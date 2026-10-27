@@ -1407,17 +1407,21 @@ export const saveVideo = async (
     let existingMeta: any = {};
     let existingReferenceImages: any[] | null = null;
     try {
-      const { data: existingRow } = await supabase
+      const { data: existingRow, error } = await supabase
         .from('generations')
         .select('metadata, reference_images')
         .eq('id', media.id)
         .maybeSingle();
+      if (error) throw error;
       existingMeta = existingRow?.metadata || {};
       if (Array.isArray(existingRow?.reference_images)) {
         existingReferenceImages = existingRow.reference_images;
       }
-    } catch {
-      // Non-fatal: if the row doesn't exist or the read fails we just upsert fresh.
+    } catch (readError: any) {
+      // A missing row upserts fresh above. A failed read must not replace the
+      // saved metadata (including a reconciled cost) or reference images.
+      console.warn('saveVideo: existing details could not be read:', readError?.message || readError);
+      return undefined;
     }
 
     const safeReferenceVideos = sanitizePublicMediaRefs(media.referenceVideos);

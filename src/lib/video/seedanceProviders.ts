@@ -2,10 +2,12 @@ import type { AIProvider } from '../providers.js';
 
 export type SeedanceRequest = { videoModel: string; mode: string; prompt?: string; duration: number; quality: string; aspectRatio: string;
   generateAudio?: boolean; referenceEditMode?: boolean; editSourcePreparationVersion?: number; imageUrls?: string[]; videoUrls?: string[]; audioUrls?: string[] };
+// The app and EvoLink call a prompt-only task `text_only`; fal names its route text-to-video.
+const routeMode = (mode: string) => mode === 'text_only' ? 'text_to_video' : mode;
 export function seedanceProviderError(provider: AIProvider, body: SeedanceRequest): string | undefined {
   const newer = body.videoModel === 'seedance-2.5';
   if (!['seedance-2.0','seedance-2.5'].includes(body.videoModel)) return 'Unsupported Seedance model.';
-  if (!['text_to_video','image_to_video','reference_to_video','video_edit','video_extend'].includes(body.mode)) return 'Unsupported video operation.';
+  if (!['text_to_video','image_to_video','reference_to_video','video_edit','video_extend'].includes(routeMode(body.mode))) return 'Unsupported video operation.';
   if (body.mode.startsWith('video_') && !newer) return 'Video editing and extension require Seedance 2.5.';
   const counts = [body.imageUrls?.length || 0, body.videoUrls?.length || 0, body.audioUrls?.length || 0];
   if (counts.some((n, i) => n > (body.mode === 'image_to_video' ? [2,0,0] : newer ? [30,10,10] : [9,3,3])[i]) || counts.reduce((a,b) => a+b,0) > (newer ? 50 : 12)) return 'Too many references for this video mode.';
@@ -34,7 +36,7 @@ export function falSeedanceInput(body: SeedanceRequest) {
     if (body.mode === 'video_edit') { input.task = 'editing'; input.aspect_ratio = 'auto'; input.duration = 'auto'; }
     if (body.mode === 'video_extend') { input.task = 'extension'; input.aspect_ratio = 'auto'; }
   }
-  const mode = body.mode.startsWith('video_') ? 'reference-to-video' : body.mode.replaceAll('_','-');
+  const mode = body.mode.startsWith('video_') ? 'reference-to-video' : routeMode(body.mode).replaceAll('_','-');
   return { endpoint: `bytedance/${body.videoModel}/${mode}`, input };
 }
 export function openRouterSeedanceInput(body: SeedanceRequest) {

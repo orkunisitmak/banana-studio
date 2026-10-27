@@ -2653,8 +2653,10 @@ export const Gallery: React.FC<GalleryProps> = ({
                       value={newFolderName}
                       onChange={e => setNewFolderName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleRenameFolder()}
+                      aria-invalid={!!folderRenameError}
+                      aria-describedby={folderRenameError ? 'rename-folder-error' : undefined}
                     />
-                    {folderRenameError && <p className="text-[10px] text-red-300">{folderRenameError}</p>}
+                    {folderRenameError && <p id="rename-folder-error" role="alert" title={folderRenameError} className="truncate text-[10px] text-red-300">{folderRenameError}</p>}
                     <div className="flex w-full gap-1.5">
                       <button onClick={() => { setRenamingFolderId(null); setFolderRenameError(null); }} className="h-8 flex-1 rounded-lg border border-white/[0.07] text-[10px] font-semibold text-gray-400 hover:bg-white/[0.04] hover:text-white">Cancel</button>
                       <button onClick={handleRenameFolder} disabled={!newFolderName.trim()} className="h-8 flex-1 rounded-lg bg-violet-600 text-[10px] font-semibold text-white hover:bg-violet-500 disabled:opacity-40">Save</button>

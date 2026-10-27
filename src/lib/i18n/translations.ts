@@ -15,6 +15,8 @@ export const translations = {
       providerKeys: 'Provider keys',
       shortcuts: 'Shortcuts',
       help: 'Help',
+      languageTurkish: 'Turkish',
+      languageEnglish: 'English',
     },
     controls: {
       promptPlaceholder: 'Describe what you want to create... (Press Ctrl+Enter to generate)',
@@ -80,6 +82,8 @@ export const translations = {
       providerKeys: 'API Anahtarları',
       shortcuts: 'Kısayollar',
       help: 'Yardım',
+      languageTurkish: 'Türkçe',
+      languageEnglish: 'İngilizce',
     },
     controls: {
       promptPlaceholder: 'Üretmek istediğiniz görseli veya videoyu tarif edin... (Üretmek için Ctrl+Enter)',

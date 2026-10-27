@@ -21,6 +21,7 @@ import { ImageReferenceSummary } from './ImageReferenceSummary';
 import { ImageEditArea } from './ImageEditArea';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
+import { isGenerationShortcut } from '../lib/keyboardShortcuts';
 import { createPortal } from 'react-dom';
 import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle } from 'lucide-react';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
@@ -1525,7 +1526,7 @@ export const Controls: React.FC<ControlsProps> = ({
       const isMod = e.metaKey || e.ctrlKey;
 
       // The open Brainstorm panel owns submission, including the shortcut.
-      if (isMod && e.key === 'Enter') {
+      if (isGenerationShortcut(e)) {
         if (document.querySelector?.('[data-gallery-image-editor]')) return;
         e.preventDefault();
         if (isBrainstormActive) {

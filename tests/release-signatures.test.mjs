@@ -46,6 +46,12 @@ test('release verification binds both signatures to one version, architecture, e
    fs.writeFileSync(feedPath,signed(modified,keys.privateKey));assert.throws(()=>verifyReleaseArtifacts(options),/verification failed/);
   }
   fs.writeFileSync(feedPath,signed(xml,keys.privateKey));assert.throws(()=>verifyReleaseArtifacts({...options,build:'8'}),/verification failed/);assert.throws(()=>verifyReleaseArtifacts({...options,sourceCommit:'e'.repeat(40)}),/verification failed/);
-  fs.rmSync(archivePath);fs.symlinkSync(feedPath,archivePath);assert.throws(()=>verifyReleaseArtifacts(options),/verification failed/);
+  fs.rmSync(archivePath);
+  try {
+   fs.symlinkSync(feedPath,archivePath);
+   assert.throws(()=>verifyReleaseArtifacts(options),/verification failed/);
+  } catch(err) {
+   if (process.platform !== 'win32' || (err.code !== 'EPERM' && err.code !== 'ENOTSUP')) throw err;
+  }
  } finally {fs.rmSync(temporary,{recursive:true,force:true});}
 });

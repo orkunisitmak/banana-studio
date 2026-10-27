@@ -1,6 +1,7 @@
 import AppKit
 import WebKit
 import Sparkle
+import UserNotifications
 
 @main
 final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
@@ -68,27 +69,21 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updater.checkForUpdates(self)
     }
     @objc func showKeys() {
-        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
+        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key. Test checks a key with a free, read-only request to its provider."
         alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
-        var rows: [(ProviderKey, NSSecureTextField, NSButton)] = []
-        for key in ProviderKey.allCases {
-            let row = NSStackView(); row.orientation = .horizontal; row.spacing = 10
-            let label = NSTextField(labelWithString: key.label); label.widthAnchor.constraint(equalToConstant: 124).isActive = true
-            let field = NSSecureTextField(); field.widthAnchor.constraint(equalToConstant: 290).isActive = true
-            field.placeholderString = ((try? KeyVault.read(key)) ?? nil) != nil ? "Saved in Keychain" : "Paste your API key"
-            let remove = NSButton(checkboxWithTitle: "Remove", target: nil, action: nil)
-            row.addArrangedSubview(label); row.addArrangedSubview(field); row.addArrangedSubview(remove); stack.addArrangedSubview(row); rows.append((key, field, remove))
-        }
-        stack.frame = NSRect(x: 0, y: 0, width: 560, height: 224)
-        stack.widthAnchor.constraint(equalToConstant: 560).isActive = true
+        let rows = ProviderKey.allCases.map(KeyRow.init)
+        rows.forEach { stack.addArrangedSubview($0.view) }
+        stack.frame = NSRect(x: 0, y: 0, width: 680, height: 224)
+        stack.widthAnchor.constraint(equalToConstant: 680).isActive = true
         alert.accessoryView = stack
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            for (key, field, remove) in rows {
-                if remove.state == .on { try KeyVault.save(key, value: nil) }
-                else if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try KeyVault.save(key, value: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
-                field.stringValue = ""
+            for row in rows {
+                let value = row.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if row.remove.state == .on { try KeyVault.save(row.key, value: nil) }
+                else if !value.isEmpty { try KeyVault.save(row.key, value: value) }
+                row.field.stringValue = ""
             }
             try workspace.refreshKeys()
         } catch { let failure = NSAlert(); failure.messageText = "The keys could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
@@ -127,6 +122,18 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
               let body = message.body as? [String: String] else { return }
         if body["action"] == "keys" { showKeys() }
         if body["action"] == "lock" { NSApp.terminate(self) }
+        if body["action"] == "notify", let title = body["title"] { notify(title: title, body: body["body"] ?? "") }
+    }
+    /// Finished generations announce themselves only while Banana Studio is in the background or minimized.
+    private func notify(title: String, body: String) {
+        guard !(NSApp.isActive && window.isVisible && !window.isMiniaturized) else { return }
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = String(title.prefix(120)); content.body = String(body.prefix(240)); content.sound = .default
+            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
     }
     private func allowed(_ url: URL?) -> Bool { guard let url, let origin else { return false }; return url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

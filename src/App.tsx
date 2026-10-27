@@ -28,6 +28,7 @@ import { createRecreateConfig, mergeRecreateHydration } from './lib/gallery/recr
 import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
+import { postNativeNotification } from '../desktop/shared/nativeBridge';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
@@ -563,6 +564,7 @@ const AuthorizedWorkspace: React.FC<{
         storagePath: remoteMedia.storagePath,
       });
       toast.success('Image Ready', 'A queued image generation completed.');
+      postNativeNotification('Image ready', 'A queued image generation completed.');
     } catch (e: any) {
       const message = e?.message || 'Image generation failed';
       await updateImageStatus(pending.id, 'failed', { metadata: { error: message } });
@@ -702,6 +704,7 @@ const AuthorizedWorkspace: React.FC<{
         ));
 
         toast.success('Video Ready', 'A queued video generation completed.');
+        postNativeNotification('Video ready', 'A queued video generation completed.');
       }
     } catch (error: any) {
       const message = error?.message || 'Video generation failed';
@@ -1049,6 +1052,7 @@ const AuthorizedWorkspace: React.FC<{
 
           toast.dismissToast(progressToastId);
           toast.success('Generation Complete', 'Video created successfully.');
+          postNativeNotification('Video ready', 'Your video was created successfully.');
         }
       } catch (error: any) {
         console.error("Video generation failed", error);
@@ -1171,6 +1175,7 @@ const AuthorizedWorkspace: React.FC<{
       } else if (failedCount > 0 && completedCount > 0) {
         toast.warning('Partial Success', `${completedCount} image${completedCount > 1 ? 's' : ''} created, ${failedCount} failed. Failed items remain in the gallery so you can review and remove them.`);
       }
+      if (completedCount > 0) postNativeNotification('Images ready', `${completedCount} image${completedCount > 1 ? 's' : ''} created${failedCount ? `, ${failedCount} failed` : ''}.`);
     });
     // Acceptance unlocks the editor; provider work continues in the same gallery
     // queue and durable recovery flow as regular generations.
@@ -1215,6 +1220,7 @@ const AuthorizedWorkspace: React.FC<{
       if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
       else if (completed) toast.warning('Batch partial', `${completed} created, ${failed} failed. Review the failed cards in the gallery.`);
       else toast.error('Brainstorm stopped', 'No images completed. Review the message on the gallery cards.');
+      if (completed) postNativeNotification('Brainstorm ready', `${completed} image${completed > 1 ? 's' : ''} created${failed ? `, ${failed} failed` : ''}.`);
     }).finally(finishPreparing);
   };
 

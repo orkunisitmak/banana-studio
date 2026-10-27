@@ -240,7 +240,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
             <img src={reference.data} alt={`Reference ${index + 2}`} className="h-full w-full object-cover" />
             <span className="absolute bottom-0 inset-x-0 bg-black/70 px-1 py-0.5 text-center text-[9px] font-semibold text-white">Ref {index + 2}</span>
           </button>
-          <button type="button" disabled={busy} aria-label={`Remove Reference ${index + 2}`} onClick={() => { setReferences(current => current.filter(ref => ref.id !== reference.id)); setMention(undefined); setError(null); setGenerationStarted(false); }} className="absolute right-0 top-0 grid h-6 w-6 place-items-center rounded-full bg-black/75 text-gray-200 hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-40"><X className="h-3 w-3" /></button>
+          <button type="button" disabled={busy} aria-label={`Remove Reference ${index + 2}`} onClick={() => { setReferences(current => current.filter(ref => ref.id !== reference.id)); setMention(undefined); setError(null); setGenerationStarted(false); }} className="absolute right-1 top-1 grid h-[18px] w-[18px] place-items-center rounded-full bg-black/45 text-white/90 ring-[0.5px] ring-white/25 backdrop-blur-md transition-colors duration-150 hover:bg-red-500/90 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-40"><X className="h-2.5 w-2.5" strokeWidth={2.75} /></button>
         </div>)}
         {!references.length && <p className="px-1 text-xs text-gray-500">Add reference images for the selected area.</p>}
       </div>

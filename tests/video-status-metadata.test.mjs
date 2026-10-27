@@ -29,8 +29,10 @@ const update = async (read, metadata) => {
   return globalThis.__writes.find(op => op.op === 'update')?.value;
 };
 
-test('a failed metadata read never overwrites the saved video endpoints', async () => {
-  assert.equal(await update({ data: null, error: { message: 'timeout' } }, { pollingWarning: 'x' }), undefined);
+test('a failed metadata read never overwrites the saved video endpoints, but still saves the status', async () => {
+  const written = await update({ data: null, error: { message: 'timeout' } }, { pollingWarning: 'x' });
+  assert.equal(written.status, 'processing');
+  assert.equal('metadata' in written, false);
 });
 
 test('a successful read merges new metadata into the saved video details', async () => {

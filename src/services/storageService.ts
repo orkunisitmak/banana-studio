@@ -1748,15 +1748,19 @@ export const updateVideoStatus = async (
       if (storagePath) updateObj.storage_path = storagePath;
     }
     if (updates?.metadata) {
-      // Without the saved metadata, writing would drop the task endpoints and cost.
+      // Without the saved metadata, writing it would drop the task endpoints and
+      // cost. Still save the status and URL; leave the saved metadata untouched.
       const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
-      if (error) throw new Error(`Could not preserve the saved video details: ${error.message}`);
-      const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
-      if (status === 'completed') {
-        delete merged.error;
-        delete merged.pollingWarning;
+      if (error) {
+        console.warn('updateVideoStatus: saved video details could not be read; keeping them unchanged:', error.message);
+      } else {
+        const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
+        if (status === 'completed') {
+          delete merged.error;
+          delete merged.pollingWarning;
+        }
+        updateObj.metadata = merged;
       }
-      updateObj.metadata = merged;
     }
     await supabase.from('generations').update(updateObj).eq('id', id);
   } catch (e: any) {

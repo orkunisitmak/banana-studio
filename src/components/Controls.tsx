@@ -1,4 +1,5 @@
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
+import { YouTubeThumbnailPresets } from './YouTubeThumbnailPresets';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
 import { getClipboardImages } from '../lib/references/clipboardImages';
@@ -2548,6 +2549,11 @@ export const Controls: React.FC<ControlsProps> = ({
                 aria-label="Generation settings"
             >
                 
+                {/* YouTube Thumbnail Presets */}
+                <YouTubeThumbnailPresets
+                    onSelectPreset={presetPrompt => onChange({ ...config, prompt: presetPrompt, aspectRatio: '16:9' })}
+                />
+
                 {/* Template Button - Icon only */}
                 <button
                     ref={templateButtonRef}

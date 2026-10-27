@@ -1003,6 +1003,7 @@ export const createVideoTask = async (
         generateAudio: audioEnabled !== false,
         ...(videoOperation === 'reference_edit' ? { referenceEditMode: true } : {}),
         ...(videoOperation === 'edit' ? { editSourcePreparationVersion: 1 } : {}),
+        ...(context?.id ? { generationId: context.id } : {}),
       };
 
   if (imageUrls.length > 0) body.imageUrls = imageUrls;

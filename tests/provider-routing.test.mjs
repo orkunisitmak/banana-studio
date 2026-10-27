@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODEL_ROUTES, PROVIDER_KEYS, resolveProvider, sanitizeProviderPreferences } from '../src/lib/providers.ts';
+import { MODEL_ROUTES, PROVIDER_KEYS, resolveProvider, sanitizeProviderAvailability, sanitizeProviderPreferences } from '../src/lib/providers.ts';
+import { browserIsOffline } from '../src/lib/networkStatus.ts';
 import { falSeedanceInput, openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
 import { resizePixels } from '../src/lib/images/resizePixels.ts';
 import { build } from 'esbuild';
@@ -13,6 +14,11 @@ const {compositeEditPixels} = await import('data:text/javascript;base64,'+Buffer
 import { LocalWorkspace } from '../desktop/server/store.mjs';
 import { createMediaUploader } from '../desktop/server/uploads.mjs';
 
+test('offline state is conservative and only treats an explicit false as offline',()=>{
+  assert.equal(browserIsOffline(false),true);
+  assert.equal(browserIsOffline(true),false);
+  assert.equal(browserIsOffline(undefined),false);
+});
 test('every key combination selects only a configured route for the same model',()=>{
   const providers=Object.keys(PROVIDER_KEYS);
   for(let mask=0;mask<32;mask++){
@@ -65,6 +71,10 @@ test('corrupt route preferences are quarantined and cannot poison provider selec
     'anthropic/claude-opus-5.5':'auto',
     unknown:'openrouter',
   }), {'seedance-2.5':'fal','anthropic/claude-opus-5.5':'auto'});
+});
+test('provider availability is normalized to strict booleans before routing',()=>{
+  assert.deepEqual(sanitizeProviderAvailability({openai:true,gemini:false,openrouter:'true',unknown:true}),{openai:true,gemini:false});
+  assert.deepEqual(sanitizeProviderAvailability(null),{});
 });
 test('native route preferences survive restart and cannot select a foreign model/provider pair',()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-routing-'));let store=new LocalWorkspace(directory);

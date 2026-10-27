@@ -1,5 +1,4 @@
 import React from 'react';
-import { Languages } from 'lucide-react';
 import { useTranslation } from '../lib/i18n';
 
 export function LanguageSwitcher() {
@@ -19,7 +18,7 @@ export function LanguageSwitcher() {
             : 'text-gray-400 hover:text-gray-200'
         }`}
       >
-        <span>🇹🇷</span>
+        <span aria-hidden="true">🇹🇷</span>
         <span>TR</span>
       </button>
       <button
@@ -34,7 +33,7 @@ export function LanguageSwitcher() {
             : 'text-gray-400 hover:text-gray-200'
         }`}
       >
-        <span>🇬🇧</span>
+        <span aria-hidden="true">🇬🇧</span>
         <span>EN</span>
       </button>
     </div>

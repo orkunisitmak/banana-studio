@@ -20,6 +20,16 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'minimax-h3': ['fal'],
 };
 export type ProviderAvailability = Partial<Record<AIProvider, boolean>>;
+export function sanitizeProviderAvailability(value: unknown): ProviderAvailability {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized: ProviderAvailability = {};
+  for (const provider of Object.keys(PROVIDER_KEYS) as AIProvider[]) {
+    if (typeof (value as Record<string, unknown>)[provider] === 'boolean') {
+      sanitized[provider] = (value as Record<string, boolean>)[provider];
+    }
+  }
+  return sanitized;
+}
 export function resolveProvider(model: string, choice: unknown, available: ProviderAvailability): AIProvider {
   const routes = MODEL_ROUTES[model];
   if (!Array.isArray(routes)) throw new Error('Unsupported model.');

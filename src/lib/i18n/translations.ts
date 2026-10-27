@@ -7,6 +7,8 @@ export const translations = {
       subtitle: 'A self-hosted & local-first AI media studio',
       localWorkspace: 'Local workspace · This computer',
       yourWorkspace: 'Your workspace',
+      offline: 'You are offline. Saved work remains available, but new requests will wait until your connection returns.',
+      retryConnection: 'Retry connection',
     },
     nav: {
       aiSettings: 'AI settings',
@@ -74,6 +76,8 @@ export const translations = {
       subtitle: 'Kendi sunucunuzda çalışan yerel AI medya stüdyosu',
       localWorkspace: 'Yerel Çalışma Alanı · Bu bilgisayar',
       yourWorkspace: 'Çalışma Alanınız',
+      offline: 'Çevrimdışısınız. Kayıtlı çalışmalarınız kullanılabilir, ancak yeni isteklere bağlantınız geri gelene kadar beklenir.',
+      retryConnection: 'Bağlantıyı yeniden dene',
     },
     nav: {
       aiSettings: 'Yapay Zeka Ayarları',

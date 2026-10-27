@@ -1,5 +1,6 @@
 import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
+import { NetworkStatus } from './components/NetworkStatus';
 import { I18nProvider } from './lib/i18n';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Controls } from './components/Controls';
@@ -1716,6 +1717,7 @@ const AuthorizedWorkspace: React.FC<{
     <div className="relative h-screen w-full bg-[#0d1117] text-white font-sans selection:bg-violet-500/30 flex flex-col overflow-hidden">
 
       <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onSignOut={handleSignOut} />
+      <NetworkStatus />
       {/* Admin Panel */}
       {!isLocalWorkspace() && userProfile?.role === 'admin' && <AdminPanel
         isOpen={isAdminPanelOpen}

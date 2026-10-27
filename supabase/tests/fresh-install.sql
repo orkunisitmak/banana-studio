@@ -28,6 +28,9 @@ DO $$ DECLARE prefs jsonb; BEGIN
  BEGIN
   INSERT INTO public.generations(id,user_id,created_at) VALUES('foreign','00000000-0000-4000-8000-000000000001',3);RAISE EXCEPTION 'Cross-owner write allowed';
  EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ BEGIN
+  INSERT INTO public.usage_logs(user_id,action,model,estimated_cost) VALUES('00000000-0000-4000-8000-000000000002','enhance','gemini-3.8-flash',0);RAISE EXCEPTION 'Member could write usage costs';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;END;
 END $$;
 SELECT set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000003',false);
 SELECT set_config('request.jwt.claims','{"email":"outsider@example.invalid"}',false);

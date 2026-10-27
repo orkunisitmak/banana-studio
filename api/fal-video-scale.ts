@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
@@ -71,7 +72,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const registry = await prepareTaskRegistry(res);
       if (!registry) return;
-      const response = await fetch(`${FAL_QUEUE_BASE}/${SCALE_ENDPOINT}`, {
+      const ticket = await startProviderRequest(req, res, user, 'video', 'fal');
+      if (!ticket) return;
+      const response = await ticket.track(fetch(`${FAL_QUEUE_BASE}/${SCALE_ENDPOINT}`, {
         method: 'POST',
         headers: {
           Authorization: `Key ${apiKey}`,
@@ -86,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           preset: 'fast',
           crf: 20,
         }),
-      });
+      }));
       const data = await readJson(response);
       if (!response.ok) {
         return res.status(response.status).json({

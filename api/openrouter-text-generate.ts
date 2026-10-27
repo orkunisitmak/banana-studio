@@ -1,13 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { OPENROUTER_MODELS } from '../src/lib/providers.js';
-import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { applyCors, requireUser } from './_lib/auth.js';
+import { recordUsage } from './_lib/usageLogs.js';
+import { calculateOpenRouterTextCost, isTextUsageContext } from '../src/lib/usage/textUsageCost.js';
 import { startOpenAIRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
-import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost, isOpenRouterReasoningEffort, openRouterErrorMessage } from '../src/lib/prompts/openrouterText.js';
+import { DEFAULT_OPENROUTER_REASONING, isOpenRouterReasoningEffort, openRouterErrorMessage } from '../src/lib/prompts/openrouterText.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
 
 export const config = { maxDuration: 300 };
-const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res); res.setHeader('Cache-Control', 'no-store');
@@ -28,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const upstreamModel = OPENROUTER_MODELS[model];
   const effort = body.reasoningEffort ?? DEFAULT_OPENROUTER_REASONING;
   if (!isOpenRouterReasoningEffort(effort)) return res.status(400).json({ error: 'Unsupported Opus thinking effort.' });
-  if (!ACTIONS.includes(usageContext?.action) || typeof usageContext?.prompt !== 'string') return res.status(400).json({ error: 'Invalid text feature.' });
+  if (!isTextUsageContext(usageContext)) return res.status(400).json({ error: 'Invalid text feature.' });
   if (!Array.isArray(parts) || !parts.length || parts.length > 256 || !parts.some(part => typeof part?.text === 'string' && part.text.trim())) {
     return res.status(400).json({ error: 'Provide text and optional image references.' });
   }
@@ -91,18 +92,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!response.ok) return fail(response.status, openRouterErrorMessage(response.status));
     requestId = typeof data?.id === 'string' ? data.id : requestId;
     // Account for a billed truncated/refused response before validating output.
-    let usageLogged = false;
-    let usageLoggingPending = false;
-    const accounting = createTaskDeadline(5_000);
     if (streaming) send({ type: 'status', stage: 'finishing' });
-    try {
-      const { error } = await waitForTask(createUserScopedClient(req).from('usage_logs').insert({
-        user_id: user.id, action: usageContext.action, model,
-        prompt: usageContext.prompt.slice(0, 500), image_count: 0, estimated_cost: calculateOpenRouterTextCost(data?.usage, model),
-      }).abortSignal(accounting.signal), accounting.signal);
-      usageLogged = !error;
-    } catch { usageLoggingPending = true; }
-    finally { accounting.dispose(); }
+    const { usageLogged, usageLoggingPending } = await recordUsage(user.id, { action: usageContext.action, model,
+      prompt: usageContext.prompt || `[${usageContext.action}-empty-prompt]`, imageCount: 0, estimatedCost: calculateOpenRouterTextCost(data?.usage, model) });
     const choice = data?.choices?.[0];
     if (choice?.finish_reason !== 'stop') return fail(502, 'Model yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
     if (choice?.message?.refusal) return fail(422, 'Model bu isteği yanıtlayamadı.');

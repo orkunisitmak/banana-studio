@@ -15,9 +15,12 @@ import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageSer
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
 import { getImageCostHistory } from './services/imageCostHistory';
+import { getProviderAvailability } from './services/providerRouting';
+import { startingImageModel } from './lib/providers';
+import { isStuckPendingGeneration } from './lib/gallery/stuckGeneration';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
-import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
+import { createVideoTask, pollVideoTask, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
 import { getSeedanceFrameError } from './lib/video/seedanceFrames';
 import { getSession, supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
@@ -227,6 +230,20 @@ const AuthorizedWorkspace: React.FC<{
     videoPromptExpansionMode: 'balanced',
   });
 
+  // Without a key for the default image model, a workspace with ComfyUI starts
+  // on the free local model. Checked once per sign-in, and only while the draft
+  // still has the untouched default, so a model the user chose is never replaced.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const controller = new AbortController();
+    getProviderAvailability(controller.signal).then(available => setConfig(current => {
+      if (current.imageModel !== DEFAULT_IMAGE_MODEL) return current;
+      const imageModel = startingImageModel(current.imageModel, available) as GenerationConfig['imageModel'];
+      return imageModel === current.imageModel ? current : { ...current, imageModel };
+    })).catch(() => {});
+    return () => controller.abort();
+  }, [isAuthenticated]);
+
 
   // Keep reference metadata out of the main gallery query; read a bounded,
   // user-scoped set separately for total-cost estimates after reload.
@@ -339,39 +356,21 @@ const AuthorizedWorkspace: React.FC<{
     };
   }, [isAuthenticated]);
 
-  // Watchdog: auto-fail any video stuck in 'pending' for >90s without a taskId.
-  // This catches cases where the provider createVideoTask call itself failed silently
-  // or the user closed the tab mid-flight before the task_id was saved.
+  // Watchdog: fail a generation that can never progress (see isStuckPendingGeneration):
+  // a video whose provider task ID was never saved, or a legacy fal image row.
   useEffect(() => {
     if (!isAuthenticated) return;
-    const STUCK_PENDING_MS = 90_000;
     const interval = setInterval(() => {
       const now = Date.now();
       setGeneratedMedia(prev => {
         let changed = false;
         const next = prev.map(item => {
-          if (
-            item.status === 'pending' &&
-            now - item.createdAt > STUCK_PENDING_MS
-          ) {
-            // Video: needs a provider task_id to be resumable.
-            // Image (GPT Image 2): needs falRequestId from fal.ai.
-            const isVideo = item.mediaType === 'video';
-            const isImage = item.mediaType === 'image';
-            const stuck = (isVideo && (!item.taskId || item.taskId === ''))
-              || (isImage && item.imageModel !== SUNBURST_MODEL && !item.falRequestId);
-            if (stuck) {
-              changed = true;
-              const errMsg = 'Generation request did not start (timed out before a task ID was returned). You can remove this entry.';
-              if (isVideo) {
-                updateVideoStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
-              } else if (isImage) {
-                updateImageStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
-              }
-              return { ...item, isLoading: false, status: 'failed' as const, error: errMsg };
-            }
-          }
-          return item;
+          if (!isStuckPendingGeneration(item, now, ownImageJobsRef.current)) return item;
+          changed = true;
+          const errMsg = 'Generation request did not start (timed out before a task ID was returned). You can remove this entry.';
+          if (item.mediaType === 'video') updateVideoStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
+          else updateImageStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
+          return { ...item, isLoading: false, status: 'failed' as const, error: errMsg };
         });
         return changed ? next : prev;
       });
@@ -921,7 +920,7 @@ const AuthorizedWorkspace: React.FC<{
       );
 
       try {
-        const { taskId, endpoint, queueEndpoint, cost, mode, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config,{id:videoId});
+        const { taskId, endpoint, queueEndpoint, cost, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config,{id:videoId});
 
         // Update DB row with the real task_id now that we have it
         await updateVideoStatus(videoId, 'processing', {
@@ -942,14 +941,9 @@ const AuthorizedWorkspace: React.FC<{
           await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
         }
 
-        // Log as soon as EvoLink accepts/reserves credits for the task. The
-        // previous success-only logging omitted billed tasks that later hit a
-        // polling, storage, or provider failure and materially understated
-        // the admin dashboard's video spend.
-        // H3 acceptance is logged by the server, so a lost browser response
-        // cannot omit that charge or insert the same request twice.
+        // Every provider's acceptance is logged by its server route, so a lost
+        // browser response cannot omit that charge or insert it twice.
         await assertWorkspaceSession();
-        if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item

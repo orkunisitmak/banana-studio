@@ -7,6 +7,8 @@ import { WorkspaceQuery } from '../shared/query.mjs';
 
 const TABLES = new Set(['generations','folders','templates','reference_images','saved_people','usage_logs','provider_tasks','profiles','authorized_emails']);
 const INTERNAL = new Set(['provider_tasks','profiles','authorized_emails']);
+// Like the cloud schema, only server routes record costs; the browser may read and reset them.
+const SERVER_WRITTEN = new Set(['usage_logs']);
 const fail = (message, code = 'LOCAL_VALIDATION') => ({ data: null, error: { message, code } });
 const clone = value => JSON.parse(JSON.stringify(value));
 const ownField = (row, field) => {
@@ -93,7 +95,7 @@ export class LocalWorkspace {
       if(plan.rpc)return {data:this.rpc(plan.rpc,plan.args||{},trusted),error:null};
       if(plan.storage){if(!Array.isArray(plan.paths)||plan.paths.length>1000)throw new Error('Invalid media request.');if(plan.storage==='stat')return {data:plan.paths.map(key=>({exists:fs.existsSync(this.mediaPath(key))})),error:null};if(plan.storage==='remove'){for(const key of plan.paths)fs.rmSync(this.mediaPath(key),{force:true});return {data:[],error:null};}throw new Error('Invalid media operation.');}
       const { table, operation='select', filters=[], order=[] }=plan;
-      if(!TABLES.has(table)||!['select','insert','upsert','update','delete'].includes(operation)||(!trusted&&INTERNAL.has(table)&&operation!=='select'))throw new Error('Unsupported workspace operation.');
+      if(!TABLES.has(table)||!['select','insert','upsert','update','delete'].includes(operation)||(!trusted&&INTERNAL.has(table)&&operation!=='select')||(!trusted&&SERVER_WRITTEN.has(table)&&!['select','delete'].includes(operation)))throw new Error('Unsupported workspace operation.');
       if(!Array.isArray(filters)||filters.length>30||!Array.isArray(order)||order.length>10)throw new Error('Invalid filters.');
       let rows=this.all(table).filter(row=>filters.every(f=>filter(row,f)));
       if(plan.or) { if(typeof plan.or!=='string'||plan.or.length>2000)throw new Error('Invalid filter.');const ors=plan.or.split(',').map(v=>{const [column,operator,...value]=v.split('.');const raw=value.join('.');return {column,operator,value:raw==='true'?true:raw==='false'?false:raw};});rows=rows.filter(row=>ors.some(f=>filter(row,f))); }

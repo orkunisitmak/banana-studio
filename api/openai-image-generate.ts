@@ -1,12 +1,14 @@
 import { chooseProvider } from './_lib/providerConfiguration.js';
 import { PROVIDER_KEYS, PROVIDER_LABELS, type AIProvider } from '../src/lib/providers.js';
 import { imageProviderModel, requestImage } from './_lib/imageProviders.js';
+import { comfyFailureMessage } from './_lib/comfyuiImage.js';
 import { isReferenceUrl, providerImageUrl } from './_lib/providerMedia.js';
 import { getPersonId, cleanPersonName } from '../src/lib/references/personReferences.js';
 import { normalizePromptPreparation } from '../src/lib/prompts/promptPreparation.js';
 import { normalizeYouTubeSource } from '../src/lib/youtube/youtubeSource.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, createUserScopedClient, requireUser, type AuthenticatedUser } from './_lib/auth.js';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser, type AuthenticatedUser } from './_lib/auth.js';
+import { LOCAL_IMAGE_MODELS, LOCAL_FLUX_REFERENCE_LIMIT, isLocalImageModel } from '../src/lib/images/localFlux.js';
 import { calculateOpenAIImageCost, getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../src/lib/images/openaiImage.js';
 import { prepareSunburstGeneration, getSunburstEditIntent } from '../src/lib/images/imagePrompting.js';
 import { EDIT_REGION_REQUIRED, isValidEditRegion, copyEditRegion, describeEditRegion } from '../src/lib/images/imageEditRegion.js';
@@ -49,7 +51,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ error: 'Invalid request body' });
-  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model)) return res.status(400).json({ error: 'Unsupported OpenAI image model' });
+  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1',...LOCAL_IMAGE_MODELS].includes(body.model)) return res.status(400).json({ error: 'Unsupported OpenAI image model' });
   if (typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) return res.status(400).json({ error: 'Invalid generation ID' });
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) return res.status(400).json({ error: 'Prompt must contain 1–32,000 characters.' });
   if (!['1:1', '4:3', '3:4', '16:9', '9:16'].includes(body.aspectRatio) || !['1K', '2K', '4K'].includes(body.resolution)) return res.status(400).json({ error: 'Invalid ratio or resolution.' });
@@ -62,7 +64,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(size);
   if (optionError) return res.status(400).json({ error: optionError });
   const refs = body.referenceImages ?? [];
-  if (!Array.isArray(refs) || refs.length > (body.model === SUNBURST_MODEL ? 16 : 14) || refs.some((r: any) => !r || !isImageUrl(r.data))) return res.status(400).json({ error: 'Provide up to 16 HTTPS reference images.' });
+  if (!Array.isArray(refs) || refs.length > (body.model === SUNBURST_MODEL ? 16 : isLocalImageModel(body.model) ? LOCAL_FLUX_REFERENCE_LIMIT : 14) || refs.some((r: any) => !r || !isImageUrl(r.data))) return res.status(400).json({ error: 'Provide up to 16 HTTPS reference images.' });
   if (refs.some((r: any) => r.isEditSource != null && typeof r.isEditSource !== 'boolean')) return res.status(400).json({ error: 'Invalid edit source role.' });
   if (refs.some((r: any) => r.isThumbnailStyle != null && typeof r.isThumbnailStyle !== 'boolean')) return res.status(400).json({ error: 'Invalid thumbnail style role.' });
   if (refs.some((r: any) => r.editRegion != null && !isValidEditRegion(r.editRegion))) return res.status(400).json({ error: 'Invalid edit area.' });
@@ -145,7 +147,10 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       return res.status(409).json({ error:'The saved worker claim is no longer active. No provider request was sent.' });
     }
     outcome = 'failed';
-    const response = await requestImage(provider, body.model, input, db, key, guard.id);
+    // Only ComfyUI uses the area itself; hosted providers receive it as prompt text.
+    const editImage = editReference?.editRegion ? generationReferences.findIndex(ref => ref.id === editReference!.id) : -1;
+    const response = await requestImage(provider, body.model, input, db, key, guard.id,
+      editImage >= 0 ? { image: editImage, region: editReference!.editRegion! } : undefined);
     providerStatus = response.status;
     const data = await response.json().catch(() => null);
     metadata.openaiRequestId = response.headers.get('x-request-id');
@@ -163,7 +168,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
         return res.status(202).json({ code:deferred?'IMAGE_PROVIDER_RATE_WAIT':'IMAGE_PROVIDER_RATE_STATE_UNKNOWN',retryAfter });
       }
       metadata.openaiError = { status: response.status, ...(providerErrorCode ? { code: providerErrorCode } : {}) };
-      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
+      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode) : provider === 'comfyui' ? `ComfyUI rejected the workflow (${response.status}). Check that the local model files are installed in ComfyUI; nothing was charged.` : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
       error.status = response.status;
       throw error;
     }
@@ -172,7 +177,8 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     metadata.generationCost = usd == null ? null : { usd, source: 'provider_usage' };
     // Log returned usage before storage, since a storage failure doesn't undo
     // the provider charge. Missing usage remains NULL, never a guessed price.
-    const { error: usageError } = await db.from('usage_logs').insert({
+    // Browsers may not write image usage rows, so this one is server-owned.
+    const { error: usageError } = await (createServiceRoleClient() || db).from('usage_logs').insert({
       user_id: user.id, action: 'generate', model: body.model,
       prompt: storedPrompt.slice(0, 500), image_count: Array.isArray(data?.data) ? data.data.length : 0, estimated_cost: usd,
     });
@@ -215,7 +221,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     // deployment's response-size limit. No credential is sent to the browser.
     return res.status(200).json({ id: body.id, url, storagePath, referenceImages: safeRefs, metadata });
   } catch (error: any) {
-    const message = error?.name === 'TimeoutError'
+    const message = provider === 'comfyui' && !(error instanceof SavedImageError) ? comfyFailureMessage(error) : error?.name === 'TimeoutError'
       ? `${PROVIDER_LABELS[provider]} exceeded the request time limit. It may still have billed this request. Check usage before generating again.`
       : error instanceof SavedImageError ? error.message : provider === 'openai' ? openAIErrorMessage(error?.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} could not finish the image. Check provider usage before submitting again.`;
     console.warn('OpenAI image request failed', { id: body.id, auditId: guard.id, status: providerStatus ?? null,

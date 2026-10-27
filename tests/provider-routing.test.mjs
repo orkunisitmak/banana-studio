@@ -17,7 +17,7 @@ import { createMediaUploader } from '../desktop/server/uploads.mjs';
 
 test('every key combination selects only a configured route for the same model',()=>{
   const providers=Object.keys(PROVIDER_KEYS);
-  for(let mask=0;mask<32;mask++){
+  for(let mask=0;mask<1<<providers.length;mask++){
     const available=Object.fromEntries(providers.map((provider,index)=>[provider,!!(mask&(1<<index))]));
     for(const [model,routes] of Object.entries(MODEL_ROUTES)){
       const expected=routes.find(provider=>available[provider]);

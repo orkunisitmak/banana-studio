@@ -149,5 +149,6 @@ export const getImageResolutionLabel = (media: Pick<GeneratedMedia, 'imageModel'
   return 'Size unavailable';
 };
 
+// Tier-based models record "1K · 1:1" as the request; only exact pixel requests can mismatch.
 export const hasImageSizeMismatch = (media: Pick<GeneratedMedia, 'imageRequestedSize' | 'imageOutputSize'>): boolean =>
-  Boolean(media.imageOutputSize && media.imageRequestedSize && media.imageRequestedSize !== 'auto' && media.imageRequestedSize !== media.imageOutputSize);
+  Boolean(media.imageOutputSize && /^\d+x\d+$/.test(media.imageRequestedSize || '') && media.imageRequestedSize !== media.imageOutputSize);

@@ -3,6 +3,7 @@ import { isSecureReferenceUrl } from './providerMedia.js';
 import type { ReferenceImage } from '../../src/types.js';
 import { getPersonId, cleanPersonName } from '../../src/lib/references/personReferences.js';
 import { getOpenAIImageOptions, getOpenAIImageSize, validateOpenAIImageOptions, validateOpenAIImageSize, SUNBURST_MODEL } from '../../src/lib/images/openaiImage.js';
+import { LOCAL_IMAGE_MODELS, LOCAL_FLUX_REFERENCE_LIMIT, isLocalImageModel } from '../../src/lib/images/localFlux.js';
 import { prepareSunburstGeneration } from '../../src/lib/images/imagePrompting.js';
 import { copyEditRegion, isValidEditRegion } from '../../src/lib/images/imageEditRegion.js';
 import { normalizePromptPreparation } from '../../src/lib/prompts/promptPreparation.js';
@@ -27,7 +28,7 @@ export const privateReferencePath = (value: string): string | null => {
  * worker/claim flags are copied into durable storage. */
 export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Invalid image job.');
-  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
+  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1',...LOCAL_IMAGE_MODELS].includes(body.model) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) invalid('Prompt must contain 1–32,000 characters.');
   if (!['1:1','4:3','3:4','16:9','9:16'].includes(body.aspectRatio) || !['1K','2K','4K'].includes(body.resolution)) invalid('Invalid ratio or resolution.');
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) invalid('Invalid image options.');
@@ -40,6 +41,7 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (body.imagePromptCategory != null && !['simple','youtube_thumbnail','product_shot','portrait','social_media','custom'].includes(body.imagePromptCategory)) invalid('Invalid image category.');
   if (body.folderId != null && (typeof body.folderId !== 'string' || body.folderId.length > 200)) invalid('Invalid folder.');
   const references = body.referenceImages ?? [];
+  if (Array.isArray(references) && isLocalImageModel(body.model) && references.length > LOCAL_FLUX_REFERENCE_LIMIT) invalid(`Local models use up to ${LOCAL_FLUX_REFERENCE_LIMIT} reference images (${references.length} attached). Refresh the app to keep one photo per person automatically.`);
   if (!Array.isArray(references) || references.length > (body.model === SUNBURST_MODEL ? 16 : 14) || body.mask != null || body.maskUrl != null) invalid('Invalid reference images.');
   const refs: ReferenceImage[] = references.map((ref: any) => {
     if (!ref || typeof ref.id !== 'string' || !ref.id || ref.id.length > 128 || typeof ref.data !== 'string' || ref.data.length > 4000) invalid('Invalid reference image.');

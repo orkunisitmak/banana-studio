@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import { buildH3MaxInput, H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
@@ -181,14 +182,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!claimed) return res.status(409).json({ code: 'GENERATION_SUBMITTING', error: 'This saved video is already being submitted. Check the existing task instead of submitting again.' });
         galleryClaim = { id: body.generationId, metadata: claimedMetadata };
       }
-      const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
+      const ticket = await startProviderRequest(req, res, user, 'video', 'fal');
+      if (!ticket) {
+        // No provider request was sent, so the saved video can be submitted later.
+        // The refusal is already answered; a failed release only needs a log line,
+        // because the card then stays claimed and blocks a duplicate submission.
+        if (galleryClaim) {
+          try {
+            const { error } = await registry.from('generations').update({ status: 'pending', metadata: { ...galleryClaim.metadata, h3SubmissionStartedAt: null } })
+              .eq('id', galleryClaim.id).eq('user_id', user.id).eq('status', 'processing');
+            if (error) console.warn(`[fal-h3-video] generation=${galleryClaim.id} stage=claim_release_failed`);
+          } catch { console.warn(`[fal-h3-video] generation=${galleryClaim.id} stage=claim_release_failed`); }
+        }
+        return;
+      }
+      const response = await ticket.track(fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
         method: 'POST',
         headers: {
           Authorization: `Key ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(input),
-      });
+      }));
       const data = await readJson(response);
       if (!response.ok) {
         const error = extractFalErrorMessage(data?.detail ?? data?.error ?? data?.message ?? data);

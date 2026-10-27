@@ -2,7 +2,6 @@ import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { GEMINI_TEXT_MODEL, TEXT_MODEL_OPTIONS, type TextModelId } from '../types';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { isOpenAIReasoningEffort, type OpenAIReasoningEffort } from '../lib/prompts/openaiText';
-import { logUsage } from './authService';
 import { getGeminiClient, getOpenAITextClient, type TextTaskOptions } from './geminiClient';
 import { compressBase64Image } from './imageCompression';
 import type { YouTubeVideoInfo } from './youtubeService';
@@ -134,22 +133,14 @@ const readYouTubeVideo = async (
         { text: buildAnalysisPrompt(video) },
       ];
       const response = await waitForTask(getGeminiClient().models.generateContent({
-        model: GEMINI_TEXT_MODEL, contents: { parts },
+        model: GEMINI_TEXT_MODEL, contents: { parts }, usageContext: { action: 'enhance', prompt: `[youtube-video-brief] ${video.title}` },
         // Factual extraction is independent of creative Brainstorm reasoning.
         // LOW reduces reasoning latency without dropping footage or truncating
         // the JSON through a small output-token limit.
         config: { thinkingConfig: { thinkingLevel: 'LOW' }, responseMimeType: 'application/json', responseSchema: analysisSchema },
       }, { ...options, signal: task.signal, model: GEMINI_TEXT_MODEL }), task.signal);
-      // Log each completed model call once, including unusable responses. A slow
-      // accounting write cannot hide an otherwise completed analysis.
+      // The server records each completed model call once, including unusable responses.
       options.onStage?.('finishing');
-      const accounting = createTaskDeadline(3_000, task.signal);
-      try {
-        await waitForTask(logUsage('enhance', GEMINI_TEXT_MODEL, `[youtube-video-brief] ${video.title}`, 0, {
-          usageMetadata: response.usageMetadata, referenceImageCount: 1,
-        }), accounting.signal);
-      } catch { /* Existing logUsage reports write failures; never resubmit. */ }
-      finally { accounting.dispose(); }
       task.signal.throwIfAborted();
       const analysis = parseAnalysis(response.text, video);
       if (analysis.source === 'video' && !analysis.warning && response.text) {
@@ -213,10 +204,6 @@ VERIFIED FOOTAGE OBSERVATIONS: ${JSON.stringify(observed)}`;
       usageContext: { action: 'enhance', prompt: `[youtube-video-analysis] ${video.title}` },
     }, { ...options, model, reasoningEffort, signal: task.signal,
       onStage: stage => options.onStage?.(stage === 'connecting' ? 'generating' : stage) }), task.signal);
-    const accounting = createTaskDeadline(3_000, task.signal);
-    try { await waitForTask(logUsage('enhance', model, `[youtube-video-analysis] ${video.title}`, 0, { usageMetadata: response.usageMetadata }), accounting.signal); }
-    catch { /* Never resubmit a completed provider request for accounting. */ }
-    finally { accounting.dispose(); }
     task.signal.throwIfAborted();
     const analysis = finish(response.text);
     if (!analysis.warning && response.text) {

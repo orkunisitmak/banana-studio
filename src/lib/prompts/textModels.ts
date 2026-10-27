@@ -2,8 +2,8 @@ import { DEFAULT_TEXT_MODEL, TEXT_MODEL_OPTIONS, type TextModelId } from '../../
 import { DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort, type OpenAIReasoningEffort } from './openaiText.js';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL } from './openrouterText.js';
 
-export { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from './openaiText.js';
-export { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from './openrouterText.js';
+export { OPENAI_TEXT_MODEL } from './openaiText.js';
+export { OPENROUTER_TEXT_MODEL } from './openrouterText.js';
 export const GEMINI_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH'] as const;
 export type GeminiThinkingLevel = typeof GEMINI_THINKING_LEVELS[number];
 export const DEFAULT_GEMINI_THINKING: GeminiThinkingLevel = 'MEDIUM';

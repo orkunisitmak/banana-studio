@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser, createUserScopedClient } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
 import { chooseProvider } from './_lib/providerConfiguration.js';
 import { PROVIDER_KEYS } from '../src/lib/providers.js';
 import { seedanceProviderError, falSeedanceInput, openRouterSeedanceInput } from '../src/lib/video/seedanceProviders.js';
@@ -7,6 +8,7 @@ import { isReferenceUrl } from './_lib/providerMedia.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
+import { recordUsage } from './_lib/usageLogs.js';
 
 export const config = { maxDuration: 300 };
 const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
@@ -31,16 +33,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const registry = await prepareTaskRegistry(res); if (!registry) return;
       const fal = falSeedanceInput(body);
-      const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
+      const ticket = await startProviderRequest(req, res, user, 'video', provider);
+      if (!ticket) return;
+      const response = await ticket.track(fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${process.env[PROVIDER_KEYS[provider]]}`, 'Content-Type':'application/json' },
         body: JSON.stringify(provider === 'fal' ? fal.input : openRouterSeedanceInput(body)),
-      });
+      }));
       const data = await response.json().catch(() => null);
       if (!response.ok) return res.status(response.status).json({ error: `${provider === 'fal' ? 'fal.ai' : 'OpenRouter'} rejected the video request (${response.status}). Check the prompt, media and account credit.` });
       const id = provider === 'fal' ? data?.request_id : data?.id;
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('The provider did not confirm a task ID.');
       const taskId = `bs_${provider}_${body.videoModel}_${id}`;
       await registerProviderTask(registry, provider, taskId, user.id);
+      // Recorded at acceptance like EvoLink. Its rate card does not price fal.ai or
+      // OpenRouter, so their cost stays NULL instead of a guessed estimate.
+      await recordUsage(user.id, { action: 'video_generate', model: `${body.videoModel}-${body.mode.replace(/_/g, '-')}`, prompt: body.prompt, imageCount: 1, estimatedCost: null });
       return res.status(200).json({ taskId, provider, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
     }
     const taskId = req.query.taskId as string;

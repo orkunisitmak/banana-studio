@@ -1,16 +1,38 @@
 import { GoogleGenAI } from '@google/genai';
 import { OPENROUTER_MODELS, type AIProvider } from '../../src/lib/providers.js';
 import { providerImageData } from './providerMedia.js';
+import { COMFY_LOCAL_TIMEOUT_MS, requestComfyImage } from './comfyuiImage.js';
+import { encodeRasterPNG } from './rasterCodec.js';
+import { editRegionPixels, type ImageEditRegion } from '../../src/lib/images/imageEditRegion.js';
+import { compositeEditPixels } from '../../src/lib/images/imageEditPixels.js';
 
-export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'openrouter'
+/** A protected edit's selection on reference `image`, whose canvas is the request `size`. */
+export type ImageEditArea = { image: number; region: ImageEditRegion };
+
+/** Rasterize the selection exactly as the protected-edit compositor will, so
+ * ComfyUI redraws the same pixels the composite later keeps. */
+const comfyEditArea = async ({ image, region }: ImageEditArea, size: unknown) => {
+  const match = typeof size === 'string' && size.match(/^([1-9]\d*)x([1-9]\d*)$/);
+  if (!match) throw new Error('Protected edits must request the source canvas size.');
+  const [width, height] = [Number(match[1]), Number(match[2])];
+  const outside = new Uint8Array(width * height * 4);
+  const mask = await encodeRasterPNG(compositeEditPixels(outside, new Uint8Array(outside.length).fill(255), width, height, region), width, height);
+  return { source: image, mask, bounds: editRegionPixels(region, width, height), size: [width, height] as [number, number] };
+};
+
+export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'comfyui'
+  ? model === 'flux3-klein-local' ? 'flux-3-image-klein' : 'flux-2-klein-4b' : provider === 'openrouter'
   ? OPENROUTER_MODELS[model] : provider === 'fal'
     ? model === 'gpt-image-2.5-sunburst' ? `openai/gpt-image-2.5/sunburst/${references ? 'edit' : 'text-to-image'}`
       : `${model === 'gemini-nano-banana-2.1' ? 'google/nano-banana-2.1' : 'fal-ai/nano-banana-pro'}${references ? '/edit' : ''}`
     : model;
 
-/** All destinations and fields are server-owned. One paid request, no provider retry. */
-export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string): Promise<Response> {
-  const signal = AbortSignal.timeout(250_000);
+/** All destinations and fields are server-owned. One paid request, no provider retry.
+ * Only ComfyUI consumes `edit`; hosted providers read the selection from the prompt. */
+export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string, edit?: ImageEditArea): Promise<Response> {
+  // A local GPU runs one image at a time, so a desktop job may first wait for
+  // the other worker slot's image. Hosted functions keep their 250 s budget.
+  const signal = AbortSignal.timeout(provider === 'comfyui' && process.env.BANANA_RUNTIME === 'local' ? COMFY_LOCAL_TIMEOUT_MS : 250_000);
   const { resolution, aspect_ratio, ...openaiInput } = input;
   if (provider === 'openai') return fetch(`https://api.openai.com/v1/images/${input.images?.length ? 'edits' : 'generations'}`, {
     method: 'POST', redirect: 'error', signal,
@@ -69,5 +91,6 @@ export async function requestImage(provider: AIProvider, model: string, input: R
     const output = result.candidates?.[0]?.content?.parts?.find(part => part.inlineData?.data)?.inlineData;
     return Response.json({ data: output?.data ? [{ b64_json: output.data, media_type: output.mimeType }] : [], usage: result.usageMetadata, output_format: output?.mimeType?.split('/')[1] || 'png' });
   }
+  if (provider === 'comfyui') return requestComfyImage(key, model, input, url => providerImageData(db, url), auditId, signal, edit && await comfyEditArea(edit, input.size));
   throw new Error('Unsupported image provider route.');
 }

@@ -1,12 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
-import { OPENAI_TEXT_MODEL, calculateOpenAITextCost, DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort } from '../src/lib/prompts/openaiText.js';
+import { applyCors, requireUser } from './_lib/auth.js';
+import { OPENAI_TEXT_MODEL, DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort } from '../src/lib/prompts/openaiText.js';
+import { calculateOpenAITextCost, isTextUsageContext } from '../src/lib/usage/textUsageCost.js';
+import { recordUsage } from './_lib/usageLogs.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { startOpenAIRequest, openAIErrorMessage } from './_lib/openaiGuard.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
 
 export const config = { maxDuration: 300 };
-const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
@@ -31,7 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!Array.isArray(parts) || !parts.length || parts.length > 256 || !parts.some(part => typeof part?.text === 'string' && part.text.trim())) {
     return res.status(400).json({ error: 'Provide text and optional image references.' });
   }
-  if (!ACTIONS.includes(usageContext?.action) || typeof usageContext?.prompt !== 'string') {
+  if (!isTextUsageContext(usageContext)) {
     return res.status(400).json({ error: 'Invalid text feature.' });
   }
   if (body.brainstormFormat != null && (body.brainstormFormat !== 'wardrobe' || usageContext.action !== 'brainstorm')) {
@@ -105,26 +106,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // A truncated/refused response can still be billed. Record returned usage
-    // before checking output; the client skips logging a second copy.
-    let usageLogged = false;
-    let usageLoggingPending = false;
-    const accounting = createTaskDeadline(5_000);
+    // before checking output; browsers cannot write usage rows.
     if (streaming) send({ type: 'status', stage: 'finishing' });
-    try {
-      const db = createUserScopedClient(req);
-      const { error } = await waitForTask(db.from('usage_logs').insert({
-        user_id: user.id, action: usageContext.action, model: OPENAI_TEXT_MODEL,
-        prompt: usageContext.prompt.slice(0, 500), image_count: 0,
-        estimated_cost: calculateOpenAITextCost(data?.usage),
-      }).abortSignal(accounting.signal), accounting.signal);
-      usageLogged = !error;
-      if (error) console.warn('Could not record GPT-6.1 Sol text usage');
-    } catch {
-      // A timed-out write may still commit. Do not create another charge record
-      // from the browser when the database outcome is uncertain.
-      usageLoggingPending = true;
-      console.warn('Could not confirm GPT-6.1 Sol text usage recording');
-    } finally { accounting.dispose(); }
+    const { usageLogged, usageLoggingPending } = await recordUsage(user.id, { action: usageContext.action, model: OPENAI_TEXT_MODEL,
+      prompt: usageContext.prompt || `[${usageContext.action}-empty-prompt]`, imageCount: 0, estimatedCost: calculateOpenAITextCost(data?.usage) });
 
     if (data?.status !== 'completed') return fail(502, 'GPT-6.1 Sol yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
     const output = (Array.isArray(data.output) ? data.output : [])

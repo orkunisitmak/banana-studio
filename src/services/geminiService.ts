@@ -4,14 +4,15 @@ import { buildBrainstormWardrobeGuidance, buildConceptWardrobeGuidance, complete
 import { applyYouTubeCameraGaze, preserveYouTubeCameraGaze, stripYouTubeCameraGaze } from '../lib/youtube/youtubeCameraGaze';
 import { buildEditableReferenceGuidance, prepareEditableImagePrompt } from '../lib/references/dynamicReferences';
 import { getPersonId, getPersonGroups, buildPersonIdentityContract, buildPersonSeparationRule, normalizeReferencePrompt } from '../lib/references/personReferences';
-import { GeneratedMedia, GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, BrainstormCategory, BrainstormIdea, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, ImageModelId, VideoModelId, VideoOperation } from "../types";
+import { GeneratedMedia, GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, BrainstormCategory, BrainstormIdea, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, getImageModelLabel, ImageModelId, VideoModelId, VideoOperation } from "../types";
+import { isLocalImageModel, LOCAL_FLUX_REFERENCE_LIMIT } from '../lib/images/localFlux';
+import { fitLocalReferences } from '../lib/references/localReferenceBudget';
 import { getGeminiClient, getOpenAITextClient, Modality, ThinkingLevel, type TextTaskOptions } from "./geminiClient";
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { compressBase64Image } from "./imageCompression";
 import { generateOpenAIImage, type ImageGenerationContext } from "./openaiImageService";
 import { getSunburstReferences, SUNBURST_MODEL } from "../lib/images/openaiImage";
 import { assembleSunburstBrainstormIdea, buildReferenceGenerationRule, buildSunburstGuidance, prepareImagePromptResult, buildYouTubeCameraGazeRule, buildYouTubeWardrobeRule, buildYouTubeEditorialRule, buildYouTubeStyleReferenceRule, describeSunburstReference, getSunburstEditIntent, isYouTubeChannelBannerPrompt, isYouTubeThumbnailPrompt, normalizeSunburstPrompt, preserveSunburstEditBrief, preserveSunburstSourceBrief, preserveSunburstThumbnailBrief, stripLegacyOutputCanvas, type ImagePromptSettings } from "../lib/images/imagePrompting";
-import { logUsage } from "./authService";
 import { refreshMediaAccessUrl } from './storageService';
 import { getSeedanceFrameError, normalizeSeedanceFrameTags } from '../lib/video/seedanceFrames';
 import { resolveH3MaxMode } from '../lib/video/h3Max';
@@ -53,6 +54,8 @@ const isSupportedImageModel = (model: unknown): model is ImageModelId => {
   return model === 'gemini-3-pro-image-preview'
     || model === 'gemini-3.1-flash-image-preview'
     || model === 'gemini-nano-banana-2.1'
+    || model === 'flux2-klein-local'
+    || model === 'flux3-klein-local'
     || model === SUNBURST_MODEL;
 };
 
@@ -268,10 +271,6 @@ const runImagePromptTask = async (
   parts.push({ text: `${customInstructions ? `USER CREATIVE DIRECTION:\n${prepareTextStagePrompt(customInstructions, references)}\n\n` : ''}USER BRIEF:\n${prepareTextStagePrompt(prompt, references) || 'Use the attached visual concept and the selected reference roles.'}` });
   const response = await generateTextContent(getGeminiClient(), parts, task, prompt, options, wardrobeRequired ? 'wardrobe' : undefined, task === 'brainstorm' ? count : undefined);
   options.onStage?.('finishing');
-  await finishTextUsage(logUsage(task, response.model, prompt || `[${task}-empty-prompt]`, 0, {
-    usageMetadata: response.usageMetadata as any, referenceImageCount: inputs.length,
-    targetImageModel: settings.imageModel,
-  }));
   if (task === 'brainstorm') return response.text || '[]';
   const result = prepareImagePromptResult(response.text?.trim() || prompt, references);
   if (getSunburstEditIntent(prompt, references, settings)) return preserveSunburstEditBrief(result, prompt, references, settings);
@@ -374,10 +373,6 @@ Return ONLY the enhanced prompt—no explanations, no markdown formatting.`;
 
   try {
     const response = await generateTextContent(ai, parts, 'enhance', prompt, options);
-    await logUsage('enhance', response.model, prompt || '[enhance-empty-prompt]', 0, {
-      usageMetadata: response.usageMetadata as any,
-      referenceImageCount: referenceImages.length,
-    });
     const result = prepareImagePromptResult(response.text || prompt, referenceImages);
     if (localEdit) return preserveSunburstEditBrief(result, prompt, referenceImages, settings);
     const prepared = isYouTubeThumbnailPrompt(prompt, referenceImages, settings) ? completeConceptWardrobe(result, prompt, referenceImages)
@@ -427,11 +422,6 @@ export const enhanceVideoPrompt = async (
     const audioContext = referenceAudios.map((audio, index) => ({ position: index + 1, duration: audio.duration }));
     parts.push({ text: `${buildH3MaxPromptGuide(h3, references, duration)}\n\nAttached video metadata (descriptions are unverified user context): ${JSON.stringify(sourceContext)}\nAttached audio metadata: ${JSON.stringify(audioContext)}\n\nUser Draft: ${normalizeH3MaxPromptLanguage(prompt, h3, references) || 'Describe the selected operation using only its attached inputs; preserve unrequested details.'}` });
     const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
-    await logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
-      usageMetadata: response.usageMetadata as any,
-      referenceImageCount: referenceImages.length, referenceVideoCount: referenceVideos.length,
-      referenceAudioCount: referenceAudios.length, targetVideoModel: videoModel, h3MaxMode: h3.mode,
-    });
     const enhanced = normalizeH3MaxPromptLanguage(response.text || prompt, h3, references);
     if (h3.mode === 'recast' && enhanced.length > 2000) {
       throw new Error('H3 Max için geliştirilen prompt 2000 karakteri aşıyor. Taslağı kısaltıp yeniden dene.');
@@ -667,13 +657,6 @@ Return ONLY the enhanced prompt with the sections above. No explanations, no mar
 
   try {
     const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
-    await logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
-      usageMetadata: response.usageMetadata as any,
-      referenceImageCount: referenceImages.length,
-      referenceVideoCount: referenceVideos.length,
-      referenceAudioCount: referenceAudios.length,
-      targetVideoModel: videoModel,
-    });
     let enhancedPrompt = response.text || prompt;
     if (isSeedanceFrameGeneration) return normalizeSeedanceFrameTags(enhancedPrompt, referenceImages);
     if (videoReferenceTags.length > 0) {
@@ -780,10 +763,6 @@ Return ONLY the varied prompt. No explanations, no markdown, no quotes around it
 
   try {
     const response = await generateTextContent(ai, parts, 'variation', originalPrompt, options);
-    await logUsage('variation', response.model, originalPrompt, 0, {
-      usageMetadata: response.usageMetadata as any,
-      referenceImageCount: referenceImages.length,
-    });
     const prepared = preserveConceptWardrobe(prepareImagePromptResult(response.text?.trim() || originalPrompt, referenceImages), originalPrompt);
     return localEdit
       ? stripYouTubeCameraGaze(prepared) : preserveYouTubeCameraGaze(prepared, originalPrompt);
@@ -881,6 +860,13 @@ export const generateMedia = async (
   const activeImageModel = getActiveImageModel(config.imageModel);
   if (activeImageModel !== config.imageModel) config = { ...config, imageModel: activeImageModel };
   const selectedImageModel = isSupportedImageModel(config.imageModel) ? config.imageModel : IMAGE_MODEL_NAME;
+  if (isLocalImageModel(selectedImageModel)) {
+    // Fit before person mentions expand into "image 1 … image N", so the
+    // prompt names only the photos that are actually sent.
+    const fit = fitLocalReferences(config.referenceImages || [], LOCAL_FLUX_REFERENCE_LIMIT, getImageModelLabel(selectedImageModel));
+    if (fit.error) throw new Error(fit.error);
+    config = { ...config, referenceImages: fit.kept };
+  }
 
   const requestPrompt = config.prompt.trim() || (selectedImageModel !== SUNBURST_MODEL && config.referenceImages?.length
     ? 'Create a new image using the attached references.' : config.prompt);
@@ -1009,15 +995,6 @@ const parseBrainstormIdeas = (text: string, count: number, wardrobeReferences?: 
   return ideas.map(idea => idea.trim()).filter(Boolean).slice(0, count).map((text, index) => ({
     id: `idea-${Date.now()}-${index}`, text, isUsed: false,
   }));
-};
-
-const finishTextUsage = async (pending: Promise<unknown>) => {
-  // Accounting must not hide a finished model response. The original write may
-  // finish later; it is never submitted a second time here.
-  const task = createTaskDeadline(3_000);
-  try { await waitForTask(pending, task.signal); }
-  catch { console.warn('Text result ready; usage recording did not finish in time.'); }
-  finally { task.dispose(); }
 };
 
 export const brainstormIdeas = async (
@@ -1202,10 +1179,6 @@ Format: ["Detailed narrative prompt 1...", "Detailed narrative prompt 2...", ...
   try {
     const response = await generateTextContent(ai, parts, 'brainstorm', userBrief?.trim() || `[${category}] brainstorm`, options, wardrobeRequired ? 'wardrobe' : undefined, normalizedIdeaCount);
     options.onStage?.('finishing');
-    await finishTextUsage(logUsage('brainstorm', response.model, userBrief?.trim() || `[${category}] brainstorm`, 0, {
-      usageMetadata: response.usageMetadata as any,
-      referenceImageCount: referenceImages.length,
-    }));
     
     return parseBrainstormIdeas(response.text || '[]', normalizedIdeaCount, wardrobeRequired ? referenceImages : undefined, combinedBrief)
       .map(idea => {

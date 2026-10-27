@@ -2,7 +2,7 @@ import { selectProvider } from './providerRouting';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
-import { logUsage, supabase } from './authService';
+import { supabase } from './authService';
 import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublicUrl, refreshMediaAccessUrl } from './storageService';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { getSeedanceFrameError, prepareSeedanceFramePrompt } from '../lib/video/seedanceFrames';
@@ -1170,29 +1170,4 @@ export const pollVideoTask = async (
 
     await new Promise(resolve => setTimeout(resolve, isH3Max ? H3_MAX_POLL_INTERVAL : POLL_INTERVAL));
   }
-};
-
-export const logVideoUsage = (prompt: string, count: number, config: GenerationConfig, mode: EvoMode, cost: VideoCost | undefined) => {
-  const videoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
-  const referenceVideoDuration = (config.referenceVideos || []).reduce(
-    (total, video) => total + (video.duration != null && video.duration > 0 ? video.duration : 0),
-    0,
-  );
-  logUsage('video_generate' as any, `${videoModel}-${mode.replace(/_/g, '-')}`, prompt, count, {
-    estimatedCost: cost?.usd ?? null,
-    videoQuality: config.videoQuality,
-    videoDuration: config.videoDuration,
-    audioEnabled: config.audioEnabled !== false,
-    referenceImageCount: config.referenceImages.length,
-    referenceVideoCount: (config.referenceVideos || []).length,
-    referenceVideoDuration,
-    primaryVideoDuration: config.referenceVideos?.[0]?.duration != null && config.referenceVideos[0].duration! > 0
-      ? config.referenceVideos[0].duration
-      : 0,
-    videoOperation: config.videoOperation || 'generate',
-    promptExpansionMode: videoModel === 'minimax-h3' ? config.h3MaxOptions?.promptExpansionMode || config.videoPromptExpansionMode || 'balanced' : undefined,
-    h3MaxMode: videoModel === 'minimax-h3' ? getH3MaxMode(config) : undefined,
-    h3MaxOptions: videoModel === 'minimax-h3' ? config.h3MaxOptions : undefined,
-    referenceAudioCount: (config.referenceAudios || []).length,
-  }).catch(e => console.warn('Failed to log video usage:', e));
 };

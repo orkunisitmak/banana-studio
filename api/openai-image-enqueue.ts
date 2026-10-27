@@ -30,6 +30,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     return res.status(202).json({ id:payload.id, queued:true, durable:true });
   } catch (error) {
+    // Operational detail only: no prompt, reference URL or credential is logged.
+    if (!(error instanceof ImageJobInputError)) console.warn('Image job preparation failed', error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error);
     return res.status(error instanceof ImageJobInputError?400:503).json({ error:error instanceof ImageJobInputError?error.message:'Image queue preparation is unavailable. No provider request was sent.' });
   }
 }

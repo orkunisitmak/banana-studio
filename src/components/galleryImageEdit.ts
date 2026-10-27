@@ -1,3 +1,5 @@
+import { isLocalImageModel } from '../lib/images/localFlux';
+import { convertHeicFile } from '../lib/references/heicImages';
 import { getOpenAIImageOptions, SUNBURST_MODEL } from '../lib/images/openaiImage';
 import type { AspectRatio, GeneratedMedia, GenerationConfig, ImageModelId, ReferenceImage } from '../types';
 import type { ImageEditRegion } from '../lib/images/imageEditRegion';
@@ -5,9 +7,10 @@ import type { ImageEditRegion } from '../lib/images/imageEditRegion';
 const RATIOS: AspectRatio[] = ['1:1', '3:4', '4:3', '9:16', '16:9'];
 
 /** The approved source occupies one provider input slot. */
-export const getGalleryEditReferenceLimit = (model: ImageModelId): number => model === SUNBURST_MODEL ? 15 : 13;
+export const getGalleryEditReferenceLimit = (model: ImageModelId): number => model === SUNBURST_MODEL ? 15 : isLocalImageModel(model) ? 5 : 13;
 
-export const readGalleryEditReference = (file: File): Promise<ReferenceImage> => {
+export const readGalleryEditReference = async (original: File): Promise<ReferenceImage> => {
+  const file = await convertHeicFile(original);
   const extension = file.name?.split('.').pop()?.toLowerCase();
   const mimeType = file.type === 'image/jpg' ? 'image/jpeg' : file.type ||
     (extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : '');

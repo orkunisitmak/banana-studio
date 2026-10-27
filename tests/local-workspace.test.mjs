@@ -21,6 +21,11 @@ test('local records, folders and references persist independently; filters and p
     assert.ok(f.store.execute({table:'profiles',operation:'update',filters:[{column:'id',operator:'eq',value:identity.userId}],value:{role:'other'}},false).error);
     assert.ok(f.store.execute({rpc:'dispatch_image_job',args:{}},false).error);
     assert.ok(f.store.execute({table:'generations',operation:'delete'},false).error);
+    for(const operation of ['insert','upsert'])assert.ok(f.store.execute({table:'usage_logs',operation,value:{action:'enhance',model:'gemini-3.8-flash',estimated_cost:0}},false).error);
+    assert.equal((await f.store.client().from('usage_logs').insert({id:'server-row',action:'enhance',model:'gemini-3.8-flash',estimated_cost:0.01})).error,null);
+    assert.ok(f.store.execute({table:'usage_logs',operation:'update',filters:[{column:'id',operator:'eq',value:'server-row'}],value:{estimated_cost:0}},false).error);
+    assert.equal(f.store.execute({table:'usage_logs',operation:'select',columns:'estimated_cost'},false).data[0].estimated_cost,0.01);
+    assert.equal(f.store.execute({table:'usage_logs',operation:'delete',filters:[{column:'id',operator:'eq',value:'server-row'}]},false).error,null);
   } finally {f.store.close();f.cleanup();}
 });
 test('media paths reject traversal and symlinks; access URLs follow the new local port',async()=>{
@@ -75,7 +80,7 @@ test('loopback server requires native bootstrap, cookie, exact host and mutation
     assert.equal((await fetch(base+'/local/query',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:'{}'})).status,403);
     assert.equal((await fetch(base+'/local/query',{method:'POST',headers:{...headers,Origin:'https://attacker.example','Content-Type':'application/json'},body:'{}'})).status,403);
     const response=await fetch(base+'/local/query',{method:'POST',headers:{...headers,Origin:base,'Content-Type':'application/json'},body:JSON.stringify({table:'folders',operation:'insert',value:{id:'folder',name:'Example'}})});assert.equal(response.status,200);assert.equal((await response.json()).error,null);
-    const page=await fetch(base+'/',{headers});assert.match(page.headers.get('content-security-policy'),/script-src 'self'/);assert.ok(!(await page.text()).includes(bootstrap));
+    const page=await fetch(base+'/',{headers});assert.match(page.headers.get('content-security-policy'),/script-src 'self';/);assert.match(page.headers.get('content-security-policy'),/worker-src 'self' blob:;/);assert.ok(!(await page.text()).includes(bootstrap));
     await f.store.upload('example.mp4',Buffer.from('0123456789'));const part=await fetch(f.store.mediaUrl('example.mp4'),{headers:{...headers,Range:'bytes=2-4'}});assert.equal(part.status,206);assert.equal(await part.text(),'234');
   }finally{if(local)await local.close();f.store.close();f.cleanup();}
 });

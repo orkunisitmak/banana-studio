@@ -18,6 +18,7 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
+| FLUX.2 klein · Local / FLUX 3 Klein · Local — ücretsiz, kendi ekran kartında çalışır | Kendi ComfyUI'n | `COMFYUI_URL` (örneğin `http://127.0.0.1:8188`) |
 | Opus 5.5 — varsayılan yaratıcı model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, varyasyon | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — metin ve video analizi | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
@@ -29,6 +30,12 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 Üç görsel sağlayıcısı da referanslı yeni üretimi destekler. Referans eklemek kendiliğinden korumalı editi açmaz: bunun için **Edit area** seç. Son seçili alan kaynak görsele yerleştirilir; dışındaki pikseller sağlayıcıdan bağımsız olarak korunur. Nano'nun çözünürlük katmanlarından gelen çıktı, oranı kaynakla uyuşuyorsa birleştirmeden önce kaynak boyutuna ölçeklenebilir; farklı oran reddedilir. Sağlayıcının referans görsel kabul eden API adı “edit” olabilir; bu, uygulamada otomatik alan editi anlamına gelmez.
 
 Düşünme seviyesi AI settings'ten seçilir. Yalnızca fal.ai anahtarı Enhance/Brainstorm açmaz; artık desteklenmeyen Any LLM bağlantısını kullanmıyoruz. Anthropic anahtarı OpenRouter anahtarı değildir. Anahtarın model erişimi ve API bakiyesi bulunmalıdır.
+
+**FLUX.2 klein · Local** hesap gerektirmez. [ComfyUI](https://github.com/Comfy-Org/ComfyUI)'yi aynı bilgisayarda (ya da sunucunun erişebildiği bir makinede) çalıştır; `flux-2-klein-4b-fp8.safetensors` dosyasını `models/diffusion_models`, `qwen_3_4b.safetensors` dosyasını `models/text_encoders`, `flux2-vae.safetensors` dosyasını `models/vae` klasörüne koy ve `COMFYUI_URL` değerini gir. 1K için 8 GB NVIDIA kart yeterli.
+
+**FLUX 3 Klein · Local** aynı ComfyUI'yi ve `COMFYUI_URL` değerini kullanır. `flux3-image-klein-int8-convrot.safetensors` dosyasını `models/diffusion_models`, `qwen3vl_4b_int8_convrot.safetensors` dosyasını `models/text_encoders` klasörüne koy (VAE ortaktır). Hugging Face deposu erişim onayı ister: giriş yapıp `black-forest-labs/flux-3-image-klein-comfy` sayfasında FLUX Kommunity Lisansını kabul et; yıllık geliri 5 milyon doların altındaysa ticari kullanım ücretsizdir. Yazıyı, kişinin kimliğini ve birden çok referansı FLUX.2 klein'dan çok daha iyi işler; RTX 3060 Ti'de 1K görsel yaklaşık 15–25 sn sürer, her referans yaklaşık 25 sn ekler.
+
+İki yerel model de en fazla altı referans alır ve korumalı alan düzenlemesini destekler. `COMFYUI_URL` bir adrestir, gizli anahtar değildir; kontrol etmediğin bir ComfyUI'ye yönlendirme.
 
 ## Video farkları
 

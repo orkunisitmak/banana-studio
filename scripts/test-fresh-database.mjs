@@ -15,6 +15,7 @@ try {
  const migrations=fs.readdirSync(new URL('../supabase/migrations',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
  for(const migration of migrations)await sql.unsafe(fs.readFileSync(new URL('../supabase/migrations/'+migration,import.meta.url),'utf8'));
  await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/fresh-install.sql',import.meta.url),'utf8'));
- console.log('Fresh schema installed and ownership, access-list, private-storage and preference assertions passed.');
+ await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/provider-ledger.sql',import.meta.url),'utf8'));
+ console.log('Fresh schema installed and ownership, access-list, private-storage, preference and provider ledger assertions passed.');
 } catch(error) {console.error('Isolated database verification failed:',error.message);process.exitCode=1;}
 finally {if(sql)await sql.end();if(started)execFileSync(path.join(bin,'pg_ctl'),['-D',path.join(directory,'data'),'-m','fast','-w','stop'],{stdio:'pipe'});fs.rmSync(directory,{recursive:true,force:true});}

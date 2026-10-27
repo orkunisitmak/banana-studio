@@ -4,6 +4,8 @@ import { ArrowLeft, Check, Globe2, ImagePlus, Loader2, Pencil, Plus, Trash2, Use
 import { SavedVisibilityControl } from './SavedVisibilityControl';
 import type { GenerationConfig, ReferenceImage, SavedPerson, SavedPersonSummary, SavedReferenceImage } from '../types';
 import { getSavedPeople, getSavedPeopleCovers, getSavedPerson, removeSavedPerson, savePerson } from '../services/storageService';
+import { readGalleryEditReference } from './galleryImageEdit';
+import { HEIC_ACCEPT } from '../lib/references/heicImages';
 
 export type SavedPersonSeed = { groupId: number; savedPersonId?: string; name: string; photos: SavedPerson['photos']; isMe: boolean };
 
@@ -148,11 +150,11 @@ export const SavedPeople: React.FC<{
     try {
       if (files.length + editor.person.photos.length > 16) throw new Error('A person can have up to 16 photos.');
       const photos = await Promise.all(files.map(async file => {
-        if (!file.type.startsWith('image/') || file.size > 20 * 1024 * 1024) throw new Error('Choose image files smaller than 20 MB.');
-        const data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read photo.')); reader.readAsDataURL(file);
-        });
-        return { id: crypto.randomUUID(), data, mimeType: file.type };
+        if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} is larger than 20 MB.`);
+        // Windows reports no MIME type for some photos; the extension decides, as in gallery edits.
+        const { id, data, mimeType } = await readGalleryEditReference(file)
+          .catch(() => { throw new Error(`${file.name} is not a PNG, JPG, WebP or HEIC image.`); });
+        return { id, data, mimeType };
       }));
       if (mounted.current) {
         setExtraPhotos(current => [...current, ...photos]);
@@ -188,7 +190,7 @@ export const SavedPeople: React.FC<{
             })}
             <button type="button" disabled={busy} onClick={() => fileInput.current?.click()} className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-600 text-gray-400 hover:border-violet-400 hover:text-violet-300"><ImagePlus className="h-4 w-4" /><span className="text-[10px]">Upload</span></button>
           </div>
-          <input type="file" ref={fileInput} accept="image/*" multiple className="hidden" onChange={(event: React.ChangeEvent<HTMLInputElement>) => { const files = Array.from(event.target.files || []) as File[]; event.target.value = ''; void upload(files); }} />
+          <input type="file" ref={fileInput} accept={`image/*,${HEIC_ACCEPT}`} multiple className="hidden" onChange={(event: React.ChangeEvent<HTMLInputElement>) => { const files = Array.from(event.target.files || []) as File[]; event.target.value = ''; void upload(files); }} />
           <p className="mt-2 text-[10px] leading-4 text-gray-500">Save your changes, then choose Update photos to apply them to this draft. The scene prompt stays the same.</p>
         </div>
         <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-3">

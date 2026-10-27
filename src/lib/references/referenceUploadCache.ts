@@ -11,7 +11,9 @@ export const createReferenceUploader = (
   const cache = new Map<string, Entry>();
   let sequence = 0;
   return async (data: string, mime: string, prefix: string, userScope: string): Promise<string> => {
-    if (data.startsWith('https://')) return refreshUrl(data);
+    // The standalone workspace serves its own media over http://127.0.0.1; those
+    // URLs are already stored, not inline bytes to upload again.
+    if (data.startsWith('https://') || (typeof location !== 'undefined' && data.startsWith(`${location.origin}/storage/`))) return refreshUrl(data);
     const request = ++sequence;
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
     const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');

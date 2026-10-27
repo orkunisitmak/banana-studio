@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
 import { getNanoBanana21InputError, NANO_BANANA_21_ENDPOINT } from '../src/lib/images/nanoBanana21.js';
 
@@ -111,6 +112,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     delete input.quality;
   }
 
+  // Each extra image is billed; the app never asks for more than four per request.
+  if (input.num_images != null && ![1, 2, 3, 4].includes(input.num_images as number)) {
+    return res.status(400).json({ error: 'num_images must be between 1 and 4' });
+  }
+
   if (endpoint.endsWith('/edit')) {
     const urls = input.image_urls;
     if (!Array.isArray(urls) || urls.length === 0) {
@@ -121,14 +127,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
-    const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
+    const ticket = await startProviderRequest(req, res, user, 'image', 'fal');
+    if (!ticket) return;
+    const response = await ticket.track(fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
       method: 'POST',
       headers: {
         Authorization: `Key ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input),
-    });
+    }));
 
     let data: any;
     try {
@@ -146,14 +154,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         data?.detail ||
         data?.error?.message ||
         data?.message ||
-        JSON.stringify(data);
+        'fal.ai rejected the image request.';
       return res
         .status(response.status)
         .json({ error: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg) });
     }
 
     if (!data.request_id) {
-      return res.status(502).json({ error: 'fal.ai response missing request_id', raw: data });
+      return res.status(502).json({ error: 'fal.ai response missing request_id' });
     }
 
     await registerProviderTask(registry, 'fal', data.request_id, user.id);

@@ -19,6 +19,7 @@ import { ImageEditComparison } from './ImageEditComparison';
 import { Dropdown } from './ControlDropdown';
 import { ImageCountControl, PROMPT_PANEL_CLASS, PROMPT_INPUT_CLASS, PROMPT_TEXTAREA_CLASS, PROMPT_TOOLBAR_CLASS, PROMPT_SETTINGS_CLASS, PROMPT_ACTIONS_CLASS, PROMPT_REVERT_CLASS, promptResizeClass, promptEnhanceClass, promptGenerateClass } from './PromptComposerUI';
 import { buildGalleryImageEditConfig, canUseNanoEditCanvas, getEditSource, getGalleryEditReferenceLimit, readGalleryEditReference } from './galleryImageEdit';
+import { HEIC_ACCEPT } from '../lib/references/heicImages';
 
 interface GalleryImageEditorProps {
   image: GeneratedMedia;
@@ -227,7 +228,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
     </div>
     {hasArea ? <div className={`${PROMPT_PANEL_CLASS} rounded-[1.6rem] border border-white/[0.09] ${preview ? 'hidden' : ''}`} data-gallery-edit-prompt>
       <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-3 sm:px-4" data-edit-reference-tray>
-        <input ref={referenceInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" aria-label="Upload edit reference files" disabled={busy} onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+        <input ref={referenceInputRef} type="file" accept={`image/png,image/jpeg,image/webp,${HEIC_ACCEPT}`} multiple className="hidden" aria-label="Upload edit reference files" disabled={busy} onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
           const files = Array.from<File>(event.currentTarget.files || []);
           event.currentTarget.value = '';
           void addReferences(files);

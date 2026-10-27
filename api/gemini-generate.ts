@@ -1,19 +1,24 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
+import { recordUsage } from './_lib/usageLogs.js';
+import { calculateGeminiTextCost, isTextUsageContext } from '../src/lib/usage/textUsageCost.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 
 interface GeminiGenerateRequest {
   model: string;
   contents: unknown;
   config?: unknown;
+  usageContext?: unknown;
 }
 
-const ALLOWED_MODELS = new Set(['gemini-3.8-flash', 'gemini-3-pro-image-preview', 'gemini-nano-banana-2.1']);
+// Text and footage analysis only. Images use the queued image pipeline and its ledger.
+const ALLOWED_MODELS = new Set(['gemini-3.8-flash']);
 const ALLOWED_CONFIG_KEYS = new Set([
-  'temperature', 'topP', 'topK', 'candidateCount', 'maxOutputTokens', 'stopSequences',
+  'temperature', 'topP', 'topK', 'maxOutputTokens', 'stopSequences',
   'responseModalities', 'responseMimeType', 'responseSchema', 'responseJsonSchema',
-  'systemInstruction', 'safetySettings', 'tools', 'toolConfig', 'thinkingConfig',
+  'systemInstruction', 'safetySettings', 'thinkingConfig',
   'imageConfig', 'mediaResolution', 'speechConfig', 'seed', 'presencePenalty', 'frequencyPenalty',
 ]);
 
@@ -56,13 +61,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }
 
-  const { model, contents, config: genConfig } = body || ({} as GeminiGenerateRequest);
+  const { model, contents, config: genConfig, usageContext } = body || ({} as GeminiGenerateRequest);
   if (typeof model !== 'string' || !ALLOWED_MODELS.has(model)) {
     return res.status(400).json({ error: 'Unsupported Gemini model' });
   }
   if (contents === undefined || contents === null) {
     return res.status(400).json({ error: 'contents is required' });
   }
+  if (!isTextUsageContext(usageContext)) return res.status(400).json({ error: 'Invalid text feature.' });
   if (genConfig != null && (typeof genConfig !== 'object' || Array.isArray(genConfig))) {
     return res.status(400).json({ error: 'Invalid generation config' });
   }
@@ -76,6 +82,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     safeConfig[key] = value;
   }
 
+  const ticket = await startProviderRequest(req, res, user, 'text', 'gemini');
+  if (!ticket) return;
   const startedAt = Date.now();
   const provider = createTaskDeadline(250_000, undefined, 'Gemini yanıt süresi aşıldı. İstek otomatik olarak tekrarlanmadı. Yeniden deneyebilirsin.');
   // Negotiate the same status/result protocol as the text proxy. Heartbeats
@@ -117,6 +125,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `[gemini-generate] model=${model} kind=${kind} thinking=${thinking} stage=completed ms=${Date.now() - startedAt} thoughts=${response.usageMetadata?.thoughtsTokenCount ?? 'unknown'} input=${response.usageMetadata?.promptTokenCount ?? 'unknown'}`,
     );
 
+    await ticket.finish('completed', null, 200);
+    // Browsers cannot write usage rows; the cost comes from Gemini's own token counts.
+    await recordUsage(user.id, { action: usageContext.action, model, prompt: usageContext.prompt || `[${usageContext.action}-empty-prompt]`,
+      imageCount: 0, estimatedCost: calculateGeminiTextCost((response as any).usageMetadata) });
     // Hand back the bits the client actually consumes. Anything not listed here
     // stays on the server.
     const result = {
@@ -133,6 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     return res.status(200).json(result);
   } catch (error: any) {
+    await ticket.finish('failed');
     if (disconnected) {
       console.info(`[gemini-generate] model=${model} kind=${kind} stage=cancelled ms=${Date.now() - startedAt}`);
       return;

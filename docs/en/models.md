@@ -18,6 +18,7 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
+| FLUX.2 klein · Local / FLUX 3 Klein · Local — free, runs on your GPU | Your own ComfyUI | `COMFYUI_URL` (for example `http://127.0.0.1:8188`) |
 | Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
@@ -27,6 +28,12 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | YouTube search / channel and video metadata | YouTube Data API v3 | `YOUTUBE_API_KEY` |
 
 All three image providers support reference-based generation. Uploading references does not enable protected editing automatically: explicitly select **Edit area** for that. The final selected area is composited onto the source; outside pixels stay original regardless of provider. Tier-based Nano outputs may be resized to the source canvas before compositing, only when their proportions match. A different canvas ratio is rejected. A provider's reference-image API may be named “edit”; the app's reference-generation prompt does not carry an area edit's source-preservation instructions.
+
+**FLUX.2 klein · Local** needs no account. Run [ComfyUI](https://github.com/Comfy-Org/ComfyUI) on the same computer (or a machine the server can reach) with `flux-2-klein-4b-fp8.safetensors` in `models/diffusion_models`, `qwen_3_4b.safetensors` in `models/text_encoders` and `flux2-vae.safetensors` in `models/vae`, then set `COMFYUI_URL`. An 8 GB NVIDIA card is enough at 1K.
+
+**FLUX 3 Klein · Local** uses the same ComfyUI and `COMFYUI_URL`, with `flux3-image-klein-int8-convrot.safetensors` in `models/diffusion_models` and `qwen3vl_4b_int8_convrot.safetensors` in `models/text_encoders` (the VAE is shared). Its Hugging Face repository is gated: sign in and accept the FLUX Kommunity License at `black-forest-labs/flux-3-image-klein-comfy`, which is free for commercial use under USD 5 million annual revenue. It renders text, keeps a person's identity and combines several references far better than FLUX.2 klein; on an RTX 3060 Ti a 1K image takes about 15–25 s and each reference adds roughly 25 s.
+
+Both local models accept up to six references and support protected area edits. `COMFYUI_URL` is an address, not a secret; never point it at a ComfyUI instance you do not control.
 
 Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable Enhance or Brainstorm: fal's deprecated Any LLM endpoint is not used. An Anthropic key is not an OpenRouter key. A saved key still needs model access and sufficient API credit.
 

@@ -1,7 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startProviderRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
+import { recordUsage } from './_lib/usageLogs.js';
+import { EVOLINK_CREDITS_PER_USD, estimateVideoCost } from '../src/lib/video/videoPricing.js';
+import type { VideoQuality } from '../src/types.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 
@@ -190,14 +194,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
 
-    const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
+    const ticket = await startProviderRequest(req, res, user, 'video', 'evolink');
+    if (!ticket) return;
+    const response = await ticket.track(fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
-    });
+    }));
 
     let data: any;
     try {
@@ -216,6 +222,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     await registerProviderTask(registry, 'evolink', data.id, user.id);
+    // Record the charge once EvoLink accepts the task; later polling or storage
+    // failures do not refund it. Reserved credits are provider-calculated for
+    // this exact route; the published rate card covers a response without them.
+    const credits = [data.usage?.credits_reserved, data.usage?.credits_consumed, data.usage?.credits_used, data.usage?.total_credits]
+      .map(Number).find(value => Number.isFinite(value) && value > 0);
+    const operation = isEdit ? 'edit' : isExtend ? 'extend' : isReferenceEdit ? 'reference_edit' : 'generate';
+    await recordUsage(user.id, { action: 'video_generate', model: `${videoModel}-${mode.replace(/_/g, '-')}`, prompt, imageCount: 1,
+      estimatedCost: credits ? credits / EVOLINK_CREDITS_PER_USD : estimateVideoCost(videoModel, quality as VideoQuality, duration, !!videoUrls?.length,
+        0, operation, 0, mode === 'reference_to_video' ? imageUrls?.length || 0 : 0).usd });
 
     return res.status(200).json({
       taskId: data.id,

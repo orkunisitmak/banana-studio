@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createServiceRoleClient, type AuthenticatedUser } from './auth.js';
+import { PROVIDER_LABELS, type AIProvider } from '../../src/lib/providers.js';
 
 // JWT identity has already been verified by requireUser. The database checks
 // that its session still exists and belongs to that same user before spending.
@@ -13,8 +14,8 @@ export const getOpenAISessionId = (req: VercelRequest): string | null => {
   } catch { return null; }
 };
 
-// The historical server-only ledger now also admits OpenRouter requests, so
-// provider switching cannot bypass the existing session/spend limits.
+// The historical server-only ledger admits OpenAI and OpenRouter requests;
+// startProviderRequest below admits every other paid provider into it.
 export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' = 'OpenAI') {
   const prefix = provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
   const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
@@ -61,25 +62,81 @@ export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse
     return null;
   }
   console.info(`[${prefix}] id=${id} kind=${kind} stage=accepted`);
+  return ledgerTicket(db, id, prefix);
+}
+
+const ledgerTicket = (db: NonNullable<ReturnType<typeof createServiceRoleClient>>, id: string, prefix: string) => {
   let finished = false;
+  const finish = async (outcome: 'completed' | 'failed' | 'rejected', providerRequestId?: string | null, providerStatus?: number) => {
+    if (finished) return;
+    finished = true;
+    // Only operational identifiers go in this server-owned ledger. Never
+    // persist prompts, keys, tokens, request headers or upstream error text.
+    const safeRequestId = typeof providerRequestId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(providerRequestId) ? providerRequestId : null;
+    try {
+      const { error } = await db.rpc('finish_openai_request', {
+        p_id: id, p_outcome: outcome, p_provider_request_id: safeRequestId,
+        p_provider_status: Number.isInteger(providerStatus) && providerStatus! >= 100 && providerStatus! <= 599 ? providerStatus : null,
+      }).abortSignal(AbortSignal.timeout(5_000));
+      if (error) console.warn(`[${prefix}] id=${id} stage=ledger_unconfirmed`);
+    } catch { console.warn(`[${prefix}] id=${id} stage=ledger_unconfirmed`); }
+    console.info(`[${prefix}] id=${id} stage=${outcome}`);
+  };
   return {
     id,
-    async finish(outcome: 'completed' | 'failed' | 'rejected', providerRequestId?: string | null, providerStatus?: number) {
-      if (finished) return;
-      finished = true;
-      // Only operational identifiers go in this server-owned ledger. Never
-      // persist prompts, keys, tokens, request headers or upstream error text.
-      const safeRequestId = typeof providerRequestId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(providerRequestId) ? providerRequestId : null;
+    finish,
+    /** Records one provider submission; its response or error reaches the caller unchanged. */
+    async track(request: Promise<Response>): Promise<Response> {
       try {
-        const { error } = await db.rpc('finish_openai_request', {
-          p_id: id, p_outcome: outcome, p_provider_request_id: safeRequestId,
-          p_provider_status: Number.isInteger(providerStatus) && providerStatus! >= 100 && providerStatus! <= 599 ? providerStatus : null,
-        }).abortSignal(AbortSignal.timeout(5_000));
-        if (error) console.warn(`[${prefix}] id=${id} stage=ledger_unconfirmed`);
-      } catch { console.warn(`[${prefix}] id=${id} stage=ledger_unconfirmed`); }
-      console.info(`[${prefix}] id=${id} stage=${outcome}`);
+        const response = await request;
+        await finish(response.ok ? 'completed' : 'failed', null, response.status);
+        return response;
+      } catch (error) {
+        await finish('failed');
+        throw error;
+      }
     },
   };
+};
+
+/** The providers public.start_provider_request admits; OpenAI has its own entry point. */
+export type LedgerProvider = Extract<AIProvider, 'openrouter' | 'gemini' | 'fal' | 'evolink'>;
+
+/** fal.ai, Gemini, EvoLink and OpenRouter video share the OpenAI ledger's
+ * per-user and workspace budgets; video also has its own lower daily cap. */
+export async function startProviderRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text' | 'video', provider: LedgerProvider) {
+  const label = PROVIDER_LABELS[provider];
+  const session = getOpenAISessionId(req);
+  if (!session) {
+    res.status(401).json({ error: 'Refresh your session before generating.' });
+    return null;
+  }
+  const db = createServiceRoleClient();
+  if (!db) {
+    res.status(503).json({ error: `${label} request protection is unavailable. No provider request was sent.` });
+    return null;
+  }
+  const id = randomUUID();
+  let result;
+  try {
+    result = await db.rpc('start_provider_request', { p_id: id, p_user_id: user.id, p_session_id: session, p_kind: kind, p_provider: provider })
+      .abortSignal(AbortSignal.timeout(5_000));
+  } catch { result = { error: true }; }
+  if (result.error || !result.data || typeof result.data.allowed !== 'boolean') {
+    res.status(503).json({ error: `${label} request protection is unavailable. No provider request was sent.` });
+    return null;
+  }
+  if (!result.data.allowed) {
+    const forbidden = result.data.reason === 'session';
+    if (!forbidden) res.setHeader('Retry-After', String(result.data.retry_after || 60));
+    res.status(forbidden ? 403 : 429).json(forbidden
+      ? { error: 'Your session is no longer authorized. Sign in again.' }
+      : { error: `${label} request limit reached. Wait before trying again.`, providerRequestSent: false });
+    return null;
+  }
+  const prefix = `${provider}-request`;
+  console.info(`[${prefix}] id=${id} kind=${kind} stage=accepted`);
+  return ledgerTicket(db, id, prefix);
 }
 
 // Provider errors can reflect credentials (including partially masked keys),

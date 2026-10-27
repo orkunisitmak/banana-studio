@@ -1,6 +1,7 @@
 import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
+import type { TextUsageContext } from '../lib/usage/textUsageCost';
 import { selectProvider } from './providerRouting';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
@@ -40,7 +41,7 @@ export interface GenerateContentRequest {
   brainstormFormat?: 'wardrobe';
   brainstormCount?: number;
   outputFormat?: 'youtube_analysis';
-  usageContext?: { action: 'enhance' | 'video_enhance' | 'brainstorm' | 'variation'; prompt: string };
+  usageContext?: TextUsageContext;
 }
 
 export interface GenerateContentResponse {

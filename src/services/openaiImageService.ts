@@ -1,5 +1,7 @@
 import { selectProvider } from './providerRouting';
-import type { GeneratedMedia, GenerationConfig } from '../types';
+import { getImageModelLabel, type GeneratedMedia, type GenerationConfig } from '../types';
+import { isLocalImageModel, LOCAL_FLUX_REFERENCE_LIMIT } from '../lib/images/localFlux';
+import { fitLocalReferences } from '../lib/references/localReferenceBudget';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
@@ -116,6 +118,12 @@ export const generateOpenAIImage = async (
 ): Promise<GeneratedMedia> => {
   config = structuredClone(config);
   config.imageProvider = config.imageProvider || await selectProvider(config.imageModel);
+  if (isLocalImageModel(config.imageModel)) {
+    // Fit before prompt preparation so reference numbering matches what is sent.
+    const fit = fitLocalReferences(config.referenceImages || [], LOCAL_FLUX_REFERENCE_LIMIT, getImageModelLabel(config.imageModel));
+    if (fit.error) throw new Error(fit.error);
+    config.referenceImages = fit.kept;
+  }
   validateImageGenerationReferences({ ...config, prompt });
   const options = getOpenAIImageOptions(config.imageModel === SUNBURST_MODEL ? config.openaiImageOptions : undefined);
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }));

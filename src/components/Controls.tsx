@@ -27,7 +27,7 @@ import { enhancePrompt, enhanceVideoPrompt } from '../services/geminiService';
 import { compressImage, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
 import { YouTubeChannelRef } from './YouTubeChannelRef';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
-import { getTextModelLabel } from '../types';
+import { getImageModelLabel, getTextModelLabel } from '../types';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
@@ -37,6 +37,9 @@ import { isValidEditRegion } from '../lib/images/imageEditRegion';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { assignSeedanceFrames, getSeedanceFrameError } from '../lib/video/seedanceFrames';
 import { getYouTubeDraftKey, prepareYouTubeBrainstormDraft, type YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
+import { convertHeicFile, HEIC_ACCEPT, isHeicFile } from '../lib/references/heicImages';
+import { isLocalImageModel, LOCAL_FLUX_REFERENCE_LIMIT } from '../lib/images/localFlux';
+import { fitLocalReferences } from '../lib/references/localReferenceBudget';
 
 interface ControlsProps {
   config: GenerationConfig;
@@ -682,8 +685,11 @@ export const Controls: React.FC<ControlsProps> = ({
     });
   };
 
-  const processImageFiles = async (files: (File | Blob)[]) => {
+  const processImageFiles = async (selected: (File | Blob)[]) => {
       setAttachmentError(null);
+      let files: (File | Blob)[];
+      try { files = await Promise.all(selected.map(convertHeicFile)); }
+      catch (error) { setAttachmentError(error instanceof Error ? error.message : 'A HEIC photo could not be converted.'); return; }
       const MAX_IMAGES = maxReferenceImages;
       const MAX_SIZE_BYTES = 1024 * 1024; // 1MB threshold for compression
       const currentImages = config.referenceImages || [];
@@ -1354,7 +1360,7 @@ export const Controls: React.FC<ControlsProps> = ({
     // 1. Handle Desktop Files
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         const allFiles = Array.from(e.dataTransfer.files) as File[];
-        const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
+        const imageFiles = allFiles.filter(f => f.type.startsWith('image/') || isHeicFile(f));
         const videoFiles = allFiles.filter(f => f.type.startsWith('video/') || (!f.type && /\.(mp4|mov|webm)$/i.test(f.name)));
         const audioFiles = allFiles.filter(f => f.type.startsWith('audio/')
           || (!f.type.startsWith('video/') && /\.(mp3|wav|m4a|aac|ogg|oga|flac|aif|aiff)$/i.test(f.name)));
@@ -1505,6 +1511,8 @@ export const Controls: React.FC<ControlsProps> = ({
         setGenerationError(error instanceof Error ? error.message : 'Check the attached references.');
         return;
       }
+      // Shortcuts call this directly; references a local model cannot fit never queue.
+      if (localReferenceFit?.error) { setGenerationError(localReferenceFit.error); return; }
     }
     if (config.mode === 'video' && config.videoModel === 'seedance-2.5' && !config.referenceVideos?.some(video => video.isContinuation)) {
       const error = getSeedanceFrameError(config.referenceImages, config.referenceVideos?.length || 0, config.referenceAudios?.length || 0, config.videoOperation);
@@ -1862,7 +1870,10 @@ export const Controls: React.FC<ControlsProps> = ({
   const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
   const isSunburst = config.imageModel === SUNBURST_MODEL;
   const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
-  const modelInputError = routeInputError || h3InputError || sunburstError || (
+  const localReferenceFit = !isVideoMode && isLocalImageModel(config.imageModel)
+    ? fitLocalReferences(config.referenceImages, LOCAL_FLUX_REFERENCE_LIMIT, getImageModelLabel(config.imageModel)) : undefined;
+  const localSkippedNames = [...new Set((localReferenceFit?.skipped || []).map(ref => ref.personName || 'a person'))];
+  const modelInputError = routeInputError || h3InputError || sunburstError || localReferenceFit?.error || (
     isH3VideoConfig ? null : isVideoMode
       ? requiresSourceVideo && !(config.referenceVideos?.length)
         ? 'Add a source video for this action.'
@@ -1882,7 +1893,9 @@ export const Controls: React.FC<ControlsProps> = ({
       ? hasSeedanceFrameRoles
         ? 'First / last frames use a start image and an optional end image. Use matching crops; different ratios crop the last frame to the first.'
         : 'References guide the content. For a start-to-end transition, choose First / last frames with one or two images.'
-      : undefined;
+      : localReferenceFit?.skipped?.length
+        ? `${getImageModelLabel(config.imageModel)} uses ${LOCAL_FLUX_REFERENCE_LIMIT} reference images. ${localReferenceFit.skipped.length} extra photo${localReferenceFit.skipped.length === 1 ? '' : 's'} of ${localSkippedNames.join(', ')} will be skipped; each person keeps at least one.`
+        : undefined;
   const customSizeHint = !isVideoMode && isSunburst && getOpenAIImageOptions(config.openaiImageOptions).size === 'custom'
     ? sizeAdjustment?.size === getOpenAIImageSize(config) ? sizeAdjustment.text
       : config.referenceImages.some(ref => ref.isEditSource && ref.editRegion) ? 'Only the masked area changes.' : 'Sizes auto-adjust when you finish editing.'
@@ -1894,7 +1907,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, brainstormImageCount, imageCostHistory);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+    : !isBrainstormActive && !sunburstError && !localReferenceFit?.error && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
   // While jobs run the button keeps its lime surface so another generation can be
   // queued, so busy-state labels must stay dark there and only turn light on the
   // disabled gray surface.
@@ -2072,7 +2085,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     )}
                 </div>
 
-                <input ref={refInputRef} type="file" className="hidden" accept="image/*" multiple onChange={handleRefImageUpload} />
+                <input ref={refInputRef} type="file" className="hidden" accept={`image/*,${HEIC_ACCEPT}`} multiple onChange={handleRefImageUpload} />
                 <button onClick={() => refInputRef.current?.click()} aria-label="Add reference images" disabled={maxReferenceImages === 0} title={maxReferenceImages === 0 ? 'This action does not accept image inputs' : `Add images (max ${maxReferenceImages})`} className="w-12 h-12 rounded-lg border border-dashed border-gray-700 bg-gray-800/30 hover:bg-gray-800 hover:border-gray-500 text-gray-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 flex flex-col items-center justify-center gap-0.5 transition-all shrink-0">
                     <ImagePlus className="w-4 h-4" />
                     <span className="text-[8px] font-bold uppercase">Ref</span>

@@ -491,8 +491,9 @@ export const getAuthorizedEmails = async (): Promise<AuthorizedEmail[]> => {
     .order('created_at', { ascending: true });
 
   if (error) {
+    // An empty list would read as "nobody is authorized"; let the panel show its error.
     console.warn('Failed to fetch authorized emails:', error);
-    return [];
+    throw new Error('Could not load authorized users. Try again.');
   }
   return (data || []) as AuthorizedEmail[];
 };

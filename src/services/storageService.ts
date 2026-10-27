@@ -1744,7 +1744,9 @@ export const updateVideoStatus = async (
       if (storagePath) updateObj.storage_path = storagePath;
     }
     if (updates?.metadata) {
-      const { data: existing } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      // Without the saved metadata, writing would drop the task endpoints and cost.
+      const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      if (error) throw new Error(`Could not preserve the saved video details: ${error.message}`);
       const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
       if (status === 'completed') {
         delete merged.error;

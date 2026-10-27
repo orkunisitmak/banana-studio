@@ -2053,7 +2053,8 @@ export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
 
 export const renameFolder = async (folderId: string, newName: string): Promise<void> => {
   if (supabase) {
-    await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    const { error } = await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    if (error) throw new Error(`Folder could not be renamed: ${error.message}`);
   }
   try {
     const db = await openDB();

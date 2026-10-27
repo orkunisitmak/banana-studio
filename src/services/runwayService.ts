@@ -281,17 +281,28 @@ const normalizeVideoForEdit = async (
   }
 
   const startedAt = Date.now();
+  // The scale job is already paid for; ride out brief poll failures like the other task pollers.
+  let transientErrors = 0;
   while (Date.now() - startedAt < VIDEO_PREPROCESS_TIMEOUT) {
     await new Promise(resolve => setTimeout(resolve, VIDEO_PREPROCESS_POLL_INTERVAL));
     const pollHeaders = await getServerAuthHeaders();
-    const statusResponse = await fetch(
-      `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
-      { headers: pollHeaders },
-    );
+    let statusResponse: Response;
+    try {
+      statusResponse = await fetch(
+        `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
+        { headers: pollHeaders },
+      );
+    } catch (error) {
+      if (++transientErrors >= 5) throw error;
+      continue;
+    }
     const statusData = await statusResponse.json().catch(() => null);
     if (!statusResponse.ok) {
+      const transient = statusResponse.status === 408 || statusResponse.status === 429 || statusResponse.status >= 500;
+      if (transient && ++transientErrors < 5) continue;
       throw new Error(statusData?.error || 'Source-video compatibility preprocessing failed.');
     }
+    transientErrors = 0;
     if (statusData?.status === 'SUCCEEDED' && typeof statusData.videoUrl === 'string') {
       return statusData.videoUrl;
     }

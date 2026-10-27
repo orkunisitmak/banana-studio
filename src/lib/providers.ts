@@ -33,6 +33,20 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
   return selected;
 }
 
+export function sanitizeProviderPreferences(value: unknown): Record<string, ProviderChoice> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized: Record<string, ProviderChoice> = {};
+  for (const [model, choice] of Object.entries(value)) {
+    const routes = MODEL_ROUTES[model];
+    if (choice === 'auto') {
+      sanitized[model] = 'auto';
+    } else if (Array.isArray(routes) && routes.includes(choice as AIProvider)) {
+      sanitized[model] = choice as ProviderChoice;
+    }
+  }
+  return sanitized;
+}
+
 export const OPENROUTER_MODELS: Record<string, string> = {
   'gpt-image-2.5-sunburst': 'openai/gpt-image-2.5-sunburst',
   'gemini-3-pro-image-preview': 'google/gemini-3-pro-image',

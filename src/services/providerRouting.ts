@@ -1,5 +1,5 @@
 import { supabase } from './authService';
-import { resolveProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
+import { resolveProvider, sanitizeProviderPreferences, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 
 // Preferences contain only route names. Credentials stay in the native vault/server.
@@ -10,9 +10,9 @@ export async function getProviderPreferences(): Promise<Record<string, ProviderC
   if (isLocalWorkspace()) {
     const result = await supabase.rpc('get_provider_preferences');
     if (result.error) throw new Error('Provider preferences could not be loaded.');
-    return result.data || {};
+    return sanitizeProviderPreferences(result.data);
   }
-  try { return JSON.parse(localStorage.getItem(storageKey(data.session.user.id)) || '{}'); } catch { return {}; }
+  try { return sanitizeProviderPreferences(JSON.parse(localStorage.getItem(storageKey(data.session.user.id)) || '{}')); } catch { return {}; }
 }
 export async function saveProviderPreference(model: string, value: ProviderChoice) {
   const { data } = await supabase.auth.getSession();

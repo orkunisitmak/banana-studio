@@ -2423,7 +2423,10 @@ export const getTemplates = async (): Promise<Template[]> => {
 };
 
 export const deleteTemplate = async (id: string): Promise<void> => {
-  if (supabase) await supabase.from('templates').delete().eq('id', id);
+  if (supabase) {
+    const { error } = await supabase.from('templates').delete().eq('id', id);
+    if (error) throw new Error(`Template could not be deleted: ${error.message}`);
+  }
   try {
     const db = await openDB();
     db.transaction(TEMPLATE_STORE_NAME, 'readwrite').objectStore(TEMPLATE_STORE_NAME).delete(id);

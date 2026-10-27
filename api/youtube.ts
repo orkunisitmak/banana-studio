@@ -5,6 +5,20 @@ const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
 const ALLOWED_ENDPOINTS = new Set(['videos', 'channels', 'playlistItems', 'search']);
 
+const ALLOWED_PARAMS = new Set([
+  'part',
+  'id',
+  'q',
+  'maxResults',
+  'type',
+  'channelId',
+  'forHandle',
+  'forUsername',
+  'playlistId',
+  'pageToken',
+  'fields',
+]);
+
 interface YoutubeProxyRequest {
   endpoint: string;
   params?: Record<string, string>;
@@ -40,12 +54,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const url = new URL(`${YOUTUBE_API_BASE}/${endpoint}`);
-    url.searchParams.set('key', apiKey);
+    
+    // Sanitize and filter allowed query parameters (prevent parameter injection & key overriding)
     if (params && typeof params === 'object') {
       for (const [k, v] of Object.entries(params)) {
-        if (typeof v === 'string') url.searchParams.set(k, v);
+        if (typeof v === 'string' && ALLOWED_PARAMS.has(k) && k.toLowerCase() !== 'key') {
+          if (k === 'maxResults') {
+            const num = parseInt(v, 10);
+            if (!isNaN(num) && num > 0 && num <= 50) {
+              url.searchParams.set(k, String(num));
+            }
+          } else {
+            url.searchParams.set(k, v);
+          }
+        }
       }
     }
+
+    // Always enforce the server's secret API key last
+    url.searchParams.set('key', apiKey);
 
     const response = await fetch(url.toString());
     const text = await response.text();
@@ -65,7 +92,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json(data);
   } catch (error: any) {
-    console.error('YouTube proxy error:', error?.message || error);
-    return res.status(500).json({ error: error?.message || 'YouTube request failed' });
+    // Redact sensitive keys from server error traces
+    const safeErrorMsg = (error?.message || 'YouTube request failed').replace(apiKey, '[REDACTED]');
+    console.error('YouTube proxy error:', safeErrorMsg);
+    return res.status(500).json({ error: safeErrorMsg });
   }
 }

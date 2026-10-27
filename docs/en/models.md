@@ -64,6 +64,19 @@ Create an account with the provider, open its key dashboard, create a key and co
 
 For YouTube, create/select your own Google Cloud project, enable **YouTube Data API v3**, then create an API key for that project. A Gemini key is not a replacement for this enabled API and its quota. API billing and consumer chat subscriptions are separate products; check the provider's API account rather than assuming a chat subscription covers requests.
 
+## Use your Claude or Codex subscription (desktop, text only)
+
+The Mac and Windows apps can run **Enhance, Brainstorm and variations** through the command-line tool you already use, so no API key is needed for those text features:
+
+| Model | Route name | Needs |
+| --- | --- | --- |
+| Claude Opus 5.5 | Claude subscription (CLI) | The `claude` command ([Claude Code](https://docs.claude.com/en/docs/claude-code)), signed in |
+| GPT-6.1 Sol | Codex / ChatGPT subscription (CLI) | The `codex` command ([Codex CLI](https://developers.openai.com/codex/cli)), signed in |
+
+Open the command once in a terminal and sign in. Banana Studio finds it on your `PATH`; **Auto** uses it only when no API-key route for that model is configured, and you can also pick it in **AI settings**. The app runs the official command on your computer and never reads or stores its sign-in. Requests count against your subscription's usage limit, and they take longer than an API call (roughly 10-30 seconds with Claude, up to a minute with Codex).
+
+Limits: it is text and image references only, so YouTube footage analysis still needs Gemini and image or video generation still needs an API key. It is unavailable in hosted web workspaces, because a server must never run visitors' prompts through its owner's personal subscription. Set `CLAUDE_CLI_ENABLED=false` or `CODEX_CLI_ENABLED=false` in the server environment to turn a route off.
+
 ## Example setups
 
 | You want… | Add and select… |

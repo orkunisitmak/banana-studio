@@ -14,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!await requireUser(req, res)) return;
 
   const providers = providerAvailability();
-  const configured = Boolean(providers.gemini || providers.openrouter);
+  const configured = Boolean(providers.gemini || providers.openrouter || providers['claude-cli'] || providers['codex-cli']);
   res.setHeader('Cache-Control', 'no-store');
   return res.status(200).json({ configured, providers,
     openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()) && process.env.OPENROUTER_ENABLED !== 'false',

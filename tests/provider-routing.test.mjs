@@ -73,3 +73,14 @@ test('OpenRouter local frame uploads use bytes without requiring an EvoLink or f
     assert.equal(result.imageUrls[0],'data:image/png;base64,'+Buffer.from('synthetic').toString('base64'));
   }finally{store.close();fs.rmSync(directory,{recursive:true,force:true});}
 });
+
+test('subscription CLI routes serve only their own text model and rank after every API-key route',()=>{
+  assert.deepEqual(MODEL_ROUTES['anthropic/claude-opus-5.5'],['openrouter','claude-cli']);
+  assert.equal(MODEL_ROUTES['gpt-6.1-sol'].at(-1),'codex-cli');
+  assert.equal(resolveProvider('anthropic/claude-opus-5.5','auto',{'claude-cli':true}),'claude-cli');
+  assert.equal(resolveProvider('anthropic/claude-opus-5.5','auto',{openrouter:true,'claude-cli':true}),'openrouter');
+  assert.equal(resolveProvider('gpt-6.1-sol','codex-cli',{'codex-cli':true,openai:true}),'codex-cli');
+  assert.throws(()=>resolveProvider('anthropic/claude-opus-5.5','codex-cli',{'codex-cli':true}));
+  assert.throws(()=>resolveProvider('gpt-image-2.5-sunburst','auto',{'claude-cli':true,'codex-cli':true}));
+  assert.throws(()=>resolveProvider('gemini-3.8-flash','claude-cli',{'claude-cli':true}));
+});

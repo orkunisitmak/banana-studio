@@ -64,6 +64,19 @@ Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya W
 
 YouTube için kendi Google Cloud projeni oluştur/seç, **YouTube Data API v3** servisini etkinleştir ve bu projeye ait API anahtarı oluştur. Gemini anahtarı, bu servisin etkinleştirilmesi ve kotasının yerine geçmez. API kullanımı ile tüketici sohbet abonelikleri ayrı ürünlerdir; sohbet aboneliğinin API isteklerini karşıladığını varsayma.
 
+## Claude veya Codex aboneliğini kullan (masaüstü, yalnız metin)
+
+Mac ve Windows uygulaması **Enhance, Brainstorm ve varyasyonları** zaten kullandığın komut satırı aracı üzerinden çalıştırabilir; bu metin özellikleri için API anahtarı gerekmez:
+
+| Model | Bağlantı adı | Gerekenler |
+| --- | --- | --- |
+| Claude Opus 5.5 | Claude subscription (CLI) | `claude` komutu ([Claude Code](https://docs.claude.com/en/docs/claude-code)), giriş yapılmış |
+| GPT-6.1 Sol | Codex / ChatGPT subscription (CLI) | `codex` komutu ([Codex CLI](https://developers.openai.com/codex/cli)), giriş yapılmış |
+
+Komutu bir kez terminalde açıp giriş yap. Banana Studio onu `PATH` içinde bulur; **Auto** yalnız o model için API anahtarlı bir bağlantı yoksa bunu kullanır, **AI settings** içinden de seçebilirsin. Uygulama resmî komutu senin bilgisayarında çalıştırır, oturum bilgisini hiç okumaz ve saklamaz. İstekler aboneliğinin kullanım limitinden düşer ve API çağrısından daha uzun sürer (Claude ile yaklaşık 10-30 saniye, Codex ile bir dakikaya kadar).
+
+Sınırlar: yalnız metin ve görsel referansları destekler; YouTube görüntü analizi hâlâ Gemini, görsel ve video üretimi hâlâ API anahtarı ister. Barındırılan web çalışma alanlarında kullanılamaz, çünkü sunucu ziyaretçilerin istemlerini sahibinin kişisel aboneliğinden geçirmemelidir. Bir bağlantıyı kapatmak için sunucu ortamında `CLAUDE_CLI_ENABLED=false` ya da `CODEX_CLI_ENABLED=false` ayarla.
+
 ## Örnek kurulumlar
 
 | İsteğin | Ekle ve seç |

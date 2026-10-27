@@ -2,6 +2,7 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import { isCliProvider } from '../lib/providers';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -40,6 +41,8 @@ export interface GenerateContentRequest {
   brainstormFormat?: 'wardrobe';
   brainstormCount?: number;
   outputFormat?: 'youtube_analysis';
+  /** Set by the router for the desktop subscription (CLI) routes. */
+  cliProvider?: 'claude-cli' | 'codex-cli';
   usageContext?: { action: 'enhance' | 'video_enhance' | 'brainstorm' | 'variation'; prompt: string };
 }
 
@@ -169,6 +172,7 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
+  if (isCliProvider(provider)) return generateContent({ ...normalized, cliProvider: provider }, '/api/cli-text-generate', options);
   return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({

@@ -16,6 +16,10 @@ AI features require network access. Prompts and selected references are sent to 
 
 Local files are not database-encrypted; protect your OS account and backups with FileVault or Windows device encryption/BitLocker. Deleting a local file does not recall copies already sent to a provider or downloaded elsewhere.
 
+## Dependency advisories
+
+Production dependencies are audited with `npm audit --omit=dev`; the release check must stay free of known runtime advisories. Development-only tooling can report advisories that never ship in the web or desktop runtime. Re-check both scopes whenever a dependency is upgraded and keep the lockfile committed.
+
 ## Releases
 
 Release artifacts must pass source, history, bundle and independent secret scans. Community releases deliberately use local ad hoc code signatures and do not provide Apple Developer ID signing or notarization. Users approve the app through macOS Privacy & Security on first launch. The application does not disable Gatekeeper, SIP or system-wide protections. The optional notarized distribution path still requires Developer ID, notarization and stapling.

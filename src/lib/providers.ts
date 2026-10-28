@@ -21,8 +21,8 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
 };
 export type ProviderAvailability = Partial<Record<AIProvider, boolean>>;
 export function resolveProvider(model: string, choice: unknown, available: ProviderAvailability): AIProvider {
-  const routes = MODEL_ROUTES[model];
-  if (!Array.isArray(routes)) throw new Error('Unsupported model.');
+  const routes = Object.hasOwn(MODEL_ROUTES, model) ? MODEL_ROUTES[model] : undefined;
+  if (!routes) throw new Error('Unsupported model.');
   if (choice != null && choice !== 'auto') {
     if (!routes.includes(choice as AIProvider)) throw new Error('This provider does not serve the selected model.');
     if (!available[choice as AIProvider]) throw new Error(`Add your ${PROVIDER_LABELS[choice as AIProvider]} key in Provider keys, or choose Auto in AI settings.`);

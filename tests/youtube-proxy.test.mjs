@@ -15,7 +15,7 @@ try {
     packages: 'external',
     plugins: [{ name: 'synthetic-auth', setup(builder) {
       builder.onResolve({ filter: /\/auth\.js$/ }, () => ({ path: 'auth', namespace: 'fixture' }));
-      builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const applyCors=()=>{}; export const requireUser=async()=>({id:"synthetic-user"});' }));
+      builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const applyCors=()=>true; export const requireUser=async()=>({id:"synthetic-user"});' }));
     } }],
   });
 

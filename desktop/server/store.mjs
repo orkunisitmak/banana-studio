@@ -13,12 +13,18 @@ const ownField = (row, field) => {
   if (typeof field !== 'string' || !/^[a-z_][a-z0-9_]*(?:->>?[a-z0-9_]+)*$/i.test(field)) throw new Error('Invalid field.');
   const parts = field.split(/->>?/); return parts.reduce((v,p) => v == null ? null : Object.hasOwn(v,p) ? v[p] : null, row);
 };
+// PostgREST compares a jsonb column with JSON text by value, not key order.
+const canonical = v => Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
+const equal = (x, value) => {
+  if (!x || typeof x !== 'object' || typeof value !== 'string') return x === value;
+  try { return JSON.stringify(canonical(x)) === JSON.stringify(canonical(JSON.parse(value))); } catch { return false; }
+};
 const wildcard = pattern => new RegExp('^' + String(pattern).replace(/\\([\\%_])|([%_])|([.*+?^${}()|[\]\\])/g, (_,escaped,wild,special) => escaped ? escaped.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') : wild === '%' ? '.*' : wild === '_' ? '.' : '\\'+special) + '$', 'i');
 const filter = (row, { column, operator, value }) => {
   const x = ownField(row,column);
   if (operator?.startsWith('not.')) return !filter(row,{ column, operator:operator.slice(4), value });
   switch(operator) {
-    case 'eq': return x === value;
+    case 'eq': return equal(x, value);
     case 'neq': return x !== value;
     case 'is': return value === null ? x == null : x === value;
     case 'gt': return x > value; case 'gte': return x >= value;

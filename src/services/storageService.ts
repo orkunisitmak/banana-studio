@@ -1710,7 +1710,8 @@ export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {
   if (supabase) {
-    await supabase.from('generations').update({ is_favorite: isFavorite }).eq('id', id);
+    const { error } = await supabase.from('generations').update({ is_favorite: isFavorite }).eq('id', id);
+    if (error) throw new Error(`Favorite could not be saved: ${error.message}`);
   }
   try {
     const db = await openDB();
@@ -1905,29 +1906,30 @@ export const syncLocalImages = async (): Promise<void> => {
 
 export const saveFolder = async (folder: Folder): Promise<void> => {
   const operationUserId = await bindMediaSession();
-  if (supabase && !operationUserId) throw new Error('Sign in to save a reference.');
+  if (supabase && !operationUserId) throw new Error('Sign in to create a folder.');
   if (supabase) {
-    try {
-      const userId = operationUserId;
-      if (!userId) throw new Error('Not authenticated');
-      await supabase.from('folders').insert({
-        id: folder.id,
-        user_id: userId,
-        name: folder.name,
-        created_at: folder.createdAt,
-        parent_id: folder.parentId || null
-      });
-    } catch (e) {
-      console.error("Supabase create folder failed", e);
-    }
+    const { error } = await supabase.from('folders').insert({
+      id: folder.id,
+      user_id: operationUserId,
+      name: folder.name,
+      created_at: folder.createdAt,
+      parent_id: folder.parentId || null
+    });
+    if (error) throw new Error(`Folder could not be created: ${error.message}`);
   }
 
   try {
     const db = await openDB(operationUserId);
-    const tx = db.transaction(FOLDER_STORE_NAME, 'readwrite');
-    tx.objectStore(FOLDER_STORE_NAME).put(folder);
-  } catch (e) {
-    console.error("IDB create folder failed", e);
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(FOLDER_STORE_NAME, 'readwrite');
+      tx.objectStore(FOLDER_STORE_NAME).put(folder);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('Local folder save failed'));
+      tx.onabort = () => reject(tx.error || new Error('Local folder save was aborted'));
+    });
+  } catch (error) {
+    if (!supabase) throw error;
+    console.warn('Folder saved, but local cache could not be updated:', error);
   }
 };
 

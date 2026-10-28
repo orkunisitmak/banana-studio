@@ -1,0 +1,2 @@
+# Exact historical synthetic test fixture; no path, rule or future-commit wildcard.
+733936f459287bd2287239bd548a25b5ec99b91d:tests/youtube-proxy.test.mjs:generic-api-key:22

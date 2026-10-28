@@ -7,7 +7,7 @@ const rules = [
   ['provider-credential', /(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{30,}|AIza[A-Za-z0-9_-]{30,}|sb_(?:secret|publishable)_[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{24,})/],
   ['private-key', /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/],
   ['live-project-address', /https:\/\/[a-z]{20}\.supabase\.co\b/],
-  ['machine-path', /(?:^|[^A-Za-z0-9])(?:\/(?:Users|home)\/(?!runner\b|user\b|example\b)[A-Za-z0-9_.-]+\/|[A-Za-z]:\\Users\\(?!Public\\)[A-Za-z0-9_. -]+\\)/],
+  ['machine-path', /(?:^|[^A-Za-z0-9])(?:\/(?:Users|home)\/(?!runner\b|user\b|example\b)[A-Za-z0-9_.-]+\/|[A-Za-z]:\\Users\\(?!Public\\)[A-Za-z0-9_. -]+\\)/i],
   ['signed-media-link', /https?:\/\/[^\s"'<>]+\/storage\/v1\/(?:object|render\/image)\/sign\/[^\s"'<>]+[?&]token=[A-Za-z0-9_.-]{25,}/],
 ];
 const forbiddenPath = /(?:^|\/)(?:\.env(?:\..*)?|outputs?|\.local-runtime|\.local-data|\.vercel|\.DS_Store)(?:\/|$)|\.(?:p12|pfx|p8|pem|key|csr|cer|crt|provisionprofile|sqlite(?:3)?|db|log|dmg|zip)$/i;

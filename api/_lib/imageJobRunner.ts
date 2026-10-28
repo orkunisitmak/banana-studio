@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { executeOpenAIImage } from '../openai-image-generate.js';
 import { refreshImageJobReferences } from './imageJobPayload.js';
 import { readStoredImage } from './imageStorage.js';
+import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
 import type { ImageJobMessage } from './imageJobQueue.js';
 
 export class ImageJobWait extends Error {
@@ -67,7 +68,18 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
   let status=500,result:any;
   const response={setHeader(){},status(value:number){status=value;return this;},json(value:unknown){result=value;return this;},end(){}} as unknown as VercelResponse;
   try {
-    const references=await refreshImageJobReferences(db,claim.payload);
+    let references;
+    try { references=await refreshImageJobReferences(db,claim.payload); }
+    catch (error) {
+      // A removed reference never becomes available again; end the job instead
+      // of re-admitting it on every redelivery.
+      if (!(error instanceof MediaAccessError) || error.temporary) throw error;
+      // Keep redelivery possible until the admission audit is finalized.
+      await guard.finish('rejected');
+      await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_metadata:null,p_storage_path:null,
+        p_error:'A reference is unavailable or was removed. Attach that image again. No generation was submitted.'});
+      return;
+    }
     await executeOpenAIImage({method:'POST',headers:{},body:{...claim.payload,referenceImages:references}} as VercelRequest,response,{
       user:{id:job.userId},db,guard,
       dispatch:async metadata => {

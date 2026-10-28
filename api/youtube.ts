@@ -8,14 +8,13 @@ const ALLOWED_ENDPOINTS = new Set(['videos', 'channels', 'playlistItems', 'searc
 const ALLOWED_PARAMS = new Set([
   'part',
   'id',
-  'q',
-  'maxResults',
-  'type',
-  'channelId',
   'forHandle',
   'forUsername',
   'playlistId',
   'pageToken',
+  'maxResults',
+  'q',
+  'type',
   'fields',
 ]);
 
@@ -23,6 +22,45 @@ interface YoutubeProxyRequest {
   endpoint: string;
   params?: Record<string, string>;
 }
+
+export const sanitizeYoutubeParams = (raw: unknown): Record<string, string> => {
+  const safe: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return safe;
+
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    // Drop any attempt to supply or override the server API key
+    if (k.toLowerCase() === 'key') continue;
+    if (!ALLOWED_PARAMS.has(k) || typeof v !== 'string') continue;
+
+    if (k === 'maxResults') {
+      if (!/^\d+$/.test(v)) continue;
+      const parsed = Number(v);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        safe.maxResults = String(Math.min(parsed, 50));
+      }
+      continue;
+    }
+
+    // Limit value length to prevent unbounded query strings
+    if (v.length <= 1000) {
+      safe[k] = v;
+    }
+  }
+
+  return safe;
+};
+
+export const buildYoutubeRequestUrl = (endpoint: string, apiKey: string, params?: unknown): URL | null => {
+  if (!endpoint || !ALLOWED_ENDPOINTS.has(endpoint)) return null;
+  const url = new URL(`${YOUTUBE_API_BASE}/${endpoint}`);
+  const safeParams = sanitizeYoutubeParams(params);
+  for (const [k, v] of Object.entries(safeParams)) {
+    url.searchParams.set(k, v);
+  }
+  // The server API key is always enforced and cannot be overridden by input parameters
+  url.searchParams.set('key', apiKey);
+  return url;
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
@@ -52,28 +90,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: `Unsupported endpoint: ${endpoint}` });
   }
 
+  const url = buildYoutubeRequestUrl(endpoint, apiKey, params);
+  if (!url) {
+    return res.status(400).json({ error: `Unsupported endpoint: ${endpoint}` });
+  }
+
   try {
-    const url = new URL(`${YOUTUBE_API_BASE}/${endpoint}`);
-    
-    // Sanitize and filter allowed query parameters (prevent parameter injection & key overriding)
-    if (params && typeof params === 'object') {
-      for (const [k, v] of Object.entries(params)) {
-        if (typeof v === 'string' && ALLOWED_PARAMS.has(k) && k.toLowerCase() !== 'key') {
-          if (k === 'maxResults') {
-            const num = parseInt(v, 10);
-            if (!isNaN(num) && num > 0 && num <= 50) {
-              url.searchParams.set(k, String(num));
-            }
-          } else {
-            url.searchParams.set(k, v);
-          }
-        }
-      }
-    }
-
-    // Always enforce the server's secret API key last
-    url.searchParams.set('key', apiKey);
-
     const response = await fetch(url.toString());
     const text = await response.text();
     let data: any;
@@ -91,10 +113,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.status(200).json(data);
-  } catch (error: any) {
-    // Redact sensitive keys from server error traces
-    const safeErrorMsg = (error?.message || 'YouTube request failed').replace(apiKey, '[REDACTED]');
-    console.error('YouTube proxy error:', safeErrorMsg);
-    return res.status(500).json({ error: safeErrorMsg });
+  } catch {
+    // Upstream errors may repeat or encode the credential-bearing request URL.
+    console.error('YouTube proxy request failed');
+    return res.status(500).json({ error: 'YouTube request failed' });
   }
 }

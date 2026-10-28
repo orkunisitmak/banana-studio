@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=https://docs.mergify.com/mergify-configuration-schema.json
+# Initial observation proposal: every rule is DISABLED; no merge/queue action.
+# Labels below are informational and never grant merge authorization.
+commands_restrictions:
+  backport:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  copy:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  dequeue:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  queue:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  rebase:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  refresh:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  requeue:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  squash:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+  update:
+    conditions: ["sender = orkunisitmak", "sender-permission >= admin"]
+pull_request_rules:
+  - name: "observe: sensitive paths require manual review"
+    disabled:
+      reason: "Awaiting Orkun's policy approval and GitHub App installation permission."
+    conditions:
+      - base = main
+      - -draft
+      - 'files ~= ^(?:api/|desktop/|supabase/|src/|scripts/|tests/|\.github/|\.coderabbit\.|\.mergify\.|package(?:-lock)?\.json$|.*(?:lock|\.ya?ml|\.toml|\.config\.[^/]+)$|SECURITY\.md$|AGENTS\.md$)'
+    actions:
+      label:
+        toggle: ["review/manual"]
+  - name: "observe: incomplete repository verification"
+    disabled:
+      reason: "Observation only; never bypass a missing, stale or unsuccessful CI job."
+    conditions:
+      - base = main
+      - -draft
+      - or:
+          - -check-success = @github-actions/web-and-local
+          - -check-success = @github-actions/macos (macos-15, arm64)
+          - -check-success = @github-actions/macos (macos-15-intel, x64)
+          - -check-success = @github-actions/windows
+          - check-stale ~= .*
+    actions:
+      label:
+        toggle: ["review/ci-blocked"]
+  - name: "observe: maintainer documentation candidate, not merge permission"
+    disabled:
+      reason: "No automatic lane is enabled; even a match still needs a maintainer decision."
+    conditions:
+      - base = main
+      - -draft
+      - author = orkunisitmak
+      - '#files > 0'
+      - 'files ~= ^docs/(?:en|tr)/(?:guide|faq)\.md$'
+      - '-files ~= ^(?!docs/(?:en|tr)/(?:guide|faq)\.md$)'
+      - check-success = @github-actions/web-and-local
+      - check-success = @github-actions/macos (macos-15, arm64)
+      - check-success = @github-actions/macos (macos-15-intel, x64)
+      - check-success = @github-actions/windows
+      - '-check-stale ~= .*'
+    actions:
+      label:
+        toggle: ["review/documentation-candidate"]

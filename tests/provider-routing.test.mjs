@@ -11,6 +11,8 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/lib/images/imageEditPixels.ts',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node'});
 const {compositeEditPixels} = await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const costCompiled = await build({entryPoints:[fileURLToPath(new URL('../src/lib/images/imageCostPreview.ts',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node'});
+const {getImageCostPreview} = await import('data:text/javascript;base64,'+Buffer.from(costCompiled.outputFiles[0].text).toString('base64'));
 import { LocalWorkspace } from '../desktop/server/store.mjs';
 import { createMediaUploader } from '../desktop/server/uploads.mjs';
 
@@ -93,4 +95,28 @@ test('OpenRouter local frame uploads use bytes without requiring an EvoLink or f
     const result=await prepare('openrouter',{imageUrls:[store.mediaUrl('refs/frame.png')]});
     assert.equal(result.imageUrls[0],'data:image/png;base64,'+Buffer.from('synthetic').toString('base64'));
   }finally{store.close();fs.rmSync(directory,{recursive:true,force:true});}
+});
+
+test('all image cost routes reject invalid counts before showing a billable estimate',()=>{
+  for(const imageModel of ['gpt-image-2.5-sunburst','gemini-nano-banana-2.1','gemini-3-pro-image-preview']) {
+    for(const count of [0,-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]) {
+      const preview=getImageCostPreview({imageModel,count,resolution:'1K',aspectRatio:'1:1',referenceImages:[]});
+      assert.equal(preview.min,null, imageModel+' '+count);
+      assert.equal(preview.max,null, imageModel+' '+count);
+      assert.equal(preview.basis,'unknown');
+      assert.match(preview.label,/valid image count/);
+    }
+  }
+});
+
+test('positive image counts retain provider-specific cost previews',()=>{
+  for(const imageModel of ['gpt-image-2.5-sunburst','gemini-nano-banana-2.1','gemini-3-pro-image-preview']) {
+    const config={imageModel,count:2,resolution:'1K',aspectRatio:'1:1',referenceImages:[]};
+    const preview=getImageCostPreview(config);
+    assert.equal(typeof preview.min,'number');
+    assert.ok(preview.min>0,imageModel);
+    assert.ok(preview.max>=preview.min,imageModel);
+    assert.notEqual(preview.basis,'unknown');
+    assert.deepEqual(getImageCostPreview({...config,count:0},2),preview);
+  }
 });

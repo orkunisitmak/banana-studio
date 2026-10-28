@@ -172,6 +172,7 @@ const AuthorizedWorkspace: React.FC<{
   // Generation progress tracking
   const [generationProgress, setGenerationProgress] = useState<{ completed: number; total: number } | null>(null);
   const ownImageJobsRef = useRef(new Set<string>());
+  const favoriteTogglesRef = useRef(new Set<string>());
 
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -1259,6 +1260,9 @@ const AuthorizedWorkspace: React.FC<{
   };
 
   const handleToggleFavorite = async (media: GeneratedMedia) => {
+    // A second optimistic toggle must not race the first request's rollback.
+    if (favoriteTogglesRef.current.has(media.id)) return;
+    favoriteTogglesRef.current.add(media.id);
     const newVal = !media.isFavorite;
     setGeneratedMedia(prev => prev.map(m => m.id === media.id ? { ...m, isFavorite: newVal } : m));
     try {
@@ -1267,6 +1271,8 @@ const AuthorizedWorkspace: React.FC<{
       console.error("Toggle favorite failed", e);
       // Revert on failure
       setGeneratedMedia(prev => prev.map(m => m.id === media.id ? { ...m, isFavorite: !newVal } : m));
+    } finally {
+      favoriteTogglesRef.current.delete(media.id);
     }
   };
 

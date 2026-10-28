@@ -48,13 +48,15 @@ export async function optimizeForYouTubeThumbnail(
     img.src = sourceUrlOrBlob;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error('Failed to load image for optimization'));
-  });
-
-  if (objectUrlToRevoke) {
-    URL.revokeObjectURL(objectUrlToRevoke);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Failed to load image for optimization'));
+    });
+  } finally {
+    if (objectUrlToRevoke) {
+      URL.revokeObjectURL(objectUrlToRevoke);
+    }
   }
 
   // 2. Set up high-performance offscreen canvas
@@ -131,6 +133,9 @@ export async function optimizeForYouTubeThumbnail(
   // Fallback to safe 0.70 quality if not reached
   if (!bestBlob) {
     bestBlob = await getBlob(0.7);
+  }
+  if (bestBlob.size > maxBytes) {
+    throw new Error(`Optimized thumbnail exceeds the ${maxBytes} byte limit`);
   }
 
   const dataUrl = URL.createObjectURL(bestBlob);

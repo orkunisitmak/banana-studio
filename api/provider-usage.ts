@@ -17,6 +17,9 @@ const FAL_IMAGE_ENDPOINTS = [
   'fal-ai/nano-banana-2/edit',
   'openai/gpt-image-2',
   'openai/gpt-image-2/edit',
+  // Provider routing can send Sunburst to fal (api/_lib/imageProviders.ts).
+  'openai/gpt-image-2.5/sunburst/text-to-image',
+  'openai/gpt-image-2.5/sunburst/edit',
 ];
 const FAL_VIDEO_ENDPOINTS = [
   ...Object.values(H3_MAX_ENDPOINTS),
@@ -25,6 +28,8 @@ const FAL_VIDEO_ENDPOINTS = [
   'minimax/h3/text-to-video',
   'minimax/h3/image-to-video',
   'minimax/h3/reference-to-video',
+  // Seedance routed to fal (src/lib/video/seedanceProviders.ts).
+  ...['seedance-2.0', 'seedance-2.5'].flatMap(model => ['text-to-video', 'image-to-video', 'reference-to-video'].map(mode => `bytedance/${model}/${mode}`)),
 ];
 const FAL_BILLING_ENDPOINTS = [...FAL_IMAGE_ENDPOINTS, ...FAL_VIDEO_ENDPOINTS];
 export const config = { maxDuration: 60 };

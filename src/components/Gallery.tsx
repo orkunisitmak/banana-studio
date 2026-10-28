@@ -1643,7 +1643,7 @@ export const Gallery: React.FC<GalleryProps> = ({
         if (!img) return;
         const response = await fetch(img.url);
         const blob = await response.blob();
-        zip.file(`nanogen-${id}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, blob);
+        zip.file(`banana-${id}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, blob);
       });
 
       await Promise.all(promises);
@@ -1651,7 +1651,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `nanogen-batch-${Date.now()}.zip`;
+      link.download = `banana-batch-${Date.now()}.zip`;
       link.click();
       window.URL.revokeObjectURL(url);
       setIsSelectionMode(false);
@@ -1698,7 +1698,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       const ext = media.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `nanogen-${media.id}.${ext}`;
+      a.download = `banana-${media.id}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1748,7 +1748,7 @@ export const Gallery: React.FC<GalleryProps> = ({
         const blobUrl = URL.createObjectURL(jpegBlob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = `nanogen-${media.id}.jpg`;
+        a.download = `banana-${media.id}.jpg`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

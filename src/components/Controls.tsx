@@ -1522,7 +1522,8 @@ export const Controls: React.FC<ControlsProps> = ({
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.repeat || (e as any).isComposing) return;
+      if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
       const isMod = e.metaKey || e.ctrlKey;
 
       // The open Brainstorm panel owns submission, including the shortcut.
@@ -1533,10 +1534,15 @@ export const Controls: React.FC<ControlsProps> = ({
           handleBrainstorm();
           return;
         }
-        const canGen = isH3VideoConfig ? !getH3MaxInputError(config) : config.prompt.trim() || config.referenceImages.length > 0;
-        if (canGen && activeRequests === 0 && !hasStaleEnhancedPrompt) {
+        if (canGenerate) {
           handleGenerate();
         }
+        return;
+      }
+
+      if (e.key === 'Escape' && isBrainstormPanelOpen) {
+        e.preventDefault();
+        setIsBrainstormPanelOpen(false);
         return;
       }
 
@@ -1705,6 +1711,15 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.defaultPrevented || e.repeat || e.nativeEvent.isComposing) return;
+    if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      if (canGenerate) {
+        e.preventDefault();
+        handleGenerate();
+      }
+      return;
+    }
     if (!h3PromptSupported) return;
     if (mentionState.active && (config.referenceImages.length > 0 || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0)) {
         const groupMentions = findPersonMentions(config.referenceImages, mentionState.query).map(group => ({ ...group, type: 'group' as const, count: group.images.length }));
@@ -1839,6 +1854,14 @@ export const Controls: React.FC<ControlsProps> = ({
     }
   }, [config, isSeedance25FrameToVideo, providerRoute.provider, onChange]);
 
+  const requiresSourceVideo = isVideoMode && selectedVideoModel !== 'minimax-h3' && selectedVideoOperation !== 'generate';
+  const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
+  const isSunburst = config.imageModel === SUNBURST_MODEL;
+  const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
+  const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
+    ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
+    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+
   if (isMinimized) {
     return (
         <div ref={generationBarRef} className="fixed bottom-4 left-1/2 z-[120] w-[calc(100%-32px)] max-w-[480px] -translate-x-1/2 sm:bottom-5 sm:w-auto">
@@ -1860,10 +1883,6 @@ export const Controls: React.FC<ControlsProps> = ({
     );
   }
 
-  const requiresSourceVideo = isVideoMode && selectedVideoModel !== 'minimax-h3' && selectedVideoOperation !== 'generate';
-  const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
-  const isSunburst = config.imageModel === SUNBURST_MODEL;
-  const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
   const modelInputError = routeInputError || h3InputError || sunburstError || (
     isH3VideoConfig ? null : isVideoMode
       ? requiresSourceVideo && !(config.referenceVideos?.length)
@@ -1894,9 +1913,6 @@ export const Controls: React.FC<ControlsProps> = ({
   const imageCostLabel = imageCostPreview.label;
   const brainstormImageCount = brainstormIdeaCount * config.count;
   const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, brainstormImageCount, imageCostHistory);
-  const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
-    ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
   // While jobs run the button keeps its lime surface so another generation can be
   // queued, so busy-state labels must stay dark there and only turn light on the
   // disabled gray surface.
@@ -2552,7 +2568,23 @@ export const Controls: React.FC<ControlsProps> = ({
                 
                 {/* YouTube Thumbnail Presets */}
                 <YouTubeThumbnailPresets
-                    onSelectPreset={presetPrompt => onChange({ ...config, prompt: presetPrompt, aspectRatio: '16:9' })}
+                    onSelectPreset={presetPrompt => onChange({
+                        ...config,
+                        prompt: presetPrompt,
+                        originalPrompt: undefined,
+                        promptPreparation: undefined,
+                        youtubeSource: undefined,
+                        enhancedForMode: undefined,
+                        enhancedForImageModel: undefined,
+                        enhancedForImageContextKey: undefined,
+                        enhancedForVideoModel: undefined,
+                        enhancedForVideoOperation: undefined,
+                        enhancedForVideoReferenceKey: undefined,
+                        enhancedForH3MaxMode: undefined,
+                        enhancedForH3MaxOptionsKey: undefined,
+                        aspectRatio: '16:9',
+                        mode: 'image'
+                    })}
                 />
 
                 {/* Template Button - Icon only */}

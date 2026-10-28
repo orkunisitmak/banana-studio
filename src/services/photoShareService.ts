@@ -132,7 +132,7 @@ export const preparePhotosForSharing = async (media: PhotoSource[], options: Pre
       totalBytes += blob.size;
       const safeId = item.id.replace(/[^a-z0-9_-]/gi, '').slice(0, 80) || 'photo';
       // Original bytes and resolution are retained; no canvas or re-encoding.
-      files.push(new File([blob], `nanogen-${files.length + 1}-${safeId}.${format.extension}`, { type: format.mime }));
+      files.push(new File([blob], `banana-${files.length + 1}-${safeId}.${format.extension}`, { type: format.mime }));
       options.onProgress?.(files.length, media.length);
     }
     const nav = options.navigator || currentNavigator();

@@ -56,6 +56,14 @@ const referenceKey = (references: GenerationConfig['referenceImages']): string |
 
 type CostConfig = Pick<GenerationConfig, 'imageProvider' | 'imageModel' | 'resolution' | 'aspectRatio' | 'openaiImageOptions' | 'referenceImages' | 'count'>;
 export const getImageCostPreview = (config: CostConfig, count = config.count, history: ImageCostSample[] = []): ImageCostPreview => {
+  // Reject invalid draft counts before selecting a provider-specific estimator.
+  // Otherwise zero, fractional, negative or non-finite counts can display a
+  // misleading $0 or negative price for a potentially billable operation.
+  if (!Number.isSafeInteger(count) || count < 1) {
+    return { min: null, max: null, label: 'Choose valid image count',
+      description: 'Choose a positive whole number of images before estimating generation cost.',
+      note: '', basis: 'unknown' };
+  }
   if (config.imageProvider && config.imageProvider !== (config.imageModel === SUNBURST_MODEL ? 'openai' : 'fal')) return { min: null, max: null, label: 'Provider usage-based', description: 'This route uses the selected provider’s billing. Actual cost is shown when returned; another provider’s estimate is not used.', note: '', basis: 'unknown' };
   if (config.imageModel === NANO_BANANA_21_MODEL) {
     const cost = estimateNanoBanana21OutputCost(config.resolution, count);

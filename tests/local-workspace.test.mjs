@@ -79,3 +79,15 @@ test('loopback server requires native bootstrap, cookie, exact host and mutation
     await f.store.upload('example.mp4',Buffer.from('0123456789'));const part=await fetch(f.store.mediaUrl('example.mp4'),{headers:{...headers,Range:'bytes=2-4'}});assert.equal(part.status,206);assert.equal(await part.text(),'234');
   }finally{if(local)await local.close();f.store.close();f.cleanup();}
 });
+test('JSON metadata compare-and-swap matches by value like PostgREST jsonb and rejects stale snapshots',async()=>{
+  const f=fixture();try{
+    const db=f.store.client(true),metadata={falEndpoint:'minimax/h3-max/text-to-video',nested:{b:2,a:[1,{y:1,x:0}]}};
+    await db.from('generations').insert({id:'g',type:'video',status:'processing',task_id:'t',metadata});
+    const saved=await db.from('generations').update({status:'failed',metadata:{...metadata,error:'x'}}).eq('id','g').eq('status','processing').eq('metadata',JSON.stringify(metadata)).select('id').maybeSingle();
+    assert.deepEqual(saved.data,{id:'g'});assert.equal(f.store.get('generations','g').status,'failed');
+    assert.equal((await db.from('generations').update({status:'processing'}).eq('id','g').eq('metadata',JSON.stringify(metadata)).select('id').maybeSingle()).data,null);
+    assert.equal((await db.from('generations').select('id').eq('metadata',JSON.stringify({error:'x',nested:{a:[1,{x:0,y:1}],b:2},falEndpoint:metadata.falEndpoint}))).data.length,1);
+    assert.equal((await db.from('generations').select('id').eq('metadata','{not json')).data.length,0);
+    assert.equal((await db.from('generations').select('id').eq('status','"failed"')).data.length,0);
+  } finally{f.store.close();f.cleanup();}
+});

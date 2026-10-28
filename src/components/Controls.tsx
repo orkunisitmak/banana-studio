@@ -403,6 +403,18 @@ export const Controls: React.FC<ControlsProps> = ({
     ? getOriginalImagePrompt(config.prompt, config.originalPrompt)
     : config.originalPrompt) ?? null;
   const [isMinimized, setIsMinimized] = useState(false);
+  // The visible bar slides out first; the swap happens once the exit animation ends.
+  const [isBarLeaving, setIsBarLeaving] = useState(false);
+  const barSwapTimerRef = useRef<number>();
+  useEffect(() => () => window.clearTimeout(barSwapTimerRef.current), []);
+  const swapBar = (minimized: boolean) => {
+    if (isBarLeaving) return;
+    hideRefPreview();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setIsMinimized(minimized); return; }
+    setIsBarLeaving(true);
+    barSwapTimerRef.current = window.setTimeout(() => { setIsMinimized(minimized); setIsBarLeaving(false); }, 260);
+  };
+  const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
   const lastPromptLoadRef = useRef(0);
   useLayoutEffect(() => {
     if (lastPromptLoadRef.current === promptLoadVersion) return;
@@ -481,6 +493,15 @@ export const Controls: React.FC<ControlsProps> = ({
   const [isRefGalleryOpen, setIsRefGalleryOpen] = useState(false);
   const [refGalleryTab, setRefGalleryTab] = useState<'images' | 'people'>('images');
   const [draggedRefId, setDraggedRefId] = useState<string | null>(null);
+  // A short hover dwell opens an enlarged reference preview above the thumbnail.
+  const [refPreview, setRefPreview] = useState<{ src: string; rect: DOMRect } | null>(null);
+  const refPreviewTimerRef = useRef<number>();
+  const showRefPreview = (src: string, target: HTMLElement) => {
+    window.clearTimeout(refPreviewTimerRef.current);
+    refPreviewTimerRef.current = window.setTimeout(() => setRefPreview({ src, rect: target.getBoundingClientRect() }), 450);
+  };
+  const hideRefPreview = () => { window.clearTimeout(refPreviewTimerRef.current); setRefPreview(null); };
+  useEffect(() => () => window.clearTimeout(refPreviewTimerRef.current), []);
   const [isDraggingToGallery, setIsDraggingToGallery] = useState(false);
   const [isDraggingSavedRef, setIsDraggingSavedRef] = useState(false); // New state for visual feedback
   const [draggedGalleryItem, setDraggedGalleryItem] = useState<SavedReferenceImage | null>(null); // Track gallery item being dragged
@@ -931,10 +952,12 @@ export const Controls: React.FC<ControlsProps> = ({
     }
   };
 
-  const handleRemoveImage = (imageId: string) => {
+  // onlyThisPhoto keeps the rest of a person group; its last photo still removes the group.
+  const handleRemoveImage = (imageId: string, onlyThisPhoto = false) => {
     const removedImage = config.referenceImages.find(img => img.id === imageId);
     if (!removedImage) return;
-    const personId = getPersonId(removedImage);
+    const groupId = getPersonId(removedImage);
+    const personId = onlyThisPhoto && groupId != null && config.referenceImages.some(image => image.id !== imageId && getPersonId(image) === groupId) ? undefined : groupId;
     const images = config.referenceImages.filter(image => personId != null ? getPersonId(image) === personId : image.id === imageId);
     const removedIds = new Set<string>(images.map(image => image.id));
     const definitions = getPersonDefinitions(config);
@@ -1524,6 +1547,14 @@ export const Controls: React.FC<ControlsProps> = ({
       if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
       const isMod = e.metaKey || e.ctrlKey;
 
+      // ⌘. / Ctrl+. hides or restores the generation bar, unless the area editor is open.
+      if (isMod && !e.shiftKey && !e.altKey && e.key === '.') {
+        if (e.repeat || document.querySelector?.('[data-gallery-image-editor]')) return;
+        e.preventDefault();
+        swapBar(!isMinimized);
+        return;
+      }
+
       // The open Brainstorm panel owns submission, including the shortcut.
       if (isMod && e.key === 'Enter') {
         if (document.querySelector?.('[data-gallery-image-editor]')) return;
@@ -1863,14 +1894,14 @@ export const Controls: React.FC<ControlsProps> = ({
   if (isMinimized) {
     return (
         <div ref={generationBarRef} className="fixed bottom-4 left-1/2 z-[120] w-[calc(100%-32px)] max-w-[480px] -translate-x-1/2 sm:bottom-5 sm:w-auto">
-            <button onClick={() => setIsMinimized(false)} className="group flex h-16 w-full min-w-0 items-center justify-between gap-3 rounded-[1.4rem] border border-white/[0.1] bg-[#121821]/95 py-2 pl-2.5 pr-3.5 shadow-[0_18px_64px_rgba(0,0,0,0.58),0_0_0_1px_rgba(139,92,246,0.04)] backdrop-blur-2xl transition-all hover:-translate-y-0.5 hover:border-violet-400/25 hover:bg-[#171e29] animate-in slide-in-from-bottom-2 sm:min-w-[380px] sm:px-3">
+            <button onClick={() => swapBar(false)} className={`group flex h-16 w-full min-w-0 items-center justify-between gap-3 rounded-[1.4rem] border border-white/[0.1] bg-[#121821]/95 py-2 pl-2.5 pr-3.5 shadow-[0_18px_64px_rgba(0,0,0,0.58),0_0_0_1px_rgba(139,92,246,0.04)] backdrop-blur-2xl transition-all hover:-translate-y-0.5 hover:border-violet-400/25 hover:bg-[#171e29] ${isBarLeaving ? 'pointer-events-none animate-bar-out' : 'animate-bar-in'} motion-reduce:animate-none sm:min-w-[380px] sm:px-3`}>
                 <div className="flex min-w-0 items-center gap-3">
                     <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${activeRequests > 0 ? 'border-violet-400/25 bg-violet-500/15 text-violet-300' : 'border-lime-400/20 bg-lime-500/10 text-lime-300'}`}>
                       {activeRequests > 0 ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
                     </div>
                     <div className="min-w-0 text-left">
                       <span className="block truncate text-sm font-semibold text-white">{activeRequests > 0 ? `${activeRequests} generation${activeRequests === 1 ? '' : 's'} running` : 'Generation bar'}</span>
-                      <span className="block text-xs text-gray-500">Tap to expand controls</span>
+                      <span className="block text-xs text-gray-500">Tap to expand controls · {shortcutModifier}.</span>
                     </div>
                 </div>
                 <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/[0.04] text-gray-500 transition-colors group-hover:bg-white/[0.07] group-hover:text-white">
@@ -1992,7 +2023,7 @@ export const Controls: React.FC<ControlsProps> = ({
           setGenerationError(null);
         }}
       />}
-      <div className={`${PROMPT_PANEL_CLASS} rounded-t-[1.6rem] rounded-b-none border border-x-0 border-b-0 pb-[max(0.625rem,env(safe-area-inset-bottom))] animate-in slide-in-from-bottom duration-300 sm:rounded-[1.6rem] sm:border ${
+      <div className={`${PROMPT_PANEL_CLASS} rounded-t-[1.6rem] rounded-b-none border border-x-0 border-b-0 pb-[max(0.625rem,env(safe-area-inset-bottom))] ${isBarLeaving ? 'pointer-events-none animate-bar-out' : 'animate-bar-in'} motion-reduce:animate-none sm:rounded-[1.6rem] sm:border ${
           (isDragging || isDraggingSavedRef) ? 'border-violet-400/70 bg-violet-950/80' : 'border-white/[0.09]'
       }`}>
         
@@ -2011,9 +2042,10 @@ export const Controls: React.FC<ControlsProps> = ({
         {/* Minimize Tab */}
         <div className="absolute left-1/2 top-px flex -translate-x-1/2 -translate-y-full items-end gap-1">
             <button 
-                onClick={() => setIsMinimized(true)}
+                onClick={() => swapBar(true)}
                 className="group flex h-7 items-center gap-1.5 rounded-t-xl border border-b-0 border-white/[0.09] bg-[#121821]/95 px-3 text-gray-500 shadow-[0_-8px_22px_rgba(0,0,0,0.2)] backdrop-blur-xl transition-colors hover:text-white"
                 aria-label="Minimize generation bar"
+                title={`Hide (${shortcutModifier}.)`}
             >
                 <span className="text-[9px] font-bold uppercase tracking-[0.14em] transition-colors group-hover:text-violet-300">Hide</span>
                 <ChevronDown className="h-3 w-3" />
@@ -2132,8 +2164,11 @@ export const Controls: React.FC<ControlsProps> = ({
                     <div
                         key={img.id}
                         draggable
-                        onDragStart={(e) => { handleDragStart(e, img, index); closeRefPopover(); }}
+                        onDragStart={(e) => { hideRefPreview(); handleDragStart(e, img, index); closeRefPopover(); }}
                         onDragEnd={handleDragEnd}
+                        onMouseEnter={(e) => { if (!draggedRefId) showRefPreview(img.data, e.currentTarget); }}
+                        onMouseLeave={hideRefPreview}
+                        onMouseDown={hideRefPreview}
                         onClick={(e) => openRefPopover('image', img.id, e)}
                         className={`relative w-12 h-12 rounded-lg bg-gray-800 overflow-hidden group shrink-0 shadow-lg border-2 transition-colors cursor-pointer active:cursor-grabbing ${
                             isVideoMode
@@ -2170,7 +2205,18 @@ export const Controls: React.FC<ControlsProps> = ({
                           </div>
                         )}
                         {!isVideoMode && img.isVideoContext && !getPersonId(img) && <div className="pointer-events-none absolute left-0 top-0 rounded-br bg-red-600 px-1 py-0.5 text-[7px] font-bold text-white">YT</div>}
-                        {!isVideoMode && img.editRegion && <div className="pointer-events-none absolute right-0 top-0 rounded-bl bg-emerald-500 px-1 py-0.5 text-[7px] font-bold text-black">MASK</div>}
+                        {!isVideoMode && img.editRegion && <div className="pointer-events-none absolute bottom-0 left-0 rounded-tr bg-emerald-500 px-1 py-0.5 text-[7px] font-bold text-black">MASK</div>}
+                        <button
+                          type="button"
+                          draggable={false}
+                          aria-label={`Remove reference ${index + 1}`}
+                          title="Remove"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); hideRefPreview(); handleRemoveImage(img.id, true); closeRefPopover(); }}
+                          className="absolute right-0.5 top-0.5 z-10 grid h-[15px] w-[15px] place-items-center rounded-full bg-black/45 text-white/90 ring-[0.5px] ring-white/25 backdrop-blur-md transition-colors duration-150 hover:bg-red-500/90 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                          <X className="h-[9px] w-[9px]" strokeWidth={2.75} />
+                        </button>
                     </div>
                 ))}
 
@@ -2210,6 +2256,17 @@ export const Controls: React.FC<ControlsProps> = ({
                     </div>
                 ))}
             </div>
+
+            {refPreview && !activeRefPopover && createPortal(
+              <img
+                src={refPreview.src}
+                alt=""
+                aria-hidden
+                className="pointer-events-none fixed z-[200] max-h-[min(260px,45vh)] max-w-[260px] -translate-x-1/2 -translate-y-full rounded-xl object-contain shadow-[0_18px_50px_rgba(0,0,0,0.55)] ring-1 ring-white/15 animate-preview-in motion-reduce:animate-none"
+                style={{ left: Math.min(Math.max(refPreview.rect.left + refPreview.rect.width / 2, 140), window.innerWidth - 140), top: refPreview.rect.top - 10 }}
+              />,
+              document.body,
+            )}
 
             {/* Reference Tile Action Popover */}
             {activeRefPopover && (() => {

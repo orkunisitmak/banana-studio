@@ -42,5 +42,12 @@ enum KeyVault {
         for key in ProviderKey.allCases { if let value = try read(key) { values[key.rawValue] = value } }
         return values
     }
+    /// First and last four characters around a fixed run of dots, so the preview never reveals the key length.
+    /// Keys shorter than 16 characters are fully masked so most of the secret stays hidden.
+    static func masked(_ value: String) -> String {
+        let dots = String(repeating: "•", count: 8)
+        guard value.count >= 16 else { return dots }
+        return "\(value.prefix(4))\(dots)\(value.suffix(4))"
+    }
     enum VaultError: Error { case unavailable, invalid }
 }

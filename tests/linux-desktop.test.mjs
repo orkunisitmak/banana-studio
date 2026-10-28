@@ -257,7 +257,7 @@ test('vault classifies read, decryption and malformed-data failures without disc
   const ciphertext = Buffer.from('synthetic-ciphertext');
   const storage = { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => 'kwallet6' };
   const vault = new Vault(directory, storage);
-  const check = pattern => assert.throws(() => vault.read(), error => {
+  const check = (pattern, read = () => vault.read()) => assert.throws(read, error => {
     assert.ok(error instanceof VaultReadError);
     assert.match(error.message, pattern);
     assert.ok(!String(error).includes(privateValue));
@@ -274,8 +274,18 @@ test('vault classifies read, decryption and malformed-data failures without disc
       storage.decryptString = () => plaintext;
       check(/contain invalid data/);
     }
-    vault.file = path.join(vault.file, 'not-a-directory');
-    assert.throws(() => vault.read(), { name: 'VaultReadError', message: /could not be read/ });
+    const originalOpenSync = fs.openSync;
+    check(/could not be read/, () => {
+      try {
+        fs.openSync = (file, ...args) => {
+          if (file === vault.file) throw Object.assign(new Error(privateValue + directory), { code: 'EACCES' });
+          return originalOpenSync(file, ...args);
+        };
+        return vault.read();
+      } finally { fs.openSync = originalOpenSync; }
+    });
     assert.deepEqual(fs.readdirSync(directory), ['provider-keys.enc']);
+    fs.unlinkSync(vault.file);
+    assert.deepEqual(vault.read(), {});
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

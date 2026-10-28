@@ -76,7 +76,7 @@ export const translations = {
       subtitle: 'Kendi sunucunuzda çalışan yerel AI medya stüdyosu',
       localWorkspace: 'Yerel Çalışma Alanı · Bu bilgisayar',
       yourWorkspace: 'Çalışma Alanınız',
-      offline: 'Çevrimdışısınız. Kayıtlı çalışmalarınız kullanılabilir, ancak yeni isteklere bağlantınız geri gelene kadar beklenir.',
+      offline: 'Çevrimdışısınız. Kayıtlı çalışmalarınız kullanılabilir, ancak yeni isteklere bağlantınız geri gelene kadar bekletilir.',
       retryConnection: 'Bağlantıyı yeniden dene',
     },
     nav: {

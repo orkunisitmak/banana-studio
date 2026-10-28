@@ -138,7 +138,12 @@ export async function optimizeForYouTubeThumbnail(
     throw new Error(`Optimized thumbnail exceeds the ${maxBytes} byte limit`);
   }
 
-  const dataUrl = URL.createObjectURL(bestBlob);
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read optimized thumbnail'));
+    reader.readAsDataURL(bestBlob);
+  });
   const originalSize = sourceUrlOrBlob instanceof Blob ? sourceUrlOrBlob.size : bestBlob.size;
 
   return {

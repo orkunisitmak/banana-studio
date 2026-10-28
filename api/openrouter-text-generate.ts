@@ -5,12 +5,13 @@ import { startOpenAIRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost, isOpenRouterReasoningEffort, openRouterErrorMessage } from '../src/lib/prompts/openrouterText.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
+import { enforceDailyGenerationQuota } from './_lib/generationQuota.js';
 
 export const config = { maxDuration: 300 };
 const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res); res.setHeader('Cache-Control', 'no-store');
+  if (!applyCors(req, res)) return; res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const auth = createTaskDeadline(15_000);
@@ -62,6 +63,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (streaming) { send({ type: 'error', error }); return res.end(); }
     return res.status(status).json({ error });
   };
+  if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res)) {
+    await guard.finish('failed', null, 429);
+    return;
+  }
   if (streaming) {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8'); res.setHeader('X-Accel-Buffering', 'no');
     res.on('close', close); send({ type: 'status', stage: 'generating' });
@@ -72,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const analysis = body.outputFormat === 'youtube_analysis';
   const format = analysis ? YOUTUBE_ANALYSIS_FORMAT : usageContext.action === 'brainstorm' ? buildBrainstormOutputFormat(wardrobe, body.brainstormCount) : undefined;
   try {
-    const response = await waitForTask(fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await waitForTask(fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST', redirect: 'error',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-OpenRouter-Title': 'Banana Studio' },
       body: JSON.stringify({ model: upstreamModel,

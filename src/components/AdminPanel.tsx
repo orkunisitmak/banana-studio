@@ -1,7 +1,7 @@
 import { H3_MAX_MODE_OPTIONS } from '../lib/video/h3Max';
 import { H3_MAX_OUTPUT_RATES } from '../lib/video/h3MaxPricing';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Loader2, Image as ImageIcon, DollarSign, BarChart3, RefreshCw, ShieldCheck, Plus, Trash2, Mail, Settings, Video, Wand2, ExternalLink, ChevronDown } from 'lucide-react';
+import { X, Loader2, Image as ImageIcon, DollarSign, BarChart3, RefreshCw, ShieldCheck, Plus, Trash2, Mail, Settings, Video, Wand2, ExternalLink, ChevronDown, History } from 'lucide-react';
 import { AdminUserSummary, VideoQuality, getEvoLinkVideoPricing, isSeedance25PromoActive } from '../types';
 import {
   getAdminUsageSummary,
@@ -16,9 +16,10 @@ import {
 import { TextModelSettings } from './TextModelSettings';
 import { AdminModelUsage, AdminProviderUsage } from './AdminModelUsage';
 import { AdminUsageFilter } from './AdminUsageFilter';
+import { AdminAuditTab } from './AdminAuditTab';
 import { AdminUsagePeriod, resolveAdminUsageRange } from '../lib/admin/adminUsageRange';
 
-type AdminTab = 'usage' | 'access' | 'settings';
+type AdminTab = 'usage' | 'access' | 'audit' | 'settings';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -71,7 +72,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
 
   useEffect(() => {
     if (!isOpen) return;
-    if (activeTab === 'settings') { setIsLoading(false); return; }
+    if (activeTab === 'settings' || activeTab === 'audit') { setIsLoading(false); return; }
     let current = true;
     setIsLoading(true);
     if (activeTab === 'usage') setUsageError(null);
@@ -204,7 +205,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
         </div>
 
         {/* Tabs */}
-        <div className="grid grid-cols-3 sm:flex shrink-0 border-b border-gray-800 px-2 sm:px-6" aria-label="Admin sections">
+        <div className="grid grid-cols-4 sm:flex shrink-0 border-b border-gray-800 px-2 sm:px-6" aria-label="Admin sections">
           <button
             onClick={() => setActiveTab('usage')}
             aria-pressed={activeTab === 'usage'}
@@ -237,6 +238,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
             </span>
           </button>
           <button
+            onClick={() => setActiveTab('audit')}
+            aria-pressed={activeTab === 'audit'}
+            className={`min-w-0 px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'audit'
+                ? 'border-violet-400 text-violet-400'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <span className="flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap">
+              <History className="w-4 h-4 shrink-0" />
+              Audit
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             aria-pressed={activeTab === 'settings'}
             className={`min-w-0 px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors ${
@@ -254,7 +269,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
 
         <div key={activeTab} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
         {activeTab === 'usage' && <AdminUsageFilter period={usagePeriod} range={usageRange} onChange={setUsagePeriod} />}
-        {isLoading ? (
+        {activeTab === 'audit' ? (
+          <AdminAuditTab refreshVersion={refreshVersion} />
+        ) : isLoading ? (
           <div role="status" className="flex-1 flex items-center justify-center gap-3 p-12 text-sm text-gray-400">
             <Loader2 className="w-8 h-8 text-violet-400 animate-spin" /> Loading {activeTab === 'usage' ? 'usage' : 'users'}…
           </div>

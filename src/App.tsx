@@ -6,11 +6,20 @@ import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AuthBoundary } from './components/AuthBoundary';
 import { startTextPreferencesSync } from './services/textPreferencesService';
-import { AdminPanel } from './components/AdminPanel';
+const AdminPanel = React.lazy(() => import('./components/AdminPanel').then(module => ({ default: module.AdminPanel })));
 import { useToast } from './components/Toast';
+import { useWorkspaceSession } from './hooks/useWorkspaceSession';
+import { useGalleryHash } from './hooks/useGalleryHash';
+import { requestNotificationPermission, useJobNotifications } from './hooks/useJobNotifications';
+import { ModelPlayground } from './components/ModelPlayground';
+import { BrandKitDialog } from './components/BrandKitDialog';
+import { DEFAULT_BRAND_KIT, loadBrandKit, saveBrandKit, type BrandKit } from './lib/brand/kit';
+import { LazyBoundary } from './components/LazyBoundary';
+import { clearPromptHistory, loadPromptHistory, recordPromptHistory, type PromptHistoryEntry } from './lib/prompts/promptHistoryStore';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
 import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
 import * as workspaceStorage from './services/storageService';
+import { recordAuditEvent } from './services/auditService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
@@ -19,11 +28,12 @@ import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
 import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
 import { getSeedanceFrameError } from './lib/video/seedanceFrames';
-import { getSession, supabase } from './services/authService';
+import { supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxMode } from './lib/video/h3MaxConfig';
 import { parseErrorMessage } from './services/generationErrors';
 import { mergePersonReferenceInputs } from './lib/references/personReferences';
+import { resolveStableImageReferences } from './lib/references/referenceTokens';
 import { createRecreateConfig, mergeRecreateHydration } from './lib/gallery/recreateDraft';
 import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
@@ -37,7 +47,7 @@ const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => ge
 
 const mergeSavedMedia = (
   media: GeneratedMedia,
-  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string }
+  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | null
 ): GeneratedMedia => {
   if (!savedResult) return media;
 
@@ -87,22 +97,7 @@ const AuthorizedWorkspace: React.FC<{
 }> = ({ userId, userProfile, onSignOut }) => {
   useEffect(() => startTextPreferencesSync(userId), [userId]);
   const isAuthenticated = true;
-  const workspaceActive = useRef(true);
-  useEffect(() => {
-    workspaceActive.current = true;
-    return () => { workspaceActive.current = false; };
-  }, []);
-  const assertWorkspaceSession = async () => {
-    const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new Error('Session changed. Sign in again to continue.');
-  };
-  const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
-    async (...args: Args): Promise<Result> => {
-      await assertWorkspaceSession();
-      const result = await operation(...args);
-      await assertWorkspaceSession();
-      return result;
-    };
+  const { workspaceActive, assertWorkspaceSession, withWorkspaceSession } = useWorkspaceSession(userId);
   const saveImage = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveImage(media, userId));
   const saveVideo = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveVideo(media, userId));
   const getImages = withWorkspaceSession(workspaceStorage.getImages);
@@ -136,6 +131,7 @@ const AuthorizedWorkspace: React.FC<{
 
   // Track how many requests are currently active
   const [activeRequests, setActiveRequests] = useState<number>(0);
+  useJobNotifications(activeRequests);
   const [isBrainstormPreparing, setIsBrainstormPreparing] = useState(false);
   const [promptLoadVersion, setPromptLoadVersion] = useState(0);
   const recreateLoadIdRef = useRef(0);
@@ -159,6 +155,10 @@ const AuthorizedWorkspace: React.FC<{
   const [generatedMedia, setGeneratedMedia] = useState<GeneratedMedia[]>([]);
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [promptHistory, setPromptHistory] = useState<PromptHistoryEntry[]>([]);
+  const [brandKit, setBrandKit] = useState<BrandKit>(DEFAULT_BRAND_KIT);
+  const [isBrandKitOpen, setIsBrandKitOpen] = useState(false);
+  const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);
   const [isGalleryIndexLoading, setIsGalleryIndexLoading] = useState(false);
   const [galleryHistoryError, setGalleryHistoryError] = useState<string | null>(null);
@@ -173,37 +173,7 @@ const AuthorizedWorkspace: React.FC<{
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
 
-  // --- URL Hash Sync ---
-  // Restore state from hash on mount
-  useEffect(() => {
-    const parseHash = () => {
-      const params = new URLSearchParams(window.location.hash.slice(1));
-      const folder = params.get('folder') || null;
-      const image = params.get('image') || null;
-      setCurrentFolderId(folder);
-      setSelectedImageId(image);
-    };
-    parseHash();
-    window.addEventListener('popstate', parseHash);
-    return () => window.removeEventListener('popstate', parseHash);
-  }, []);
-
-  // Push hash when navigation state changes (skip the initial mount)
-  const isInitialMount = useRef(true);
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    const params = new URLSearchParams();
-    if (currentFolderId) params.set('folder', currentFolderId);
-    if (selectedImageId) params.set('image', selectedImageId);
-    const hash = params.toString();
-    const newHash = hash ? `#${hash}` : window.location.pathname;
-    if (window.location.hash.slice(1) !== hash) {
-      window.history.pushState(null, '', newHash);
-    }
-  }, [currentFolderId, selectedImageId]);
+  useGalleryHash(currentFolderId, selectedImageId, setCurrentFolderId, setSelectedImageId);
 
   // Toast notifications
   const toast = useToast();
@@ -282,6 +252,8 @@ const AuthorizedWorkspace: React.FC<{
 
         setGeneratedMedia(current => mergeLoadedGalleryHistory(current, migratedHistory, historyLoadStartedAt));
         setTemplates(normalizedTemplates);
+        setPromptHistory(loadPromptHistory(userId));
+        setBrandKit(loadBrandKit(userId));
         
         // Resume pending/processing videos and recover rows that were marked
         // failed only because the provider status endpoint returned a transient
@@ -810,6 +782,7 @@ const AuthorizedWorkspace: React.FC<{
   };
 
   const handleGenerate = async (requestConfig: GenerationConfig = config, fromEditor = false) => {
+    requestNotificationPermission();
     if (!fromEditor && recreateLoadingRef.current !== null) {
       toast.info('Loading saved references', 'Wait for the saved references to finish loading before generating.');
       return;
@@ -824,6 +797,7 @@ const AuthorizedWorkspace: React.FC<{
       toast.warning('Re-enhance Required', 'The model, action, or references changed after Enhance. Revert to the original prompt, then Enhance again.');
       return;
     }
+    if (!fromEditor && config.prompt.trim()) setPromptHistory(recordPromptHistory(userId, config));
 
     // Video generation flow -- persists to DB immediately
     if (config.mode === 'video') {
@@ -1235,6 +1209,7 @@ const AuthorizedWorkspace: React.FC<{
     setGeneratedMedia(prev => prev.filter(m => m.id !== media.id));
     try {
       await deleteImage(media);
+      void recordAuditEvent({ action: 'media.deleted', targetType: 'media', targetId: media.id }).catch(() => {});
     } catch (e) {
       console.error("Delete failed", e);
       toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
@@ -1246,6 +1221,11 @@ const AuthorizedWorkspace: React.FC<{
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
     try {
       await deleteImages(toDelete);
+      void recordAuditEvent({
+        action: 'media.deleted',
+        targetType: 'media',
+        metadata: { count: toDelete.length, ids: toDelete.slice(0, 20).map(media => media.id) },
+      }).catch(() => {});
       toast.success('Images Deleted', `${toDelete.length} image${toDelete.length > 1 ? 's' : ''} removed.`);
     } catch (e) {
       console.error("Batch delete failed", e);
@@ -1295,6 +1275,12 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  const handleUpdateTags = useCallback(async (id: string, tags: string[]) => {
+    if (adminGalleryUser) throw new Error('This gallery is read-only.');
+    const normalized = await withWorkspaceSession(workspaceStorage.updateMediaTags)(id, tags, userProfile?.id);
+    setGeneratedMedia(prev => prev.map(item => item.id === id ? { ...item, tags: normalized } : item));
+  }, [adminGalleryUser, userProfile?.id, withWorkspaceSession]);
+
   const handleMoveFolder = async (folderId: string, targetParentId: string | null) => {
     try {
       await moveFolderToFolder(folderId, targetParentId);
@@ -1310,6 +1296,12 @@ const AuthorizedWorkspace: React.FC<{
       const result = await deleteFolder(folderId);
       const deletedMediaIds = new Set(result.mediaIds);
       setGeneratedMedia(prev => prev.filter(media => !deletedMediaIds.has(media.id)));
+      void recordAuditEvent({
+        action: 'folder.deleted',
+        targetType: 'folder',
+        targetId: folderId,
+        metadata: { folders: result.folderIds.length, media: result.mediaIds.length },
+      }).catch(() => {});
       toast.success(
         'Folder Deleted',
         `${result.folderIds.length} folder${result.folderIds.length === 1 ? '' : 's'} and ${result.mediaIds.length} item${result.mediaIds.length === 1 ? '' : 's'} permanently deleted.`
@@ -1678,6 +1670,58 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  const handleSelectPromptHistory = (entry: PromptHistoryEntry) => {
+    if (config.mode === 'image' && entry.prompt.includes('@REFERENCE[')) {
+      try {
+        resolveStableImageReferences(entry.prompt, config.referenceImages);
+      } catch {
+        toast.warning('Reference missing', 'The restored prompt mentions a reference that is no longer attached. Re-add it or remove the tag before generating.');
+      }
+    }
+    setConfig(prev => ({
+      ...prev,
+      prompt: entry.prompt,
+      originalPrompt: undefined,
+      promptPreparation: undefined,
+      enhancedForMode: undefined,
+      enhancedForImageModel: undefined,
+      enhancedForImageContextKey: undefined,
+      enhancedForVideoModel: undefined,
+      enhancedForVideoOperation: undefined,
+      enhancedForVideoReferenceKey: undefined,
+      enhancedForH3MaxMode: undefined,
+      enhancedForH3MaxOptionsKey: undefined,
+    }));
+  };
+
+  const handleClearPromptHistory = () => setPromptHistory(clearPromptHistory(userId));
+
+  const handleSaveBrandKit = (kit: BrandKit) => {
+    setBrandKit(saveBrandKit(userId, kit));
+    toast.success('Brand kit saved', 'Export presets and contact sheets now use it.');
+  };
+
+  const handleApplyPlayground = (patch: Partial<GenerationConfig>) => {
+    setConfig(prev => ({
+      ...prev,
+      ...patch,
+      ...(patch.prompt !== undefined && patch.prompt !== prev.prompt ? {
+        originalPrompt: undefined,
+        promptPreparation: undefined,
+        enhancedForMode: undefined,
+        enhancedForImageModel: undefined,
+        enhancedForImageContextKey: undefined,
+        enhancedForVideoModel: undefined,
+        enhancedForVideoOperation: undefined,
+        enhancedForVideoReferenceKey: undefined,
+        enhancedForH3MaxMode: undefined,
+        enhancedForH3MaxOptionsKey: undefined,
+      } : {}),
+    }));
+    setIsPlaygroundOpen(false);
+    toast.success('Playground applied', 'Model and settings loaded into the composer.');
+  };
+
   const handleSelectTemplate = (template: Template) => {
     try {
       const imageModel = resolveImageModel(template.config.imageModel ?? config.imageModel);
@@ -1716,16 +1760,39 @@ const AuthorizedWorkspace: React.FC<{
   return (
     <div className="relative h-screen w-full bg-[#0d1117] text-white font-sans selection:bg-violet-500/30 flex flex-col overflow-hidden">
 
-      <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onSignOut={handleSignOut} />
+      <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onOpenPlayground={() => setIsPlaygroundOpen(true)} onOpenBrandKit={() => setIsBrandKitOpen(true)} onSignOut={handleSignOut} />
       {/* Admin Panel */}
-      {!isLocalWorkspace() && userProfile?.role === 'admin' && <AdminPanel
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
-        onViewUserGallery={handleViewUserGallery}
-        onBillingReconciled={refreshReconciledGalleryBilling}
-      />}
+      {!isLocalWorkspace() && userProfile?.role === 'admin' && isAdminPanelOpen && (
+        <LazyBoundary label="Workspace admin" onDismiss={() => setIsAdminPanelOpen(false)}>
+          <React.Suspense fallback={null}>
+            <AdminPanel
+              isOpen={isAdminPanelOpen}
+              onClose={() => setIsAdminPanelOpen(false)}
+              onViewUserGallery={handleViewUserGallery}
+              onBillingReconciled={refreshReconciledGalleryBilling}
+            />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
+
+      <ModelPlayground
+        open={isPlaygroundOpen}
+        config={config}
+        images={generatedMedia}
+        onClose={() => setIsPlaygroundOpen(false)}
+        onApply={handleApplyPlayground}
+      />
+
+      {isBrandKitOpen && (
+        <BrandKitDialog
+          kit={brandKit}
+          onClose={() => setIsBrandKitOpen(false)}
+          onSave={handleSaveBrandKit}
+        />
+      )}
 
       <Gallery
+        brandKit={brandKit}
         key={adminGalleryUser?.user_id || 'own-gallery'}
         images={displayedMedia}
         currentFolderId={currentFolderId}
@@ -1742,12 +1809,20 @@ const AuthorizedWorkspace: React.FC<{
         onEditGenerate={async editConfig => {
           if (adminGalleryUser) throw new Error('This gallery is read-only.');
           validateImageGenerationReferences(editConfig);
-          return await handleGenerate(editConfig, true) as string[];
+          const result = await handleGenerate(editConfig, true) as string[];
+          void recordAuditEvent({
+            action: 'media.edited',
+            targetType: 'media',
+            targetId: getGalleryEditSourceId(editConfig.referenceImages) ?? editConfig.referenceImages?.[0]?.id,
+            metadata: { model: editConfig.imageModel },
+          }).catch(() => {});
+          return result;
         }}
         onCancelBrainstorm={handleCancelBrainstorm}
         onDelete={handleDelete}
         onDeleteMultiple={handleDeleteMultiple}
         onToggleFavorite={handleToggleFavorite}
+        onUpdateTags={adminGalleryUser ? undefined : handleUpdateTags}
         onMove={handleMoveImages}
         onMoveFolder={handleMoveFolder}
         onDeleteFolder={handleDeleteFolder}
@@ -1779,6 +1854,9 @@ const AuthorizedWorkspace: React.FC<{
           activeRequests={activeRequests}
           generationProgress={generationProgress}
           templates={templates}
+          promptHistory={promptHistory}
+          onSelectPromptHistory={handleSelectPromptHistory}
+          onClearPromptHistory={handleClearPromptHistory}
           onSaveTemplate={handleSaveTemplate}
           onUpdateTemplate={handleUpdateTemplate}
           onDeleteTemplate={handleDeleteTemplate}

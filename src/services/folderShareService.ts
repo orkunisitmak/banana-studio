@@ -1,4 +1,5 @@
 import { getSession } from './authService';
+import { recordAuditEvent } from './auditService';
 import { readFolderShareStatus, type FolderShareStatus } from '../lib/gallery/folderShareResponse';
 
 export type { FolderShareStatus } from '../lib/gallery/folderShareResponse';
@@ -9,5 +10,13 @@ export async function manageFolderShare(folderId: string, action: 'status' | 'cr
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
     body: JSON.stringify({ folderId, action }), cache: 'no-store',
   });
-  return readFolderShareStatus(response);
+  const status = await readFolderShareStatus(response);
+  if (action !== 'status') {
+    void recordAuditEvent({
+      action: action === 'create' ? 'share.created' : 'share.revoked',
+      targetType: 'folder',
+      targetId: folderId,
+    }).catch(() => {});
+  }
+  return status;
 }

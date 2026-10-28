@@ -11,7 +11,7 @@ export const imageProviderModel = (provider: AIProvider, model: string, referenc
 /** All destinations and fields are server-owned. One paid request, no provider retry. */
 export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string): Promise<Response> {
   const signal = AbortSignal.timeout(250_000);
-  const { resolution, aspect_ratio, ...openaiInput } = input;
+  const { resolution, aspect_ratio, seed: _seed, ...openaiInput } = input;
   if (provider === 'openai') return fetch(`https://api.openai.com/v1/images/${input.images?.length ? 'edits' : 'generations'}`, {
     method: 'POST', redirect: 'error', signal,
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Client-Request-Id': auditId }, body: JSON.stringify(openaiInput),
@@ -33,7 +33,7 @@ export async function requestImage(provider: AIProvider, model: string, input: R
     const body = sunburst ? { prompt: input.prompt, image_size: input.size === 'auto' ? 'auto' : Object.fromEntries(input.size.split('x').map(Number).map((n: number, i: number) => [i ? 'height' : 'width', n])),
       quality: input.quality, num_images: 1, output_format: input.output_format, background: input.background, sync_mode: true,
       ...(input.images?.length ? { image_urls: input.images.map((image: any) => image.image_url) } : {}),
-    } : { prompt: input.prompt, aspect_ratio: input.aspect_ratio, resolution: input.resolution, num_images: 1, output_format: 'png', sync_mode: true, ...(model === 'gemini-nano-banana-2.1' ? { thinking_level: 'high' } : {}), ...(input.images?.length ? { image_urls: input.images.map((image: any) => image.image_url) } : {}) };
+    } : { prompt: input.prompt, aspect_ratio: input.aspect_ratio, resolution: input.resolution, num_images: 1, output_format: 'png', sync_mode: true, ...(model === 'gemini-nano-banana-2.1' ? { thinking_level: 'high' } : {}), ...(input.seed != null ? { seed: input.seed } : {}), ...(input.images?.length ? { image_urls: input.images.map((image: any) => image.image_url) } : {}) };
     const endpoint = imageProviderModel(provider, model, !!input.images?.length);
     const response = await fetch(`https://fal.run/${endpoint}`, {
       method: 'POST', redirect: 'error', signal, headers: { Authorization: `Key ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),

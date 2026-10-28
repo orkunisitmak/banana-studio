@@ -7,7 +7,7 @@ export const config = { maxDuration: 60 };
 
 /** Recover an existing object only. This endpoint never calls an image provider. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });

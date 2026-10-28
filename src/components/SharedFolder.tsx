@@ -54,7 +54,7 @@ export function SharedFolder() {
     } finally { if (!operation?.signal.aborted) setOpening(null); }
   };
   return <main className="shared-shell">
-    <header className="shared-header"><div><span className="shared-brand">ORK DIGITAL BANANA</span><h1>{page?.name || 'Shared folder'}</h1><p>View and download shared images</p></div>
+          <header className="shared-header"><div><span className="shared-brand">BANANA STUDIO</span><h1>{page?.name || 'Shared folder'}</h1><p>View and download shared images</p></div>
       <button onClick={() => void load()} disabled={busy}>Refresh</button></header>
     {error && <div role="alert" className="shared-message">{error}</div>}
     {previewError && <p role="alert" className="shared-message">{previewError}</p>}

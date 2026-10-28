@@ -4,12 +4,13 @@ import { OPENAI_TEXT_MODEL, calculateOpenAITextCost, DEFAULT_OPENAI_REASONING, i
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { startOpenAIRequest, openAIErrorMessage } from './_lib/openaiGuard.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
+import { enforceDailyGenerationQuota } from './_lib/generationQuota.js';
 
 export const config = { maxDuration: 300 };
 const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -75,6 +76,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (streaming) { send({ type: 'error', error }); return res.end(); }
     return res.status(status).json({ error });
   };
+  if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res)) {
+    await guard.finish('failed', null, 429);
+    return;
+  }
   if (streaming) {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no');
@@ -85,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const provider = createTaskDeadline(250_000);
   console.info(`[openai-text-generate] action=${usageContext.action} reasoning=${reasoningEffort} stage=generating`);
   try {
-    const response = await waitForTask(fetch('https://api.openai.com/v1/responses', {
+  const response = await waitForTask(fetch('https://api.openai.com/v1/responses', {
       method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Client-Request-Id': guard.id },
       body: JSON.stringify({
         model: OPENAI_TEXT_MODEL, input: [{ role: 'user', content }],

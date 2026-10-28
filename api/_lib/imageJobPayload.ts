@@ -31,6 +31,7 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) invalid('Prompt must contain 1–32,000 characters.');
   if (!['1:1','4:3','3:4','16:9','9:16'].includes(body.aspectRatio) || !['1K','2K','4K'].includes(body.resolution)) invalid('Invalid ratio or resolution.');
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) invalid('Invalid image options.');
+  if (body.seed != null && (!Number.isInteger(body.seed) || body.seed < 0 || body.seed > 2_147_483_647)) invalid('Invalid seed.');
   let provider;
   try { provider = chooseProvider(body.model, body.provider); } catch (error) { return invalid((error as Error).message); }
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
@@ -75,13 +76,13 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   const payload = { id: body.id, model: body.model as string, provider, prompt: body.prompt,
     displayPrompt: typeof body.displayPrompt === 'string' && body.displayPrompt.length <= 32000 ? body.displayPrompt : body.prompt,
     originalPrompt: body.originalPrompt, aspectRatio: body.aspectRatio, resolution: body.resolution,
-    options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
+    seed: body.seed, options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
     imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource) };
   const prepared = prepareSunburstGeneration(payload.prompt, refs, { ...payload, imageModel: body.model, openaiImageOptions: options });
   if (prepared.prompt.length > 32000) invalid('Shorten the prompt to leave room for reference instructions.');
   const metadata = { generationProvider: provider, providerModel: payload.model, originalPrompt: payload.originalPrompt, youtubeSource: payload.youtubeSource, promptPreparation: payload.promptPreparation,
     openaiImageOptions: payload.model === SUNBURST_MODEL ? options : undefined, imagePromptCategory: payload.imagePromptCategory,
-    imageGenerationPrompt: prepared.prompt, imageGenerationReferenceIds: prepared.referenceImages.map(ref=>ref.id),
+    imageGenerationPrompt: prepared.prompt, imageGenerationReferenceIds: prepared.referenceImages.map(ref=>ref.id), seed: payload.seed,
     imageRequestedSize: payload.model === SUNBURST_MODEL ? getOpenAIImageSize({ ...payload, openaiImageOptions: options }) : `${payload.resolution} · ${payload.aspectRatio}` };
   return { payload, metadata };
 };

@@ -94,7 +94,10 @@ Use a disposable workspace for integration tests. The packaged-generation script
 ## Verify a change
 
 ```sh
+npm run lint
+npm run format:check
 npm test
+npm run test:coverage
 npm run typecheck
 npm run build
 npm run build:desktop
@@ -139,3 +142,7 @@ node scripts/test-local-generation.mjs
 ```
 
 The app is assembled under `.build/staging-windows/Banana Studio/`. Keep all files together. See [platform behavior](desktop-parity.md) and the [release procedure](../RELEASING.md).
+
+## AI-assisted development
+
+MindAeon supports this repository with code review, test coverage and release hardening. Its contributions are credited in the README, package metadata and contributor documentation. Forks may replace this credit with their own maintainer information.

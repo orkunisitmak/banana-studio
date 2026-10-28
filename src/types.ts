@@ -472,6 +472,8 @@ export interface GenerationConfig {
   enhancedForH3MaxMode?: H3MaxMode;
   enhancedForH3MaxOptionsKey?: string;
   count: number;
+  /** Optional deterministic seed for providers that support it. */
+  seed?: number;
   aspectRatio: AspectRatio;
   resolution: Resolution;
   imageModel: ImageModelId;
@@ -572,6 +574,8 @@ export interface GeneratedMedia {
   aspectRatio: AspectRatio;
   resolution: Resolution;
   imageModel?: ImageModelId;
+  /** Seed used for a reproducible image result, when the provider returns one. */
+  seed?: number;
   openaiImageOptions?: OpenAIImageOptions;
   imagePromptCategory?: BrainstormCategory;
   /** Exact prompt sent to the image provider, including reference roles. */
@@ -593,6 +597,8 @@ export interface GeneratedMedia {
   referenceImages: ReferenceImage[];
   folderId?: string | null;
   isFavorite?: boolean;
+  /** Free-form workspace labels stored with the generation metadata. */
+  tags?: string[];
   mediaType: MediaType;
   videoModel?: VideoModelId;
   videoOperation?: VideoOperation;

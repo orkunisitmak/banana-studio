@@ -131,7 +131,7 @@ export const generateOpenAIImage = async (
   const work = (async () => {
     const pending: GeneratedMedia = { id, url: '', prompt: config.prompt, originalPrompt: config.originalPrompt,
       createdAt: Date.now(), imageQueue: { version: 1, queuedAt: Date.now() }, imageStage: 'queued', status: 'pending',
-      mediaType: 'image', imageModel: config.imageModel, aspectRatio: config.aspectRatio, resolution: config.resolution,
+      mediaType: 'image', imageModel: config.imageModel, seed: config.seed, aspectRatio: config.aspectRatio, resolution: config.resolution,
       folderId: context?.folderId, referenceImages: refs };
     const accepted = await imageGenerationQueue.run(initialSession.user?.id || initialSession.access_token, id, async () => {
       await assertImageSession(owner);
@@ -149,7 +149,7 @@ export const generateOpenAIImage = async (
           body: JSON.stringify({ id, model: config.imageModel, provider: config.imageProvider, prompt, displayPrompt: config.prompt,
             originalPrompt: config.originalPrompt, promptPreparation: normalizePromptPreparation(config.promptPreparation), youtubeSource: config.youtubeSource,
             aspectRatio: config.aspectRatio, resolution: config.resolution, imagePromptCategory: config.imagePromptCategory,
-            options, referenceImages, folderId: context?.folderId }),
+            seed: config.seed, options, referenceImages, folderId: context?.folderId }),
         });
       } catch {
         // The enqueue transaction may have committed. Reconnect to its saved ID;

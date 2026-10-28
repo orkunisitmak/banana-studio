@@ -358,6 +358,7 @@ const buildNanoBananaInput = (
     safety_tolerance: '6',
   };
   if (imageUrls.length > 0) input.image_urls = imageUrls;
+  if (config.seed != null) input.seed = Math.max(0, Math.floor(config.seed));
   if (imageModel === NANO_BANANA_21_MODEL || imageModel === NANO_BANANA_2_LEGACY_MODEL) {
     input.thinking_level = 'high';
   }

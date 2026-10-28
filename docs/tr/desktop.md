@@ -4,15 +4,15 @@
 
 ## Mac: indir ve aç
 
-Mevcut sürüm **v0.1.2**, gereken sistem **macOS 13.5 veya sonrası**. Çalışma ortamı pakete dahildir; Node.js, Supabase, Vercel veya veritabanı kurmazsın.
+Mevcut sürüm **v0.1.3**, gereken sistem **macOS 13.5 veya sonrası**. Çalışma ortamı pakete dahildir; Node.js, Supabase, Vercel veya veritabanı kurmazsın.
 
 1. Apple menüsünden **Bu Mac Hakkında / About This Mac** bölümünü aç. **Çip: Apple M…** yazıyorsa Apple Silicon; **Intel** yazıyorsa Intel indir.
 2. Uygun dosyayı seç:
 
    | Mac | İndirme |
    | --- | --- |
-   | Apple Silicon — M1 ve yenileri | [Banana-Studio-0.1.2-macos-arm64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-arm64.zip) |
-   | Intel | [Banana-Studio-0.1.2-macos-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-x64.zip) |
+   | Apple Silicon — M1 ve yenileri | [Banana-Studio-0.1.3-macos-arm64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-arm64.zip) |
+   | Intel | [Banana-Studio-0.1.3-macos-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-x64.zip) |
 
 3. Zip'e çift tıkla, **Banana Studio.app** dosyasını **Applications / Uygulamalar** klasörüne taşı ve oradan aç.
 4. Bu topluluk paketleri Apple tarafından notarize edilmemiştir. İlk açma denemesinden sonra macOS engellerse **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç / Open Anyway** bölümünden yalnızca Banana Studio için izin ver ve sistemin onayını tamamla. [Apple'ın rehberini izle](https://support.apple.com/102445); sistem genelindeki korumaları açık tut.
@@ -48,7 +48,7 @@ Yerel veritabanı ayrıca şifrelenmez; dosyaları Mac hesap güvenliği, FileVa
 
 ## Windows: indir ve aç
 
-1. 64-bit Intel/AMD işlemcili Windows 10/11 için [Banana-Studio-0.1.2-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) indir.
+1. 64-bit Intel/AMD işlemcili Windows 10/11 için [Banana-Studio-0.1.3-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-windows-x64.zip) indir.
 2. **Tümünü ayıkla** seç. Çıkan **Banana Studio** klasörünü bütün olarak tut; zip içinden çalıştırma, yalnızca `.exe` dosyasını taşıma.
 3. **BananaStudio.exe** aç. Node.js, .NET ve yerel veritabanı dahildir. Microsoft **Edge WebView2 Runtime** gerekir; Windows 10/11'de genellikle bulunur. Eksik olduğu belirtilirse [Microsoft'tan](https://developer.microsoft.com/microsoft-edge/webview2/) kur.
 4. **Provider keys** veya **File → Provider API Keys…** ile gereken anahtarları ekle. Anahtarlar **Windows Credential Manager** içinde saklanır. Supabase, Google girişi veya sunucu kurulumu gerekmez.

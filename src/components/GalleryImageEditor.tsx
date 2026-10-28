@@ -59,7 +59,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const mountedRef = useRef(true);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
-  const pendingCaretRef = useRef<number>();
+  const pendingCaretRef = useRef<number | undefined>(undefined);
   const resultsRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const source = useMemo(() => getEditSource(image, region), [image.id, image.url, image.openaiImageOptions?.outputFormat, region]);

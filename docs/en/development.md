@@ -11,6 +11,9 @@ flowchart TD
   UI[React + TypeScript + Vite] --> Mode{Workspace mode}
   Mode --> Mac[AppKit + WKWebView]
   Mac --> Local[Bundled Node.js backend]
+  Mode --> Linux[Electron Linux shell]
+  Linux --> Local
+  LinuxKeys[Linux keyring protected encrypted keys] -->|native process pipe| Local
   Vault[macOS Keychain] -->|native process pipe| Local
   Local --> Disk[SQLite + local media]
   Local --> AI[Selected AI provider]
@@ -21,7 +24,7 @@ flowchart TD
   Mac --> Updates[Signed GitHub feeds + Sparkle]
 ```
 
-The local server binds a random loopback port and uses a one-time bootstrap plus an HttpOnly session cookie. Host/origin validation protects local writes. Keys cross the native/backend pipe, not frontend configuration. In cloud mode, backend routes verify the user and access-list membership; user-scoped reads preserve database policies. The privileged server client is reserved for server-owned tasks.
+The local server binds a random loopback port and uses a per-launch bootstrap credential plus an HttpOnly session cookie. Host/origin validation protects local writes. Keys cross the native/backend pipe, not frontend configuration. In cloud mode, backend routes verify the user and access-list membership; user-scoped reads preserve database policies. The privileged server client is reserved for server-owned tasks.
 
 ## Source map
 
@@ -36,6 +39,7 @@ The local server binds a random loopback port and uses a one-time bootstrap plus
 | `desktop/server/` | Local HTTP server, SQLite store, uploads, queue and native raster adapter |
 | `desktop/shared/` | Query compatibility layer and browser-side local client |
 | `desktop/macos/` | Native shell, Keychain, bundled process, raster codec and Sparkle |
+| `desktop/linux/` | Isolated Electron shell, keyring-backed encrypted keys, bundled resource resolution and Ubuntu desktop integration |
 | `supabase/migrations/`, `supabase/tests/` | Fresh-install schema and isolated access tests |
 | `scripts/`, `tests/` | Build, package, signature verification, privacy audits and tests |
 | `docs/en/`, `docs/tr/`, `docs/assets/` | Bilingual documentation and original demo artwork |
@@ -139,3 +143,7 @@ node scripts/test-local-generation.mjs
 ```
 
 The app is assembled under `.build/staging-windows/Banana Studio/`. Keep all files together. See [platform behavior](desktop-parity.md) and the [release procedure](../RELEASING.md).
+
+## Standalone Linux desktop
+
+See the [Linux desktop guide](linux-alpha.md) for Ubuntu/CachyOS prerequisites, commands, security boundaries, tested environments and remaining preview QA. This separate Electron shell reuses the existing frontend and local workspace server.

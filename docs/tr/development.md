@@ -139,3 +139,7 @@ node scripts/test-local-generation.mjs
 ```
 
 Paket `.build/staging-windows/Banana Studio/` altında oluşur. Dosyaları bütün olarak tut. [Platform davranışları](desktop-parity.md) ve [yayın prosedürü](../RELEASING.md).
+
+## Bağımsız Linux masaüstü
+
+Ubuntu/CachyOS gereksinimleri, komutlar ve doğrulanması gereken Linux kontrolleri için [Linux masaüstü kılavuzuna](linux-alpha.md) bakın. Ayrı Electron kabuğu mevcut arayüzü ve yerel sunucuyu kullanır.

@@ -13,7 +13,7 @@ const runCodec=request=>new Promise((resolve,reject)=>{
  child.stdin.on('error',fail);child.stdin.end(JSON.stringify(request));
 });
 export const decodeRaster=async bytes=>{
- if(process.platform==='win32'){
+ if(process.platform==='win32'||process.platform==='linux'){
   const {default:sharp}=await import('sharp');
   return sharp(bytes,{limitInputPixels:33_554_432,failOn:'error'}).autoOrient().toColourspace('srgb').ensureAlpha().raw().toBuffer({resolveWithObject:true});
  }
@@ -22,7 +22,7 @@ export const decodeRaster=async bytes=>{
  return {data,info:{width:result.width,height:result.height,channels:4}};
 };
 export const encodeRasterPNG=async(pixels,width,height)=>{
- if(process.platform==='win32'){
+ if(process.platform==='win32'||process.platform==='linux'){
   const {default:sharp}=await import('sharp');
   return sharp(pixels,{raw:{width,height,channels:4}}).png().toBuffer();
  }

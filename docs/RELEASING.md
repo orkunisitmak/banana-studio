@@ -87,3 +87,7 @@ Create a GitHub release `v<version>` at the tested source commit. Label communit
 For the notarized path, install a valid Developer ID Application certificate and private key in Keychain and store a notarization profile with `xcrun notarytool store-credentials`. Enter Apple credentials interactively, never in source, shell history or chat. Run packaging without `--community`, setting `BANANA_SIGNING_IDENTITY` and `BANANA_NOTARY_PROFILE` to their non-secret names. This path also notarizes, staples and checks Gatekeeper; its record must say `distribution: notarized` and `notarization: Accepted`.
 
 Follow [Sparkle's publishing guide](https://sparkle-project.org/documentation/publishing/) when changing feed structure or signing policy.
+
+## Linux desktop development preview
+
+The Linux portable and Ubuntu 24.04 `.deb` path is documented in [Linux desktop packaging](en/linux-alpha.md#build-a-self-contained-development-alpha). It uses pinned upstream Electron/Node and exact prebuilt sharp dependencies, includes notices and an app-specific AppArmor profile, and audits the final extracted package. It does not sign, update, publish or certify Linux GUI acceptance. Run the source and artifact audits plus the packaged synthetic workspace test, then perform actual Ubuntu/GNOME and CachyOS/KDE acceptance. Check corresponding-source availability for native/LGPL dependencies before any public redistribution.

@@ -10,7 +10,9 @@ import { WorkspaceProcess } from '../desktop/linux/workspace.mjs';
 const fixture = () => fs.mkdtempSync(path.join(os.tmpdir(), 'banana-linux-test-'));
 test('XDG directories accept only absolute overrides', () => {
   assert.deepEqual(directories({ XDG_DATA_HOME: '/data', XDG_CONFIG_HOME: 'relative' }, '/home/user'), {
-    data: '/data/banana-studio', config: '/home/user/.config/banana-studio', cache: '/home/user/.cache/banana-studio',
+    data: path.join('/data', 'banana-studio'),
+    config: path.join('/home/user', '.config', 'banana-studio'),
+    cache: path.join('/home/user', '.cache', 'banana-studio'),
   });
   assert.deepEqual(Object.keys(childEnvironment()).sort(), ['LANG', 'PATH']);
 });

@@ -82,7 +82,13 @@ test('linked worktree metadata is excluded without skipping source, tracked arti
     // A pointer with extra content is not exempt, even if Git accepts its first line.
     await fs.appendFile(path.join(worktree, '.git'), secret + '\n');
     assert.ok((await auditPublicRelease(worktree)).findings.some(f => f.path === '.git' && f.rule === 'provider-credential'));
-    await fs.writeFile(path.join(worktree, '.git'), pointer);
+    // Git marks this file hidden on Windows; opening it with 'w' fails with EPERM.
+    const metadata = await fs.open(path.join(worktree, '.git'), 'r+');
+    try {
+      await metadata.writeFile(pointer);
+      await metadata.truncate(pointer.length); // Remove the appended synthetic credential.
+    } finally { await metadata.close(); }
+    assert.deepEqual(await fs.readFile(path.join(worktree, '.git')), pointer);
   } finally {
     try { git('worktree', 'remove', '--force', worktree); } catch { /* Cleanup after a failed assertion. */ }
     await fs.rm(temporary, { recursive: true, force: true });

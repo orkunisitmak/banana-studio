@@ -36,6 +36,7 @@ Yerel sunucu rastgele loopback portunda çalışır; tek kullanımlık bootstrap
 | `desktop/server/` | Yerel HTTP sunucusu, SQLite, yükleme, kuyruk ve raster adaptörü |
 | `desktop/shared/` | Sorgu uyumluluk katmanı ve tarayıcının yerel istemcisi |
 | `desktop/macos/` | Yerel kabuk, Anahtar Zinciri, süreç, raster codec ve Sparkle |
+| `desktop/windows/`, `desktop/linux/` | WinForms/WebView2 + Credential Manager; GTK 4/WebKitGTK + Secret Service. İkisi de paketlenmiş sharp codec'ini kullanır |
 | `supabase/migrations/`, `supabase/tests/` | Yeni kurulum şeması ve izole erişim testleri |
 | `scripts/`, `tests/` | Derleme, paketleme, imza, gizlilik taraması ve testler |
 | `docs/en/`, `docs/tr/`, `docs/assets/` | İki dilde belgeler ve özgün demo çizimleri |
@@ -139,3 +140,23 @@ node scripts/test-local-generation.mjs
 ```
 
 Paket `.build/staging-windows/Banana Studio/` altında oluşur. Dosyaları bütün olarak tut. [Platform davranışları](desktop-parity.md) ve [yayın prosedürü](../RELEASING.md).
+
+## Linux uygulamasını derle
+
+glibc tabanlı Linux x64 veya arm64 makinede Node 24'ü ve [Linux kurulum rehberindeki](desktop.md#linux-derle-ve-aç) kabuk bileşenlerini kur, ardından çalıştır:
+
+```sh
+npm ci --ignore-scripts
+npm test
+npm run typecheck
+npm run build
+npm run build:desktop
+node scripts/fetch-node-runtime.mjs
+node scripts/package-linux.mjs
+node scripts/test-local-generation.mjs
+.build/staging-linux/banana-studio/banana-studio --test-window-placement
+.build/staging-linux/banana-studio/banana-studio --test-vault
+.build/staging-linux/banana-studio/banana-studio
+```
+
+Uygulama `.build/staging-linux/banana-studio/` altında oluşur: kabuk `shell/`, sabitlenmiş resmi Node çalışma zamanı `runtime/` içindedir; sharp'ın yalnızca bu mimariye ait glibc sürümü eklenir. `--test-vault`, Secret Service anahtarlığına rastgele bir test şemasıyla sentetik bir kayıt ekleyip kaldırır; CI bunu ayrı bir oturum anahtarlığında çalıştırır. Kabuk sistemdeki Python 3, PyGObject, GTK 4.10+, WebKitGTK 6.0 ve libsecret'i kullanır; Node sunucusunu Mac ve Windows kabukları gibi izinli ortam değişkenleriyle başlatır ve stderr çıktısını atar.

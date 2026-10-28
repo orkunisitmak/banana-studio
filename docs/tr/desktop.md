@@ -58,7 +58,26 @@ Bu **imzasız topluluk sürümüdür**. Windows, tanınmayan yayıncı uyarısı
 
 Galeri `%LOCALAPPDATA%\Banana Studio\` içindedir; **File → Open Local Data Folder** ile aç. Yedeklemeden önce uygulamayı kapat ve tüm klasörü yedekle. Anahtarlar Credential Manager'da ayrı tutulur. Windows güncellemeleri elle yapılır: **File → Check for Updates…** GitHub Releases'i açar; uygulamayı kapat, yeni klasörü ayıkla ve çalıştır. Galeri ve anahtarlar uygulama klasörünün dışında kalır.
 
-Mac ve Windows aynı React arayüzünü ve SQLite çalışma alanını kullanır. Yerel menüler, dosya seçiciler ve anahtar saklama yöntemi işletim sistemine uygundur. Windows paketine Windows CI üzerinde derleme, Credential Manager ve korumalı edit entegrasyon testleri uygulanır; tam yayın kabulü için etkileşimli Windows UI testi de gerekir. [Platform karşılaştırması ve kısayollar](desktop-parity.md).
+Mac, Windows ve Linux aynı React arayüzünü ve SQLite çalışma alanını kullanır. Yerel menüler, dosya seçiciler ve anahtar saklama yöntemi işletim sistemine uygundur. Windows paketine Windows CI üzerinde derleme, Credential Manager ve korumalı edit entegrasyon testleri uygulanır; tam yayın kabulü için etkileşimli Windows UI testi de gerekir. [Platform karşılaştırması ve kısayollar](desktop-parity.md).
+
+## Linux: derle ve aç
+
+Linux, Windows ile aynı React arayüzünü, Node/SQLite çalışma alanını ve görsel codec'ini **GTK 4 + WebKitGTK 6.0** penceresinde çalıştırır (Mac uygulamasıyla aynı WebKit motoru). glibc tabanlı 64-bit Intel/AMD veya ARM dağıtımlarda, GTK 4.10+ ile çalışır; Wayland ve X11 desteklenir. Henüz yayınlanmış bir Linux arşivi yok: [Linux uygulamasını derle](development.md#linux-uygulamasını-derle) adımlarıyla kaynak koddan derle veya bu reponun `prepared-linux-x64` CI çıktısını kullan.
+
+1. Kabuk bileşenlerini bir kez kur. Node çalışma zamanı ve görsel codec'i pakete dahildir; `gst-libav` üretilen MP4 videoları oynatır.
+
+| Dağıtım | Kabuk bileşenlerini kur |
+| --- | --- |
+| Arch / CachyOS / Manjaro | `sudo pacman -S --needed python-gobject gtk4 webkitgtk-6.0 libsecret gst-libav` |
+| Debian 13 / Ubuntu 24.04+ | `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 gir1.2-secret-1 gstreamer1.0-libav` |
+| Fedora 40+ | `sudo dnf install python3-gobject gtk4 webkitgtk6.0 libsecret gstreamer1-plugin-libav` |
+
+2. **banana-studio** klasörünü ayıkla veya derle ve dosyaları bir arada tut. Uygulama menüsüne eklemek için klasörün içinde `./install.sh` çalıştır ya da doğrudan `./banana-studio` ile aç. `./install.sh --uninstall` yalnızca menü kaydını kaldırır.
+3. **Provider keys** (veya ☰ menü → **Provider API Keys…**, Ctrl + virgül) ile anahtarları ekle. Anahtarlar masaüstünün **Secret Service** anahtarlığında saklanır: GNOME Keyring, KWallet veya KeePassXC. Anahtarlık yanıt vermezse galeri yine açılır ama anahtar kaydedilemez.
+
+Galeri `~/.local/share/banana-studio/` (veya `$XDG_DATA_HOME/banana-studio/`) içindedir; ☰ → **Open Local Data Folder** ile aç. Yedeklemeden önce uygulamayı kapat ve tüm klasörü yedekle. Anahtarlar anahtarlıkta ayrı tutulur. Güncellemeler elle yapılır: ☰ → **Check for Updates…** GitHub Releases'i açar; klasörü değiştir ve `./install.sh` komutunu yeniden çalıştır. İkinci kez açmak yeni bir çalışma alanı başlatmaz, mevcut pencereyi öne getirir. Wayland'de pencere konumunu bileşimci belirler; yalnızca boyut ve büyütülmüş durum hatırlanır.
+
+Bazı NVIDIA sürücülerinde pencere boş kalırsa uygulamayı bir kez `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./banana-studio` ile başlat.
 
 ## Sık karşılaşılan durumlar
 

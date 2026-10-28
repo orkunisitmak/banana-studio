@@ -36,6 +36,7 @@ The local server binds a random loopback port and uses a one-time bootstrap plus
 | `desktop/server/` | Local HTTP server, SQLite store, uploads, queue and native raster adapter |
 | `desktop/shared/` | Query compatibility layer and browser-side local client |
 | `desktop/macos/` | Native shell, Keychain, bundled process, raster codec and Sparkle |
+| `desktop/windows/`, `desktop/linux/` | WinForms/WebView2 + Credential Manager; GTK 4/WebKitGTK + Secret Service. Both use the bundled sharp codec |
 | `supabase/migrations/`, `supabase/tests/` | Fresh-install schema and isolated access tests |
 | `scripts/`, `tests/` | Build, package, signature verification, privacy audits and tests |
 | `docs/en/`, `docs/tr/`, `docs/assets/` | Bilingual documentation and original demo artwork |
@@ -139,3 +140,23 @@ node scripts/test-local-generation.mjs
 ```
 
 The app is assembled under `.build/staging-windows/Banana Studio/`. Keep all files together. See [platform behavior](desktop-parity.md) and the [release procedure](../RELEASING.md).
+
+## Build the Linux app
+
+On a glibc Linux x64 or arm64 machine, install Node 24 and the shell stack from the [Linux install guide](desktop.md#linux-build-and-open), then run:
+
+```sh
+npm ci --ignore-scripts
+npm test
+npm run typecheck
+npm run build
+npm run build:desktop
+node scripts/fetch-node-runtime.mjs
+node scripts/package-linux.mjs
+node scripts/test-local-generation.mjs
+.build/staging-linux/banana-studio/banana-studio --test-window-placement
+.build/staging-linux/banana-studio/banana-studio --test-vault
+.build/staging-linux/banana-studio/banana-studio
+```
+
+The app is assembled under `.build/staging-linux/banana-studio/` with the shell in `shell/`, the pinned official Node runtime in `runtime/`, and only sharp's glibc build for the host architecture. `--test-vault` adds and removes a synthetic entry under a random test schema in your Secret Service keyring; CI runs it against an isolated session keyring. The shell uses system Python 3 with PyGObject, GTK 4.10+, WebKitGTK 6.0 and libsecret; it starts the Node server with an allowlisted environment and discards its stderr, like the Mac and Windows shells.

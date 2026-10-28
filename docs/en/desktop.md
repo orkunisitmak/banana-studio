@@ -58,7 +58,26 @@ This is an **unsigned community build**. Windows may show an unrecognized-publis
 
 The local gallery is under `%LOCALAPPDATA%\Banana Studio\`. Open **File → Open Local Data Folder** to find it. Quit before backing up the whole folder. Keys are separate in Credential Manager. Windows updates are manual: **File → Check for Updates…** opens GitHub Releases; quit the app, extract the new folder and open it. Gallery and keys remain outside the application folder.
 
-Mac and Windows use the same React interface and SQLite workspace code. Native menus, file dialogs and key vaults follow each operating system. The Windows package has build, Credential Manager and protected-edit integration checks on Windows CI; an interactive Windows UI session is still needed for a full release acceptance test. [Platform comparison and shortcuts](desktop-parity.md).
+Mac, Windows and Linux use the same React interface and SQLite workspace code. Native menus, file dialogs and key vaults follow each operating system. The Windows package has build, Credential Manager and protected-edit integration checks on Windows CI; an interactive Windows UI session is still needed for a full release acceptance test. [Platform comparison and shortcuts](desktop-parity.md).
+
+## Linux: build and open
+
+Linux uses the same React interface, Node/SQLite workspace and image codec as Windows, in a **GTK 4 + WebKitGTK 6.0** window (the same WebKit engine as the Mac app). It runs on 64-bit Intel/AMD or ARM with a glibc distribution and GTK 4.10+; Wayland and X11 both work. No Linux release archive is published yet: build it from source as in [Build the Linux app](development.md#build-the-linux-app), or use the `prepared-linux-x64` CI artifact from this repository.
+
+1. Install the system shell stack once. The Node runtime and image codec are bundled; `gst-libav` plays generated MP4 videos.
+
+| Distribution | Install the shell stack |
+| --- | --- |
+| Arch / CachyOS / Manjaro | `sudo pacman -S --needed python-gobject gtk4 webkitgtk-6.0 libsecret gst-libav` |
+| Debian 13 / Ubuntu 24.04+ | `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 gir1.2-secret-1 gstreamer1.0-libav` |
+| Fedora 40+ | `sudo dnf install python3-gobject gtk4 webkitgtk6.0 libsecret gstreamer1-plugin-libav` |
+
+2. Extract or build the **banana-studio** folder and keep it together. Run `./install.sh` inside it to add **Banana Studio** to your application menu, or start `./banana-studio` directly. `./install.sh --uninstall` removes only the menu entry.
+3. Use **Provider keys** (or the ☰ menu → **Provider API Keys…**, Ctrl + comma). Keys are stored in your desktop's **Secret Service** keyring: GNOME Keyring, KWallet or KeePassXC. If no keyring answers, the gallery still opens but keys cannot be saved.
+
+The local gallery is under `~/.local/share/banana-studio/` (or `$XDG_DATA_HOME/banana-studio/`). Open ☰ → **Open Local Data Folder** to find it, and quit before backing up the whole folder. Keys stay separately in the keyring. Updates are manual: ☰ → **Check for Updates…** opens GitHub Releases; replace the folder and run `./install.sh` again. A second launch raises the existing window instead of opening another workspace. Wayland compositors place windows themselves, so only the window size and maximized state are restored.
+
+If the window stays blank on some NVIDIA drivers, start it once with `WEBKIT_DISABLE_DMABUF_RENDERER=1 ./banana-studio`.
 
 ## Common questions
 

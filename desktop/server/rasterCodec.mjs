@@ -2,6 +2,10 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Only the Mac bundle ships the native AppKit codec. Windows and Linux use the
+// sharp/libvips closure packaged beside the workspace server.
+const nativeCodec=process.platform==='darwin';
+
 const runCodec=request=>new Promise((resolve,reject)=>{
  const executable=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../MacOS/BananaStudio');
  const child=spawn(executable,['--raster-codec'],{env:{PATH:'/usr/bin:/bin'},stdio:['pipe','pipe','ignore']});
@@ -13,7 +17,7 @@ const runCodec=request=>new Promise((resolve,reject)=>{
  child.stdin.on('error',fail);child.stdin.end(JSON.stringify(request));
 });
 export const decodeRaster=async bytes=>{
- if(process.platform==='win32'){
+ if(!nativeCodec){
   const {default:sharp}=await import('sharp');
   return sharp(bytes,{limitInputPixels:33_554_432,failOn:'error'}).autoOrient().toColourspace('srgb').ensureAlpha().raw().toBuffer({resolveWithObject:true});
  }
@@ -22,7 +26,7 @@ export const decodeRaster=async bytes=>{
  return {data,info:{width:result.width,height:result.height,channels:4}};
 };
 export const encodeRasterPNG=async(pixels,width,height)=>{
- if(process.platform==='win32'){
+ if(!nativeCodec){
   const {default:sharp}=await import('sharp');
   return sharp(pixels,{raw:{width,height,channels:4}}).png().toBuffer();
  }

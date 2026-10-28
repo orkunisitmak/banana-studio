@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Banana Studio
+Comment=Local-first AI image, edit, thumbnail and video studio
+Exec=banana-studio
+Icon=com.bananastudio.BananaStudio
+Terminal=false
+Categories=Graphics;
+StartupNotify=true
+StartupWMClass=com.bananastudio.BananaStudio

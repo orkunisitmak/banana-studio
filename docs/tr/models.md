@@ -79,6 +79,6 @@ YouTube için kendi Google Cloud projeni oluştur/seç, **YouTube Data API v3** 
 
 Uygulamadaki tahmin sağlayıcı bakiyesi veya fatura değildir. Metin düşünmesi, referanslar, kalite, video süresi ve ön işlem ayrıca maliyete etki edebilir. Harcama sınırlarını sağlayıcılardan belirle, kullanım panellerini takip et.
 
-Anahtarlar masaüstünde **macOS Anahtar Zinciri / Windows Credential Manager'a**, webde **sunucu ortam değişkenlerine** aittir. Prompt, ekran görüntüsü, GitHub issue'su, public repo veya `VITE_*` değişkenine koyma. Üretim için yönetici seviyesinde faturalama anahtarları gerekmez. `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY` ve `OPENAI_PROJECT_ID`, web sürümünün isteğe bağlı faturalama raporu ayarlarıdır.
+Anahtarlar masaüstünde **macOS Anahtar Zinciri / Windows Credential Manager / Linux Secret Service'e**, webde **sunucu ortam değişkenlerine** aittir. Prompt, ekran görüntüsü, GitHub issue'su, public repo veya `VITE_*` değişkenine koyma. Üretim için yönetici seviyesinde faturalama anahtarları gerekmez. `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY` ve `OPENAI_PROJECT_ID`, web sürümünün isteğe bağlı faturalama raporu ayarlarıdır.
 
 Geliştiriciler için doğruluk kaynağı: [sağlayıcı kaydı](../../src/lib/providers.ts), [model seçenekleri](../../src/types.ts), [görsel yönlendirme](../../src/services/geminiService.ts), [video yönlendirme](../../src/services/runwayService.ts), [YouTube analizi](../../src/services/youtubeBriefService.ts), [yerel anahtar alanları](../../desktop/macos/Sources/BananaStudio/KeyVault.swift).

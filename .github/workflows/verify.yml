@@ -83,6 +83,47 @@ jobs:
           path: .build/Banana-Studio-prepared-${{ matrix.architecture }}.zip
           if-no-files-found: error
           retention-days: 7
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Install the GTK 4, WebKitGTK 6.0 and Secret Service shell stack
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 gir1.2-secret-1 gnome-keyring dbus-daemon
+      - run: npm ci --ignore-scripts --no-fund
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:desktop
+      - run: node scripts/fetch-node-runtime.mjs
+      - run: node scripts/package-linux.mjs
+      - run: /usr/bin/python3 -I ".build/staging-linux/banana-studio/shell/check_dependencies.py"
+      - run: ".build/staging-linux/banana-studio/banana-studio --test-window-placement"
+      - name: Test the Secret Service vault in an isolated session keyring
+        run: dbus-run-session -- sh -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null && .build/staging-linux/banana-studio/banana-studio --test-vault'
+      - run: node scripts/test-local-generation.mjs
+      - name: Archive the audited standalone Linux application
+        run: |
+          version=$(node -p "require('./package.json').version")
+          archive=".build/Banana-Studio-$version-linux-x64.tar.gz"
+          tar -C .build/staging-linux -czf "$archive" banana-studio
+          node -e "const fs=require('fs'),c=require('crypto');const [a,v]=process.argv.slice(1);fs.writeFileSync('.build/verification-linux-x64.json',JSON.stringify({version:v,sourceCommit:require('child_process').execSync('git rev-parse HEAD').toString().trim(),platform:'linux-x64',sha256:c.createHash('sha256').update(fs.readFileSync(a)).digest('hex'),distribution:'unsigned-community',nativeUiVerification:'not-performed-by-CI'},null,2))" "$archive" "$version"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: prepared-linux-x64
+          include-hidden-files: true
+          path: |
+            .build/Banana-Studio-*-linux-x64.tar.gz
+            .build/verification-linux-x64.json
+          if-no-files-found: error
+          retention-days: 7
   windows:
     runs-on: windows-2022
     timeout-minutes: 20

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Start the shell with the distribution's Python so PyGObject/GTK come from
+# system packages; -I ignores PYTHON* variables and user site-packages.
+here=$(dirname "$(readlink -f "$0")")
+python=/usr/bin/python3
+[ -x "$python" ] || python=$(command -v python3) || { echo "Banana Studio needs python3." >&2; exit 1; }
+exec "$python" -I -B "$here/shell/banana_studio.py" "$@"

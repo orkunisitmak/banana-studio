@@ -18,6 +18,18 @@
       "archiveSha256": "d1b5e999db158c62fe8f7267a4476b035d8bd93b1a605bac24a3f0dd166e3316",
       "binarySha256": "1052eb9c7d6c60a79b968e09f75af55a73462b0f6dff0964336d63b5e13eb63c",
       "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5"
+    },
+    "linux-x64": {
+      "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.gz",
+      "archiveSha256": "f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4",
+      "binarySha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12",
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5"
+    },
+    "linux-arm64": {
+      "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-arm64.tar.gz",
+      "archiveSha256": "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f",
+      "binarySha256": "3e53e5ff5eaa922f1b4308312d50da9091db62d40b87716ad36c60b347e7f984",
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5"
     }
   }
 }

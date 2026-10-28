@@ -1,8 +1,8 @@
-# Mac and Windows desktop behavior
+# Mac, Windows and Linux desktop behavior
 
 [Install](desktop.md) · [Türkçe](../tr/desktop-parity.md)
 
-Both shells load the same production React build and local Node/SQLite server. Library, templates, generation, Enhance, Brainstorm, area masks, progress, comparison and preview do not have a separate Windows implementation.
+All shells load the same production React build and local Node/SQLite server. Library, templates, generation, Enhance, Brainstorm, area masks, progress, comparison and preview do not have a separate Windows or Linux implementation. Linux uses the Windows column's Ctrl shortcuts; Provider keys are Ctrl + comma or the ☰ menu.
 
 | Workflow | Mac | Windows |
 | --- | --- | --- |
@@ -26,12 +26,12 @@ Text paste stays in the focused native editor, preserving Turkish characters, li
 
 Library records and original media are saved locally, including grouped People and templates. Preview URLs are refreshed after restarting the random-port local server. Video previews support byte ranges. Image previews preserve the file's aspect ratio; original-image viewing, source/edit comparison and download use the shared gallery code.
 
-Native differences remain intentional: macOS uses AppKit/WKWebView, Keychain and signed Sparkle updates. Windows uses WinForms/WebView2, Credential Manager and a manual GitHub download update. The Windows zip includes .NET, Node and the image codec; it needs the Microsoft WebView2 Runtime. Neither desktop app syncs to another computer or the hosted gallery automatically.
+Native differences remain intentional: macOS uses AppKit/WKWebView, Keychain and signed Sparkle updates. Windows uses WinForms/WebView2, Credential Manager and a manual GitHub download update. The Windows zip includes .NET, Node and the image codec; it needs the Microsoft WebView2 Runtime. Linux uses GTK 4/WebKitGTK, the freedesktop Secret Service and a manual GitHub download update; its folder includes Node and the sharp image codec and uses the distribution's GTK, WebKitGTK and GStreamer packages. Neither desktop app syncs to another computer or the hosted gallery automatically.
 
 ## Verification
 
-Shared tests exercise clipboard fallback/duplicate handling, shell messages, Library persistence, thumbnail/source URL refresh, query and storage boundaries, video ranges and durable jobs. Mac and Windows CI run the packaged server through a synthetic image generation and area edit, checking every pixel outside the selection. The provider is mocked; these checks make no paid requests. Windows also tests an isolated Credential Manager entry and removal. Both Mac architectures are built in CI.
+Shared tests exercise clipboard fallback/duplicate handling, shell messages, Library persistence, thumbnail/source URL refresh, query and storage boundaries, video ranges and durable jobs. Mac, Windows and Linux CI run the packaged server through a synthetic image generation and area edit, checking every pixel outside the selection. The provider is mocked; these checks make no paid requests. Windows also tests an isolated Credential Manager entry and removal; Linux tests an isolated Secret Service entry and window-size restoration. Both Mac architectures are built in CI.
 
 Compilation and these integration checks do not substitute for interactive clipboard, file-picker, keyboard, media playback and display-scaling tests on a physical Windows session. The release verification file records this limitation. Test these workflows with your own non-sensitive samples before adopting a new community build.
 
-Both shells remember the normal window position and size. Saved bounds are clamped to a connected display after a monitor is removed. Fullscreen and maximized modes are not restored. macOS startup has the same 30-second readiness deadline as Windows; failure stops the child server and leaves saved files intact.
+The Mac and Windows shells remember the normal window position and size. Linux restores the size and maximized state; Wayland compositors choose the position. Saved bounds are clamped to a connected display after a monitor is removed. Fullscreen and maximized modes are not restored. macOS startup has the same 30-second readiness deadline as Windows; failure stops the child server and leaves saved files intact.

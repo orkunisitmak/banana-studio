@@ -989,6 +989,18 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
         console.warn("Thumbnail generation failed, skipping", err);
       }
 
+      // Read existing metadata before uploading, so a failed read cannot leave
+      // new storage objects without the matching row update.
+      let existingImageMetadata: Record<string, unknown> = {};
+      const hasImageMetadata = media.imageModel === 'gpt-image-2.5-sunburst' || media.imageEditSourceId
+        || media.imageEditProtection || media.promptPreparation || media.youtubeSource || media.originalPrompt != null
+        || media.imageOutputSize != null || media.imageRequestedSize != null || media.generationCost != null;
+      if (hasImageMetadata) {
+        const { data, error } = await supabase.from('generations').select('metadata').eq('id', media.id).maybeSingle();
+        if (error) throw new Error(`Could not preserve the saved image details: ${error.message}`);
+        existingImageMetadata = data?.metadata || {};
+      }
+
       // Handle reference images - upload base64 ones to storage to avoid DB size limits
       const safeReferenceImages = await Promise.all((media.referenceImages || []).map(withoutLegacyMask).map(async (ref) => {
         if (!ref.data) {
@@ -1062,16 +1074,6 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
       const resolvedThumbnailPath = thumbBlob ? thumbnailPath : null;
       const thumbnailUrl = thumbBlob ? await createMediaAccessUrl(thumbnailPath) : undefined;
 
-      // Retain diagnostics and prompt/edit metadata when enriching the saved
-      // image; upsert replaces the JSON column wholesale.
-      let existingImageMetadata: Record<string, unknown> = {};
-      const hasImageMetadata = media.imageModel === 'gpt-image-2.5-sunburst' || media.imageEditSourceId
-        || media.imageEditProtection || media.promptPreparation || media.youtubeSource || media.originalPrompt != null;
-      if (hasImageMetadata) {
-        const { data, error } = await supabase.from('generations').select('metadata').eq('id', media.id).maybeSingle();
-        if (error) throw new Error(`Could not preserve the saved image details: ${error.message}`);
-        existingImageMetadata = data?.metadata || {};
-      }
       // Save reference images using the safe version
       const generationInsertBase = {
         id: media.id,
@@ -1103,7 +1105,10 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
           ...(media.youtubeSource ? { youtubeSource: normalizeYouTubeSource(media.youtubeSource) } : {}),
           ...(media.promptPreparation ? { promptPreparation: normalizePromptPreparation(media.promptPreparation) } : {}), imageEditSourceId: media.imageEditSourceId,
           imageEditProtection: media.imageEditProtection, originalPrompt: media.originalPrompt,
-          imagePromptCategory: media.imagePromptCategory, imageOutputSize: media.imageOutputSize } } : {}),
+          imagePromptCategory: media.imagePromptCategory,
+          ...(media.imageOutputSize != null ? { imageOutputSize: media.imageOutputSize } : {}),
+          ...(media.imageRequestedSize != null ? { imageRequestedSize: media.imageRequestedSize } : {}),
+          ...(media.generationCost != null ? { generationCost: media.generationCost } : {}) } } : {}),
       };
 
       const generationInsertWithPaths = {

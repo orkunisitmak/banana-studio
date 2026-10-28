@@ -28,6 +28,7 @@ import { createRecreateConfig, mergeRecreateHydration } from './lib/gallery/recr
 import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
+import { formatFrameTimestamp, inferAspectRatio, inferResolutionLabel, type CapturedFrameSaveRequest } from './lib/video/frameCapture';
 import { isStuckPendingMedia } from './lib/gallery/stuckPending';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
@@ -1561,6 +1562,37 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  const handleSaveCapturedFrame = async (request: CapturedFrameSaveRequest): Promise<string> => {
+    await assertWorkspaceSession();
+    if (adminGalleryUser) throw new Error('This gallery is read-only.');
+
+    const frameName = request.filename.replace(/\.png$/i, '');
+    const id = `${frameName}-${crypto.randomUUID().slice(0, 8)}`;
+    const media: GeneratedMedia = {
+      id,
+      url: request.dataUrl,
+      prompt: `Still frame captured at ${formatFrameTimestamp(request.timestamp)} from video ${request.sourceVideoId}.`,
+      aspectRatio: inferAspectRatio(request.width, request.height),
+      resolution: inferResolutionLabel(request.width, request.height),
+      createdAt: Date.now(),
+      referenceImages: [],
+      folderId: request.folderId,
+      isFavorite: false,
+      mediaType: 'image',
+      status: 'completed',
+      imageOutputSize: `${request.width}x${request.height}`,
+      imageRequestedSize: `${request.width}x${request.height}`,
+      generationCost: { usd: 0 },
+    };
+
+    // Reuse the normal gallery persistence path. Hosted workspaces upload and
+    // create a thumbnail; local-only workspaces retain the PNG in IndexedDB.
+    const saved = await saveImage(media);
+    const savedMedia = saved ? mergeSavedMedia(media, saved) : { ...media, syncStatus: 'local-only' as const };
+    setGeneratedMedia(previous => [savedMedia, ...previous]);
+    return id;
+  };
+
   const handleUseAsReference = async (media: GeneratedMedia) => {
     try {
       if (media.mediaType === 'video') {
@@ -1749,6 +1781,7 @@ const AuthorizedWorkspace: React.FC<{
           validateImageGenerationReferences(editConfig);
           return await handleGenerate(editConfig, true) as string[];
         }}
+        onSaveCapturedFrame={handleSaveCapturedFrame}
         onCancelBrainstorm={handleCancelBrainstorm}
         onDelete={handleDelete}
         onDeleteMultiple={handleDeleteMultiple}

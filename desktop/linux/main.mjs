@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { directories, approvedSender, childEnvironment, workspaceURL, prepareDirectories } from './security.mjs';
 import { bootstrapSession } from './bootstrap.mjs';
-import { Vault, providers } from './vault.mjs';
+import { Vault, VaultReadError, providers } from './vault.mjs';
 import { WorkspaceProcess } from './workspace.mjs';
 import { workspaceResources } from './resources.mjs';
 
@@ -171,7 +171,7 @@ else {
     if (quitting) return;
     // Only deliberately authored startup messages reach this dialog.
     const safe = /^(This shell|Run as|Start with|Install Node|Run npm|Bundled workspace|Secure Linux|Local workspace authentication)/.test(error.message);
-    dialog.showErrorBox('Banana Studio Linux Alpha', safe ? error.message : 'The workspace could not start. Check the desktop build, Node.js 24, sharp and your unlocked Linux keyring.');
+    dialog.showErrorBox('Banana Studio Linux Alpha', error instanceof VaultReadError || safe ? error.message : 'The workspace could not start. Check the desktop build, Node.js 24, sharp and your unlocked Linux keyring.');
     void quit();
   });
 }

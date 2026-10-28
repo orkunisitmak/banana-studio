@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { transformSync } from 'esbuild';
 import * as security from '../desktop/linux/security.mjs';
-import { providers } from '../desktop/linux/vault.mjs';
+import { providers, VaultReadError } from '../desktop/linux/vault.mjs';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
@@ -19,15 +19,17 @@ const { code } = transformSync(source, {
 });
 const secret = 'synthetic-private-content-never-report';
 const failure = (code = 'EACCES') => Object.assign(new Error(secret), { code, stdout: secret, stderr: secret });
-function harness({ env = {}, execute = callback => callback(null, '\t'.repeat(5) + '\n', ''), refreshError } = {}) {
+function harness({ env = {}, execute = callback => callback(null, '\t'.repeat(5) + '\n', ''), refreshError, startup = false } = {}) {
   const reports = [], logs = [], calls = [], refreshed = [];
+  let startupFailure, quits = 0;
   const module = { exports: {} };
   const context = {
     module, AbortController,
     process: { platform: 'linux', env, on() {}, stderr: { write(value) { logs.push(value); } } },
     require(name) {
       if (name === 'electron') return {
-        app: { setName() {}, setPath() {}, enableSandbox() {}, on() {}, requestSingleInstanceLock: () => false, quit() {} },
+        app: { setName() {}, setPath() {}, enableSandbox() {}, on() {}, requestSingleInstanceLock: () => startup, quit() { quits++; },
+          whenReady: () => ({ then: () => ({ catch(callback) { startupFailure = callback; } }) }) },
         dialog: { showErrorBox(title, message) { reports.push({ title, message }); } },
       };
       if (name === 'node:fs') return { mkdirSync() {}, chmodSync() {} };
@@ -37,15 +39,15 @@ function harness({ env = {}, execute = callback => callback(null, '\t'.repeat(5)
         return { kill() {} };
       } };
       if (name === './security.mjs') return { ...security, prepareDirectories() {}, directories: () => ({ data: '/synthetic/data', config: '/synthetic/config', cache: '/synthetic/cache' }) };
-      if (name === './vault.mjs') return { providers };
+      if (name === './vault.mjs') return { providers, VaultReadError };
       if (name === './bootstrap.mjs' || name === './workspace.mjs' || name === './resources.mjs') return {};
       if (name.startsWith('node:')) return require(name);
       throw new Error('Unexpected dependency.');
     },
   };
   vm.runInNewContext(code, context);
-  module.exports.prepare({ async send(value) { refreshed.push(value); if (refreshError) throw refreshError; } });
-  return { show: module.exports.showKeys, reports, logs, calls, refreshed };
+  if (!startup) module.exports.prepare({ async send(value) { refreshed.push(value); if (refreshError) throw refreshError; } });
+  return { show: module.exports.showKeys, reports, logs, calls, refreshed, failStartup: error => startupFailure(error), quits: () => quits };
 }
 const vault = () => ({ saved: [], read() { return {}; }, save(value) { this.saved.push(value); } });
 
@@ -115,4 +117,23 @@ test('unrecognized error codes and signals cannot carry private content into dia
   await h.show(vault());
   assert.deepEqual(h.logs, ['[Banana Studio] Provider Keys: phase=zenity\n']);
   assert.ok(!JSON.stringify([h.reports, h.logs]).includes(secret));
+});
+
+
+test('startup displays only fixed vault recovery messages and exits without logging raw failures', async () => {
+  for (const reason of ['read', 'unsafe', 'decrypt', 'invalid', secret]) {
+    const error = new VaultReadError(reason);
+    const h = harness({ startup: true });
+    await h.failStartup(error);
+    assert.equal(h.reports[0].message, error.message);
+    assert.ok(!h.reports[0].message.includes(secret));
+    assert.deepEqual(h.logs, []); assert.deepEqual(h.calls, []); assert.deepEqual(h.refreshed, []);
+    assert.equal(h.quits(), 1);
+  }
+  // A raw exception cannot impersonate a vault error by its message prefix.
+  const h = harness({ startup: true });
+  await h.failStartup(new Error('Secure key file ' + secret));
+  assert.match(h.reports[0].message, /^The workspace could not start/);
+  assert.ok(!h.reports[0].message.includes(secret));
+  assert.deepEqual(h.logs, []); assert.equal(h.quits(), 1);
 });

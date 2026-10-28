@@ -21,7 +21,7 @@ flowchart TD
   Mac --> Updates[İmzalı GitHub akışları + Sparkle]
 ```
 
-Yerel sunucu rastgele loopback portunda çalışır; tek kullanımlık bootstrap ve HttpOnly oturum çerezi ister. Host/origin kontrolü yerel yazmaları korur. Anahtarlar arayüz ayarından değil, yerel süreç pipe'ından geçer. Webde sunucu kullanıcıyı ve erişim listesi üyeliğini doğrular; kullanıcı kapsamındaki sorgular veritabanı kurallarını korur. Ayrıcalıklı sunucu istemcisi yalnızca sunucunun yönettiği görevler içindir.
+Yerel sunucu rastgele loopback portunda çalışır; her başlatmada üretilen bootstrap kimlik bilgisi ve HttpOnly oturum çerezi ister. Host/origin kontrolü yerel yazmaları korur. Anahtarlar arayüz ayarından değil, yerel süreç pipe'ından geçer. Webde sunucu kullanıcıyı ve erişim listesi üyeliğini doğrular; kullanıcı kapsamındaki sorgular veritabanı kurallarını korur. Ayrıcalıklı sunucu istemcisi yalnızca sunucunun yönettiği görevler içindir.
 
 ## Kaynak haritası
 

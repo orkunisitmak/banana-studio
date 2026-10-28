@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { directories, localOrigin, approvedSender, secureStorage, childEnvironment, workspaceURL } from '../desktop/linux/security.mjs';
-import { Vault } from '../desktop/linux/vault.mjs';
+import { Vault, VaultReadError } from '../desktop/linux/vault.mjs';
 import { WorkspaceProcess } from '../desktop/linux/workspace.mjs';
 
 const fixture = () => fs.mkdtempSync(path.join(os.tmpdir(), 'banana-linux-test-'));
@@ -244,8 +244,38 @@ test('vault refuses symlinks, oversized files and nonprivate encrypted files', {
     const v = new Vault(directory, storage), target = path.join(directory, 'target');
     fs.writeFileSync(target, 'synthetic ciphertext', { mode: 0o600 }); fs.symlinkSync(target, v.file);
     assert.throws(() => v.read()); assert.equal(decryptions, 0); fs.rmSync(v.file);
-    fs.writeFileSync(v.file, Buffer.alloc(65537), { mode: 0o600 }); assert.throws(() => v.read());
-    fs.writeFileSync(v.file, 'synthetic'); fs.chmodSync(v.file, 0o644); assert.throws(() => v.read()); assert.equal(decryptions, 0);
+    fs.writeFileSync(v.file, Buffer.alloc(65537), { mode: 0o600 }); assert.throws(() => v.read(), { name: 'VaultReadError', message: /unsafe file/ });
+    fs.writeFileSync(v.file, 'synthetic'); fs.chmodSync(v.file, 0o644); assert.throws(() => v.read(), { name: 'VaultReadError', message: /mode 0600/ }); assert.equal(decryptions, 0);
     fs.chmodSync(v.file, 0o600); assert.deepEqual(v.read(), {}); assert.equal(decryptions, 1);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test('vault classifies read, decryption and malformed-data failures without disclosing or replacing content', () => {
+  const directory = fixture();
+  const privateValue = 'synthetic-private-value-never-display';
+  const ciphertext = Buffer.from('synthetic-ciphertext');
+  const storage = { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => 'kwallet6' };
+  const vault = new Vault(directory, storage);
+  const check = pattern => assert.throws(() => vault.read(), error => {
+    assert.ok(error instanceof VaultReadError);
+    assert.match(error.message, pattern);
+    assert.ok(!String(error).includes(privateValue));
+    assert.ok(!String(error).includes(directory));
+    assert.equal(error.cause, undefined);
+    assert.deepEqual(fs.readFileSync(vault.file), ciphertext);
+    return true;
+  });
+  try {
+    fs.writeFileSync(vault.file, ciphertext, { mode: 0o600 });
+    storage.decryptString = () => { throw new Error(privateValue + directory); };
+    check(/could not be decrypted.*original desktop keyring/);
+    for (const plaintext of [privateValue, 'null', '[]', JSON.stringify({ UNKNOWN_KEY: privateValue }), JSON.stringify({ OPENAI_API_KEY: 42 })]) {
+      storage.decryptString = () => plaintext;
+      check(/contain invalid data/);
+    }
+    vault.file = path.join(vault.file, 'not-a-directory');
+    assert.throws(() => vault.read(), { name: 'VaultReadError', message: /could not be read/ });
+    assert.deepEqual(fs.readdirSync(directory), ['provider-keys.enc']);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

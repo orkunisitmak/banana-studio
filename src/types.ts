@@ -618,6 +618,8 @@ export interface GeneratedMedia {
   isLoading?: boolean;
   videoProgress?: number;
   videoStage?: 'generating' | 'saving';
+  /** Shared by tabs/devices while a video provider submission is in flight. */
+  submissionHeartbeatAt?: number;
   imageProgress?: number;
   imageStage?: 'preparing' | 'queued' | 'generating';
   imageQueue?: { version: 1; queuedAt: number };

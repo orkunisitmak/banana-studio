@@ -26,3 +26,13 @@ test('a video still being submitted in this tab is not failed; a reloaded one wi
   assert.equal(isStuckPendingMedia({ id: 'v', mediaType: 'video', status: 'pending', createdAt: old, videoStage: 'generating', isLoading: true }, now), false);
   assert.equal(isStuckPendingMedia({ id: 'r', mediaType: 'video', status: 'pending', createdAt: old }, now), true);
 });
+
+test('a pending video in another tab is not failed while its shared submission heartbeat is fresh', () => {
+  const activeOnAnotherDevice = { id: 'shared-video', mediaType: 'video', status: 'pending', createdAt: old, submissionHeartbeatAt: now - 20_000 };
+  assert.equal(isStuckPendingMedia(activeOnAnotherDevice, now), false);
+});
+
+test('an abandoned video without a task ID can be failed after its shared heartbeat expires', () => {
+  const abandoned = { id: 'abandoned-video', mediaType: 'video', status: 'pending', createdAt: old, submissionHeartbeatAt: now - 240_000 };
+  assert.equal(isStuckPendingMedia(abandoned, now), true);
+});

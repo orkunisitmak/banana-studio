@@ -29,7 +29,8 @@ import { createRecreateConfig, mergeRecreateHydration } from './lib/gallery/recr
 import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
-import { isStuckPendingMedia } from './lib/gallery/stuckPending';
+import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
+import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
@@ -124,6 +125,9 @@ const AuthorizedWorkspace: React.FC<{
   const createPendingVideo = withWorkspaceSession(workspaceStorage.createPendingVideo);
   const updateVideoStatus = withWorkspaceSession(workspaceStorage.updateVideoStatus);
   const getImageById = withWorkspaceSession(workspaceStorage.getImageById);
+  const refreshVideoSubmission = withWorkspaceSession((id: string) => refreshPendingVideoSubmission(supabase, userId, id));
+  const failStaleVideoSubmission = withWorkspaceSession((id: string, message: string, now: number) =>
+    failStalePendingVideo(supabase, userId, id, message, now));
   const createPendingImage = withWorkspaceSession(workspaceStorage.createPendingImage);
   const setImageTaskInfo = withWorkspaceSession(workspaceStorage.setImageTaskInfo);
   const updateImageStatus = withWorkspaceSession(workspaceStorage.updateImageStatus);
@@ -159,6 +163,10 @@ const AuthorizedWorkspace: React.FC<{
   }, []);
 
   const [generatedMedia, setGeneratedMedia] = useState<GeneratedMedia[]>([]);
+  const generatedMediaRef = useRef<GeneratedMedia[]>([]);
+  const lastStaleVideoCheckRef = useRef(new Map<string, number>());
+  const checkingStaleVideosRef = useRef(new Set<string>());
+  useEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);
@@ -311,11 +319,18 @@ const AuthorizedWorkspace: React.FC<{
             // generationCost when it later calls saveVideo. Reading those from
             // React state inside resumeVideoPolling is racy.
             resumeVideoPolling(pending.id, pending.taskId, pending);
-          } else {
-            updateVideoStatus(pending.id, 'failed', { metadata: { error: 'Generation interrupted before task was created' } });
-            setGeneratedMedia(prev => prev.map(item =>
-              item.id === pending.id ? { ...item, isLoading: false, status: 'failed', error: 'Generation interrupted before task was created' } : item
-            ));
+          } else if (isStuckPendingMedia(pending, Date.now())) {
+            // A pending row may belong to another active tab/device. Only the
+            // database's atomic stale-lease check can fail it.
+            const message = 'Generation interrupted before task was created';
+            scheduleStaleVideoCheck(
+              () => failStaleVideoSubmission(pending.id, message, Date.now()),
+              () => cancelled,
+              () => setGeneratedMedia(prev => prev.map(item =>
+                item.id === pending.id && item.status === 'pending'
+                  ? { ...item, isLoading: false, status: 'failed', error: message } : item
+              )),
+            );
           }
         }
 
@@ -346,25 +361,37 @@ const AuthorizedWorkspace: React.FC<{
     };
   }, [isAuthenticated]);
 
-  // Watchdog: auto-fail any video stuck in 'pending' for >90s without a taskId.
-  // This catches cases where the provider createVideoTask call itself failed silently
-  // or the user closed the tab mid-flight before the task_id was saved.
+  // A different tab/device may still be submitting the video and renewing its
+  // shared lease. Never fail a video based on this tab's stale React snapshot.
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(() => {
       const now = Date.now();
+      const errMsg = 'Generation request did not start (timed out before a task ID was returned). You can remove this entry.';
+      for (const item of generatedMediaRef.current) {
+        if (item.mediaType !== 'video' || !isStuckPendingMedia(item, now)
+          || checkingStaleVideosRef.current.has(item.id)
+          || !allowPeriodicStaleCheck(lastStaleVideoCheckRef.current, item.id, now)) continue;
+        checkingStaleVideosRef.current.add(item.id);
+        failStaleVideoSubmission(item.id, errMsg, now)
+          .then(failed => {
+            if (!failed) return;
+            setGeneratedMedia(prev => prev.map(media =>
+              media.id === item.id && media.status === 'pending' && !media.taskId
+                ? { ...media, isLoading: false, status: 'failed' as const, error: errMsg }
+                : media
+            ));
+          })
+          .catch(() => {})
+          .finally(() => { checkingStaleVideosRef.current.delete(item.id); });
+      }
+
       setGeneratedMedia(prev => {
         let changed = false;
         const next = prev.map(item => {
-          // Only cards that never received a provider handle are failed here.
-          if (!isStuckPendingMedia(item, now)) return item;
+          if (item.mediaType !== 'image' || !isStuckPendingMedia(item, now)) return item;
           changed = true;
-          const errMsg = 'Generation request did not start (timed out before a task ID was returned). You can remove this entry.';
-          if (item.mediaType === 'video') {
-            updateVideoStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
-          } else {
-            updateImageStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
-          }
+          updateImageStatus(item.id, 'failed', { metadata: { error: errMsg } }).catch(() => {});
           return { ...item, isLoading: false, status: 'failed' as const, error: errMsg };
         });
         return changed ? next : prev;
@@ -910,6 +937,12 @@ const AuthorizedWorkspace: React.FC<{
         setActiveRequests(value=>Math.max(0,value-1));toast.error('Video not submitted',message);return;
       }
 
+      // Keep the shared pending row alive while uploads, preprocessing and
+      // the provider's initial task creation are in flight.
+      const submissionHeartbeat = setInterval(() => {
+        refreshVideoSubmission(videoId).catch(() => {});
+      }, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS);
+
       const progressToastId = toast.loading(
         'Generating video...',
         config.videoModel === 'minimax-h3'
@@ -938,6 +971,7 @@ const AuthorizedWorkspace: React.FC<{
         if (supabase) {
           await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
         }
+        clearInterval(submissionHeartbeat);
 
         // Log as soon as EvoLink accepts/reserves credits for the task. The
         // previous success-only logging omitted billed tasks that later hit a
@@ -1086,6 +1120,7 @@ const AuthorizedWorkspace: React.FC<{
         toast.error(title, message);
         toast.dismissToast(progressToastId);
       } finally {
+        clearInterval(submissionHeartbeat);
         setActiveRequests(prev => Math.max(0, prev - 1));
       }
       return;

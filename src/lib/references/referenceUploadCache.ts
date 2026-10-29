@@ -11,7 +11,9 @@ export const createReferenceUploader = (
   const cache = new Map<string, Entry>();
   let sequence = 0;
   return async (data: string, mime: string, prefix: string, userScope: string): Promise<string> => {
-    if (data.startsWith('https://')) return refreshUrl(data);
+    // The desktop workspace serves stored media from its own http://127.0.0.1 origin.
+    const origin = globalThis.location?.origin;
+    if (data.startsWith('https://') || (origin?.startsWith('http') && data.startsWith(`${origin}/storage/v1/`))) return refreshUrl(data);
     const request = ++sequence;
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
     const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');

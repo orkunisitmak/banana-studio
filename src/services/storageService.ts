@@ -2045,7 +2045,12 @@ export interface DeleteFolderResult {
   mediaIds: string[];
 }
 
-export const deleteFolder = async (folderId: string): Promise<DeleteFolderResult> => {
+/** Folder media rows that a failed delete left in place; they still exist. */
+export class FolderDeleteError extends Error {
+  constructor(message: string, readonly keptMediaIds: string[]) { super(message); }
+}
+
+export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[], folderIds: string[]) => void): Promise<DeleteFolderResult> => {
   const folderRelations: Array<{ id: string; parentId: string | null }> = [];
   let localFolders: Folder[] = [];
   let localMedia: GeneratedMedia[] = [];
@@ -2141,16 +2146,23 @@ export const deleteFolder = async (folderId: string): Promise<DeleteFolderResult
         }
       }
     }
+  }
 
+  // The caller marks these as deleted before any row goes, so a job that
+  // finishes during the delete cannot save one of them again.
+  onMediaIds?.(Array.from(mediaIds), Array.from(folderIds));
+
+  if (supabase && userId) {
     // Delete media before folders so no foreign-key action can move content
     // back to the parent/root folder.
-    for (const ids of chunk(Array.from(mediaIds))) {
+    const mediaChunks = chunk(Array.from(mediaIds));
+    for (const [index, ids] of mediaChunks.entries()) {
       const { error } = await supabase
         .from('generations')
         .delete()
         .eq('user_id', userId)
         .in('id', ids);
-      if (error) throw new Error(`Folder media could not be deleted: ${error.message}`);
+      if (error) throw new FolderDeleteError(`Folder media could not be deleted: ${error.message}`, mediaChunks.slice(index).flat());
       ids.forEach(removePendingDeletion);
     }
 

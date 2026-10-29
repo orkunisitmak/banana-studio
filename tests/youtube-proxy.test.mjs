@@ -64,6 +64,7 @@ try {
     assert.equal(sanitizeYoutubeParams({ maxResults: 'invalid' }).maxResults, undefined);
     assert.equal(sanitizeYoutubeParams({ maxResults: '10items' }).maxResults, undefined);
     assert.equal(sanitizeYoutubeParams({ maxResults: '1.5' }).maxResults, undefined);
+    assert.equal(sanitizeYoutubeParams({ maxResults: '10\n' }).maxResults, undefined);
   });
 
   test('youtube proxy rejects unsupported endpoints', () => {

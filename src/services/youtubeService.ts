@@ -121,13 +121,16 @@ const parseChannelInput = (
   return null;
 };
 
+// YouTube writes videos of a day or longer as P#DT#H#M#S (ISO 8601), and live streams as P0D.
 const parseDuration = (iso: string): number => {
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  const m = iso.match(/^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
   if (!m) return 0;
   return (
-    parseInt(m[1] || '0') * 3600 +
-    parseInt(m[2] || '0') * 60 +
-    parseInt(m[3] || '0')
+    parseInt(m[1] || '0') * 604800 +
+    parseInt(m[2] || '0') * 86400 +
+    parseInt(m[3] || '0') * 3600 +
+    parseInt(m[4] || '0') * 60 +
+    parseInt(m[5] || '0')
   );
 };
 

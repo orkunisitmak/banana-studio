@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider } from '../src/lib/providers.ts';
+import { LOCAL_AGENT_PROVIDERS, MODEL_ROUTES, PROVIDER_LABELS, resolveProvider } from '../src/lib/providers.ts';
 import { falSeedanceInput, openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
 import { resizePixels } from '../src/lib/images/resizePixels.ts';
 import { build } from 'esbuild';
@@ -23,7 +23,8 @@ test('every key combination selects only a configured route for the same model',
       const expected=routes.find(provider=>available[provider]);
       if(expected)assert.equal(resolveProvider(model,'auto',available),expected);
       else assert.throws(()=>resolveProvider(model,'auto',available),/key|keys/);
-      if(routes.includes('codex'))assert.equal(routes.at(-1),'codex','Auto prefers configured API keys over the ChatGPT plan');
+      const firstAgent=routes.findIndex(provider=>LOCAL_AGENT_PROVIDERS.includes(provider));
+      if(firstAgent>=0)assert.ok(routes.slice(firstAgent).every(provider=>LOCAL_AGENT_PROVIDERS.includes(provider)),'Auto prefers configured API keys over a subscription sign-in');
       for(const provider of providers){
         if(routes.includes(provider)&&available[provider])assert.equal(resolveProvider(model,provider,available),provider);
         else assert.throws(()=>resolveProvider(model,provider,available));

@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, requestCodexImage } from '../api/_lib/codexImage.ts';
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
+// Bundled: the module imports its siblings with NodeNext `.js` specifiers.
+const compiled = await build({ entryPoints: [fileURLToPath(new URL('../api/_lib/codexImage.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, requestCodexImage } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 const withEnv = async (values, run) => {

@@ -8,7 +8,7 @@ Tablolar uygulamanın kullandığı bağlantıları gösterir. Model erişimi, f
 
 ## Bütün servislerde hesap açman gerekmez
 
-Mac veya Windows'ta **Provider keys** bölümüne kullanacağın **bir veya birkaç** anahtarı ekle. **AI settings → Provider routing** içinde model başına **Auto** veya belirli sağlayıcı seç. Üretim barında ve edit prompt kutusunda da seçim görünür. Auto, tabloda soldan sağa doğru tanımlı anahtarı olan ilk bağlantıyı **istek gönderilmeden önce** seçer. Eksik anahtarlar zorunlu kurulum adımı değildir.
+Mac veya Windows'ta **Providers** bölümüne kullanacağın **bir veya birkaç** anahtarı ekle. **AI settings → Routing** içinde model başına **Auto** veya belirli sağlayıcı seç. Üretim barında ve edit prompt kutusunda da seçim görünür. Auto, tabloda soldan sağa doğru tanımlı anahtarı olan ilk bağlantıyı **istek gönderilmeden önce** seçer. Eksik anahtarlar zorunlu kurulum adımı değildir.
 
 Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sağlayıcısını korur. Ayar değişikliği yeni işleri etkiler. Anahtarı kaldırmak işi başka serviste tekrar başlatmaz; kurtarmak için ilk sağlayıcının anahtarını geri ekle. Sonucu belirsiz ücretli istekler otomatik tekrarlanmaz. Yönlendirme tercihleri masaüstünde yerel veritabanında, webde bu tarayıcıda hesap başına saklanır.
 
@@ -25,6 +25,19 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Gerektiğinde video referansı ön işlemi | fal.ai | `FAL_KEY` |
 | YouTube arama / kanal ve video bilgileri | YouTube Data API v3 | `YOUTUBE_API_KEY` |
+
+### Abonelikle metin modelleri (yerel ajanlar)
+
+Mac ve Windows'ta **AI settings → Providers → Local agents** dört CLI'ı algılar; kurulu ve giriş yapılmış olup olmadıklarını gösterir. Bağlandıktan sonra Enhance, Brainstorm ve Variation API anahtarı yerine aboneliğini kullanabilir:
+
+| Yerel ajan | Giriş | Kullanılan model |
+|---|---|---|
+| [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) | Claude Pro veya Max ile `claude auth login` | Claude Opus 5.5 |
+| [Codex](https://developers.openai.com/codex/cli) | `codex login` → Sign in with ChatGPT | GPT-6.1 Sol, GPT Image 2.5 |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` komutunu bir kez çalıştır → Login with Google | Gemini 3.8 Flash (yalnızca metin) |
+| [opencode](https://opencode.ai) | `opencode auth login` → OpenCode | Claude Opus 5.5, GPT-6.1 Sol, Gemini 3.8 Flash |
+
+Her çalıştırma bilgisayarındaki CLI'ı boş geçici bir klasörde, tüm araçlar kapalı, en az ortam değişkeniyle başlatır ve prompt'u stdin ile gönderir. Banana Studio CLI token'larını okumaz veya saklamaz; yalnızca giriş türünü kontrol eder. Auto yine önce kayıtlı API anahtarını seçer; ajanı önce kullanmak için **Routing** bölümünden seç. API anahtarıyla giriş yapılmış CLI bu şekilde gösterilir ve abonelik rotası olarak kullanılmaz. Alışılmadık kurulumlar için `CLAUDE_BIN`, `CODEX_BIN`, `GEMINI_CLI_BIN` veya `OPENCODE_BIN` değişkenine tam yolu yaz; gizlemek için `CLAUDE_CODE_ENABLED`, `CODEX_ENABLED`, `GEMINI_CLI_ENABLED`, `OPENCODE_ENABLED` değerini `false` yap. YouTube görüntü analizi için yine Gemini veya OpenRouter anahtarı gerekir.
 
 ### ChatGPT aboneliğiyle GPT Image
 
@@ -57,7 +70,7 @@ Resmî bağlantılar: [OpenRouter görsel](https://openrouter.ai/docs/guides/ove
 
 ## Anahtar oluştur
 
-Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya Windows'ta **Provider keys** içindeki doğru kutuya yapıştır. Web sürümünde kurulumu yapan kişi aynı değeri Vercel'de yukarıdaki isimle ortam değişkenine kaydeder, ardından yeniden deploy eder.
+Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya Windows'ta **Providers** bölümündeki doğru satıra yapıştır. Web sürümünde kurulumu yapan kişi aynı değeri Vercel'de yukarıdaki isimle ortam değişkenine kaydeder, ardından yeniden deploy eder.
 
 | Sağlayıcı | Başlangıç | Resmî açıklama |
 | --- | --- | --- |

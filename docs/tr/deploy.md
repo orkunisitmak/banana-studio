@@ -138,6 +138,6 @@ Web alanın artık adresinden Windows, Mac ve mobil tarayıcılarla kullanılabi
 | “Set your verified, lowercase owner email” | SQL Editor kopyasında örnek adresi değiştir; küçük harf ve boşluksuz doğru e-posta kullan. |
 | Eksik sağlayıcı / reddedilen model | [Tablodan](models.md) modelin servisini bul; bakiye ve model erişimini kontrol et. |
 | İş kuyrukta kalıyor veya kaydedilemiyor | Kuyruk, Cron, sunucu secret/service-role ayarı ve Vercel fonksiyon hatalarını kontrol et. `media` özel kalsın, migration erişim kuralları korunsun. |
-| Anahtarı kaydettin ama değişmedi | Webi yeniden deploy et. Mac'te Provider keys → Save kullanılır. |
+| Anahtarı kaydettin ama değişmedi | Webi yeniden deploy et. Mac'te Providers → Add key kullanılır. |
 
 Kod, log ve şema geliştirme için [geliştirici rehberine](development.md) devam et. Log/ekran görüntüsü paylaşmadan önce [SECURITY.md](../../SECURITY.md) dosyasını oku. Gereken ayarların doğruluk kaynağı uygulamanın sunucu kodu ve [başlangıç şemasıdır](../../supabase/migrations/20261019123903_banana_studio_baseline.sql).

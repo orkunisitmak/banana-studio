@@ -22,7 +22,7 @@ The current release is **v0.1.2** and requires **macOS 13.5 or later**. It inclu
 
 ## Add the keys you need
 
-1. Select **Provider keys** in the top bar, or **Banana Studio → Provider API Keys…** in the Mac menu.
+1. Select **Providers** in the top bar, or **Banana Studio → Provider API Keys…** in the Mac menu.
 2. Create a key with your chosen provider using the [provider links](models.md). The provider may require billing or model access before it accepts requests.
 3. Paste it into the matching field and select **Save**. Do not paste API keys into the generation prompt.
 4. Select the corresponding image/video model. If you use Enhance or Brainstorm, open **AI settings** and select a configured text model too.
@@ -51,7 +51,7 @@ The local database is not separately encrypted; macOS account protection, FileVa
 1. Download [Banana-Studio-0.1.2-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) for Windows 10/11 on 64-bit Intel/AMD PCs.
 2. Choose **Extract all**. Keep the entire extracted **Banana Studio** folder together; do not run the executable inside the zip or move only the `.exe`.
 3. Open **BananaStudio.exe**. Node.js, .NET and the local database are bundled. The app requires Microsoft's **Edge WebView2 Runtime**, normally present on Windows 10/11; if the app reports it missing, install it from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/).
-4. Use **Provider keys** (or **File → Provider API Keys…**) and add only the keys you need. They stay in **Windows Credential Manager**. No Supabase, Google login or cloud setup is needed.
+4. Use **Providers** (or **File → Provider API Keys…**) and add only the keys you need. They stay in **Windows Credential Manager**. No Supabase, Google login or cloud setup is needed.
 5. Use the same Library, gallery, preview, image/video generation and edit controls as on Mac.
 
 This is an **unsigned community build**. Windows may show an unrecognized-publisher warning. Check that the archive came from this repository's release and compare its SHA-256 with `verification-windows-x64.json`. Do not disable Windows security or use a package from a different source.

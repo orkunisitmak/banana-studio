@@ -12,7 +12,7 @@ Windows kullanıcılarının da erişeceği ortak bir alan için [web sürümün
 
 ## İlk görselini üret
 
-1. Mac'te **Provider keys** bölümünü aç; webde alan sahibinden servisi ayarlamasını iste.
+1. Mac'te **Providers** bölümünü aç; webde alan sahibinden servisi ayarlamasını iste.
 2. İlgili anahtarı ekle. Örneğin GPT Image 2.5, OpenAI anahtarı kullanır.
 3. Görsel üretimini ve anahtarını eklediğin modeli seç.
 4. İstediğini yaz: “Gün doğumunda bir dağ evinin sıcak tonlarda editoryal illüstrasyonu; sade şekiller, geniş kompozisyon.”

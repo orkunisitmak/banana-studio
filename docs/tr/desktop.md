@@ -22,7 +22,7 @@ Mevcut sürüm **v0.1.2**, gereken sistem **macOS 13.5 veya sonrası**. Çalış
 
 ## Gereken anahtarları ekle
 
-1. Üstteki **Provider keys** düğmesini veya Mac menüsündeki **Banana Studio → Provider API Keys…** seçeneğini aç.
+1. Üstteki **Providers** düğmesini veya Mac menüsündeki **Banana Studio → Provider API Keys…** seçeneğini aç.
 2. [Sağlayıcı bağlantılarından](models.md) kullanacağın serviste anahtar oluştur. Servisin ödeme veya model erişimi açmanı istemesi mümkündür.
 3. Anahtarı ilgili kutuya yapıştır ve **Save** seç. Anahtarı üretim promptuna yazma.
 4. O servise ait görsel/video modelini seç. Enhance veya Brainstorm için **AI settings** bölümünde anahtarını eklediğin bir metin modeli de seç.
@@ -51,7 +51,7 @@ Yerel veritabanı ayrıca şifrelenmez; dosyaları Mac hesap güvenliği, FileVa
 1. 64-bit Intel/AMD işlemcili Windows 10/11 için [Banana-Studio-0.1.2-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) indir.
 2. **Tümünü ayıkla** seç. Çıkan **Banana Studio** klasörünü bütün olarak tut; zip içinden çalıştırma, yalnızca `.exe` dosyasını taşıma.
 3. **BananaStudio.exe** aç. Node.js, .NET ve yerel veritabanı dahildir. Microsoft **Edge WebView2 Runtime** gerekir; Windows 10/11'de genellikle bulunur. Eksik olduğu belirtilirse [Microsoft'tan](https://developer.microsoft.com/microsoft-edge/webview2/) kur.
-4. **Provider keys** veya **File → Provider API Keys…** ile gereken anahtarları ekle. Anahtarlar **Windows Credential Manager** içinde saklanır. Supabase, Google girişi veya sunucu kurulumu gerekmez.
+4. **Providers** veya **File → Provider API Keys…** ile gereken anahtarları ekle. Anahtarlar **Windows Credential Manager** içinde saklanır. Supabase, Google girişi veya sunucu kurulumu gerekmez.
 5. Mac ile aynı Library, galeri, preview, görsel/video üretimi ve edit kontrollerini kullan.
 
 Bu **imzasız topluluk sürümüdür**. Windows, tanınmayan yayıncı uyarısı gösterebilir. Arşivin bu reponun yayınından geldiğini ve SHA-256 değerinin `verification-windows-x64.json` ile eşleştiğini kontrol et. Windows güvenliğini kapatma, başka kaynaktan paket kullanma.

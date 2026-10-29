@@ -8,7 +8,7 @@ These tables describe the app's configured routes. Provider availability, accoun
 
 ## Choose accounts, not mandatory bundles
 
-Add **one or more** provider keys in **Provider keys** on Mac or Windows. In **AI settings → Provider routing**, choose **Auto** or pin a provider for each model. The generation bar and edit composer show that choice too. Auto tries the configured routes in the table's order **before** sending a request. Missing keys are skipped; they are not required setup steps.
+Add **one or more** provider keys in **Providers** on Mac or Windows. In **AI settings → Routing**, choose **Auto** or pin a provider for each model. The generation bar and edit composer show that choice too. Auto tries the configured routes in the table's order **before** sending a request. Missing keys are skipped; they are not required setup steps.
 
 Once accepted, an image job keeps its provider across reloads and app restarts. Changing settings affects new work. Removing a key does not switch a saved job to another account/provider. Restore its original key to recover it. Ambiguous timeouts are never automatically submitted elsewhere. Routing preferences are saved in the desktop workspace database, or per account in this browser for hosted web installations.
 
@@ -25,6 +25,19 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
 | YouTube search / channel and video metadata | YouTube Data API v3 | `YOUTUBE_API_KEY` |
+
+### Use text models with a subscription (local agents)
+
+On Mac and Windows, **AI settings → Providers → Local agents** detects four CLIs and shows whether each is installed and signed in. Once connected, Enhance, Brainstorm and Variation can use your plan instead of an API key:
+
+| Local agent | Sign in | Serves |
+|---|---|---|
+| [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) | `claude auth login` with a Claude Pro or Max plan | Claude Opus 5.5 |
+| [Codex](https://developers.openai.com/codex/cli) | `codex login` → Sign in with ChatGPT | GPT-6.1 Sol, GPT Image 2.5 |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | run `gemini` once → Login with Google | Gemini 3.8 Flash (text only) |
+| [opencode](https://opencode.ai) | `opencode auth login` → OpenCode | Claude Opus 5.5, GPT-6.1 Sol, Gemini 3.8 Flash |
+
+Each run starts the CLI already on your computer in an empty temporary folder, with every tool denied, a minimal environment and the prompt sent over stdin. Banana Studio never reads or stores the CLI's tokens; it only checks the sign-in type. Auto still prefers a configured API key; pick the agent in **Routing** to use it first. A CLI signed in with an API key is shown as such and is not used as a subscription route. Set `CLAUDE_BIN`, `CODEX_BIN`, `GEMINI_CLI_BIN` or `OPENCODE_BIN` to a full path for unusual installs, or `CLAUDE_CODE_ENABLED`, `CODEX_ENABLED`, `GEMINI_CLI_ENABLED`, `OPENCODE_ENABLED` to `false` to hide one. YouTube footage analysis still needs a Gemini or OpenRouter key.
 
 ### Use GPT Image with a ChatGPT plan
 
@@ -57,7 +70,7 @@ Official contracts: [OpenRouter images](https://openrouter.ai/docs/guides/overvi
 
 ## Create a key
 
-Create an account with the provider, open its key dashboard, create a key and copy it into the matching **Provider keys** field on Mac or Windows. For the web version, the installation owner saves the same value under the environment variable above in Vercel, then redeploys.
+Create an account with the provider, open its key dashboard, create a key and copy it into the matching **Providers** entry on Mac or Windows. For the web version, the installation owner saves the same value under the environment variable above in Vercel, then redeploys.
 
 | Provider | Start here | Official instructions |
 | --- | --- | --- |

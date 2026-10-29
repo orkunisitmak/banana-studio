@@ -134,7 +134,9 @@ internal sealed class StudioWindow : Form
                 {
                     using var value = JsonDocument.Parse(args.WebMessageAsJson);
                     var action = value.RootElement.GetProperty("action").GetString();
-                    if (action == "keys") await ShowKeys();
+                    // An optional account opens the prompt for that one provider; it never carries a key value.
+                    var account = value.RootElement.TryGetProperty("account", out var named) ? named.GetString() : null;
+                    if (action == "keys" && (account == null || KeyVault.Providers.Any(provider => provider.Name == account))) await ShowKeys(account);
                     if (action == "lock") Close();
                 }
                 catch (JsonException) { } catch (KeyNotFoundException) { }
@@ -176,7 +178,7 @@ internal sealed class StudioWindow : Form
         finally { fullscreenTransition = false; CaptureNormalWindowBounds(); }
     }
     private bool keysOpen;
-    private async Task ShowKeys()
+    private async Task ShowKeys(string? only = null)
     {
         if (keysOpen || origin == null) return;
         keysOpen = true;
@@ -188,7 +190,7 @@ internal sealed class StudioWindow : Form
             grid.Controls.Add(info, 0, 0); grid.SetColumnSpan(info, 3);
             var rows = new List<(string Name, TextBox Field, CheckBox Remove)>();
             var row = 1;
-            foreach (var provider in KeyVault.Providers)
+            foreach (var provider in KeyVault.Providers.Where(provider => only == null || provider.Name == only))
             {
                 var field = new TextBox { Width = 300, UseSystemPasswordChar = true, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = KeyVault.Read(provider.Name) != null ? "Saved in Credential Manager" : "Paste your API key" };
                 var remove = new CheckBox { Text = "Remove", AutoSize = true };
@@ -202,6 +204,8 @@ internal sealed class StudioWindow : Form
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             foreach (var item in rows) { if (item.Remove.Checked) KeyVault.Save(item.Name, null); else if (!string.IsNullOrWhiteSpace(item.Field.Text)) KeyVault.Save(item.Name, item.Field.Text.Trim()); item.Field.Clear(); }
             await workspace.RefreshKeys();
+            // Tells the page to re-read provider status. The event carries no data.
+            if (web.CoreWebView2 != null) await web.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new Event('banana-native-keys-changed'))");
         }
         catch { MessageBox.Show(this, "The keys could not be saved or activated. Check Windows Credential Manager and try again.", "Provider API Keys", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { keysOpen = false; }

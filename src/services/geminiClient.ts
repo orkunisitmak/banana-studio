@@ -2,6 +2,7 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import { isLocalAgentProvider, type LocalAgentProvider } from '../lib/providers';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -40,6 +41,8 @@ export interface GenerateContentRequest {
   brainstormFormat?: 'wardrobe';
   brainstormCount?: number;
   outputFormat?: 'youtube_analysis';
+  /** Set only for local agents, which share one endpoint. */
+  provider?: LocalAgentProvider;
   usageContext?: { action: 'enhance' | 'video_enhance' | 'brainstorm' | 'variation'; prompt: string };
 }
 
@@ -169,7 +172,7 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  return generateContent(isLocalAgentProvider(provider) ? { ...normalized, provider } : normalized, isLocalAgentProvider(provider) ? '/api/local-agent-text-generate' : provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({
   models: {

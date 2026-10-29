@@ -106,7 +106,7 @@ MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to 
 | Windows 10/11, 64-bit Intel/AMD | Standalone portable app | [Download](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) · [Installation guide](docs/en/desktop.md#windows-download-and-open) |
 | Other computers, phones and tablets | Web version in a browser | Open a deployed workspace; its owner manages access and provider keys. |
 
-**Desktop quick start:** download → unzip → open (Mac: move to Applications first) → **Provider keys** → add the key for your model → generate. Both standalone apps need **no Supabase, Vercel, Google sign-in or separate Node installation**. The gallery stays on your computer. API keys stay in macOS Keychain or Windows Credential Manager. Keep the app open while jobs run; minimizing is fine. [First-open permissions, updates and backups →](docs/en/desktop.md)
+**Desktop quick start:** download → unzip → open (Mac: move to Applications first) → **Providers** → add the key for your model → generate. Both standalone apps need **no Supabase, Vercel, Google sign-in or separate Node installation**. The gallery stays on your computer. API keys stay in macOS Keychain or Windows Credential Manager. Keep the app open while jobs run; minimizing is fine. [First-open permissions, updates and backups →](docs/en/desktop.md)
 
 ## Models and API keys
 

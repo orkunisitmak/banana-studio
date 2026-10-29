@@ -3,64 +3,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { agentEnvironment, codexAuth, findAgentBinary, localAgentAvailable } from './localAgents.js';
 
 /** GPT Image through the official Codex CLI signed in with a ChatGPT plan.
  * Desktop only: the app never reads or forwards Codex credentials; it runs
  * the user's own `codex` binary, which uses its own login. */
 const TIMEOUT_MS = 240_000;
 const MAX_OUTPUT_BYTES = 50 * 1024 * 1024;
-const exe = process.platform === 'win32' ? 'codex.exe' : 'codex';
 
 const codexHome = () => process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
-
-// A Finder- or Explorer-launched app has a minimal PATH; check the usual install locations too.
-const candidateDirectories = () => {
-  const home = os.homedir();
-  return [...(process.env.PATH || '').split(path.delimiter),
-    ...(process.platform === 'win32'
-      ? [path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'codex')]
-      : ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local/bin'), path.join(home, '.npm-global/bin'), path.join(home, '.bun/bin'), path.join(home, '.volta/bin')]),
-  ].filter(Boolean);
-};
-
-export const findCodexBinary = (): string | null => {
-  const configured = process.env.CODEX_BIN?.trim();
-  // Windows .cmd/.bat shims cannot be started without a shell, and the prompt must never pass through one.
-  if (configured) return path.isAbsolute(configured) && !/\.(cmd|bat)$/i.test(configured) && fs.existsSync(configured) ? configured : null;
-  for (const directory of candidateDirectories()) {
-    const file = path.join(directory, exe);
-    try { if (fs.statSync(file).isFile()) return file; } catch { /* Not installed here. */ }
-  }
-  return null;
-};
-
+export const findCodexBinary = (): string | null => findAgentBinary('codex');
 /** True when Codex stores a ChatGPT sign-in. Only the auth mode is inspected. */
-export const hasChatGPTLogin = (): boolean => {
-  try { return JSON.parse(fs.readFileSync(path.join(codexHome(), 'auth.json'), 'utf8'))?.auth_mode === 'chatgpt'; }
-  catch { return false; }
-};
-
-let cached: { at: number; value: boolean } | undefined;
-export const codexAvailable = (): boolean => {
-  if (process.env.BANANA_RUNTIME !== 'local' || process.env.CODEX_ENABLED === 'false') return false;
-  if (cached && Date.now() - cached.at < 15_000) return cached.value;
-  const value = !!findCodexBinary() && hasChatGPTLogin();
-  cached = { at: Date.now(), value };
-  return value;
-};
-
-// Only what Codex needs to run and reach the network. Provider keys and server
-// secrets in this process's environment never reach the child, so Codex cannot
-// silently switch to an API key such as OPENAI_API_KEY.
-const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TEMP', 'TMP', 'CODEX_HOME',
-  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
-  'SystemRoot', 'WINDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'COMSPEC', 'PATHEXT'];
-export const codexEnvironment = (binary: string): NodeJS.ProcessEnv => {
-  const env: NodeJS.ProcessEnv = Object.fromEntries(ENV_ALLOWLIST.filter(name => process.env[name]).map(name => [name, process.env[name]]));
-  // npm installs `codex` as a Node script; the app's bundled Node satisfies its shebang.
-  env.PATH = [...new Set([path.dirname(binary), path.dirname(process.execPath), ...candidateDirectories()])].join(path.delimiter);
-  return env;
-};
+export const hasChatGPTLogin = (): boolean => codexAuth().auth === 'signed-in';
+export const codexAvailable = (): boolean => localAgentAvailable('codex');
+export const codexEnvironment = (binary: string): NodeJS.ProcessEnv => agentEnvironment(binary, 'codex');
 
 export const codexImagePrompt = (input: Record<string, any>, imageCount: number): string => {
   const canvas = typeof input.size === 'string' && /^\d+x\d+$/.test(input.size)

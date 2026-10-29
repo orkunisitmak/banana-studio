@@ -44,6 +44,17 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
   return selected;
 }
 
+/** Local agents that take text only; image references are never routed to them. */
+export const TEXT_ONLY_PROVIDERS: readonly AIProvider[] = ['gemini-cli'];
+/** Like resolveProvider, but a request with image references skips text-only
+ * routes under Auto (keeping the remaining order), and a pinned text-only route
+ * fails instead of falling back to another provider. */
+export function resolveProviderForContent(model: string, choice: unknown, available: ProviderAvailability, { images = false } = {}): AIProvider {
+  if (!images) return resolveProvider(model, choice, available);
+  if (TEXT_ONLY_PROVIDERS.includes(choice as AIProvider)) throw new Error(`${PROVIDER_LABELS[choice as AIProvider]} accepts text only. Remove the image references, or choose another provider in AI settings.`);
+  return resolveProvider(model, choice, { ...available, ...Object.fromEntries(TEXT_ONLY_PROVIDERS.map(provider => [provider, false])) });
+}
+
 export const OPENROUTER_MODELS: Record<string, string> = {
   'gpt-image-2.5-sunburst': 'openai/gpt-image-2.5-sunburst',
   'gemini-3-pro-image-preview': 'google/gemini-3-pro-image',

@@ -1,5 +1,5 @@
 import { supabase } from './authService';
-import { resolveProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
+import { resolveProviderForContent, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 
 // Preferences contain only route names. Credentials stay in the native vault/server.
@@ -32,7 +32,7 @@ export async function getProviderAvailability(signal?: AbortSignal): Promise<Pro
   if (!response.ok) throw new Error('Provider availability could not be checked. No generation was submitted.');
   return (await response.json()).providers || {};
 }
-export async function selectProvider(model: string, signal?: AbortSignal) {
+export async function selectProvider(model: string, signal?: AbortSignal, content: { images?: boolean } = {}) {
   const [preferences, available] = await Promise.all([getProviderPreferences(), getProviderAvailability(signal)]);
-  return resolveProvider(model, preferences[model], available);
+  return resolveProviderForContent(model, preferences[model], available, content);
 }

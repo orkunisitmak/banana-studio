@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, KeyRound, Loader2, RefreshCw, Terminal } from 'lucide-react';
 import { MODEL_ROUTES, PROVIDER_KEYS, PROVIDER_LABELS, type AIProvider, type KeyedProvider, type LocalAgentProvider } from '../lib/providers';
 import { getProviderStatus, type LocalAgentStatus, type ProviderStatus } from '../services/providerStatus';
@@ -102,18 +102,24 @@ export function ProvidersSettings() {
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
+  // Loads can overlap (mount, focus, key changes); only the newest may update the panel.
+  const latest = useRef(0);
   const load = useCallback(async (refresh = false) => {
+    const request = ++latest.current;
     setChecking(refresh); setError('');
-    try { setStatus(await getProviderStatus({ refresh })); window.dispatchEvent(new Event(PROVIDERS_CHANGED)); }
-    catch (error) { setError((error as Error).message); }
-    finally { setChecking(false); }
+    try {
+      const next = await getProviderStatus({ refresh });
+      if (request !== latest.current) return;
+      setStatus(next); window.dispatchEvent(new Event(PROVIDERS_CHANGED));
+    } catch (error) { if (request === latest.current) setError((error as Error).message); }
+    finally { if (request === latest.current) setChecking(false); }
   }, []);
   useEffect(() => {
     void load();
-    // Only Check again and key changes force a re-probe; focus reads the cached status.
-    const refresh = () => void load(true), reread = () => void load();
-    window.addEventListener(NATIVE_KEYS_CHANGED, refresh); window.addEventListener('focus', reread);
-    return () => { window.removeEventListener(NATIVE_KEYS_CHANGED, refresh); window.removeEventListener('focus', reread); };
+    // Re-probe on return too: a CLI is usually signed in from Terminal, then the user comes back.
+    const refresh = () => void load(true);
+    window.addEventListener(NATIVE_KEYS_CHANGED, refresh); window.addEventListener('focus', refresh);
+    return () => { window.removeEventListener(NATIVE_KEYS_CHANGED, refresh); window.removeEventListener('focus', refresh); };
   }, [load]);
   const managed = !status?.local || !hasNativeShell();
   const connected = status ? Object.values(status.keys as Record<string, { configured: boolean; disabled: boolean }>).filter(key => key.configured && !key.disabled).length

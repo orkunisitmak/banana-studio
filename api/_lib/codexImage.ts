@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { agentEnvironment, codexAuth, findAgentBinary, localAgentAvailable } from './localAgents.js';
+import { agentCommand, agentEnvironment, codexAuth, findAgentBinary, localAgentAvailable } from './localAgents.js';
 
 /** GPT Image through the official Codex CLI signed in with a ChatGPT plan.
  * Desktop only: the app never reads or forwards Codex credentials; it runs
@@ -40,7 +40,8 @@ export const codexArguments = (imagePaths: string[], workingDirectory: string): 
 
 const runCodex = (binary: string, args: string[], prompt: string, signal?: AbortSignal) => new Promise<{ threadId: string; message: string }>((resolve, reject) => {
   // The prompt goes through stdin, never through a shell or the argument list.
-  const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: codexEnvironment(binary) });
+  const { command, args: prefix } = agentCommand(binary);
+  const child = spawn(command, [...prefix, ...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: codexEnvironment(binary) });
   let threadId = '', message = '', failure = '', lastError = '', buffer = '', stderr = '';
   const stop = (error: Error) => { child.kill('SIGTERM'); reject(error); };
   const timer = setTimeout(() => stop(Object.assign(new Error('Codex did not finish the image in time.'), { name: 'TimeoutError' })), TIMEOUT_MS);

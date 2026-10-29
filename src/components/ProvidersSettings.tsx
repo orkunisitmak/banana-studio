@@ -110,9 +110,10 @@ export function ProvidersSettings() {
   }, []);
   useEffect(() => {
     void load();
-    const refresh = () => void load(true);
-    window.addEventListener(NATIVE_KEYS_CHANGED, refresh); window.addEventListener('focus', refresh);
-    return () => { window.removeEventListener(NATIVE_KEYS_CHANGED, refresh); window.removeEventListener('focus', refresh); };
+    // Only Check again and key changes force a re-probe; focus reads the cached status.
+    const refresh = () => void load(true), reread = () => void load();
+    window.addEventListener(NATIVE_KEYS_CHANGED, refresh); window.addEventListener('focus', reread);
+    return () => { window.removeEventListener(NATIVE_KEYS_CHANGED, refresh); window.removeEventListener('focus', reread); };
   }, [load]);
   const managed = !status?.local || !hasNativeShell();
   const connected = status ? Object.values(status.keys as Record<string, { configured: boolean; disabled: boolean }>).filter(key => key.configured && !key.disabled).length

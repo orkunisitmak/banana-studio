@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { agentEnvironment, findAgentBinary, localAgentAvailable, type LocalAgent } from './localAgents.js';
+import { agentCommand, agentEnvironment, findAgentBinary, localAgentStatusWarm, type LocalAgent } from './localAgents.js';
 
 /** Prompt-writing text tasks (Enhance, Brainstorm, Variation) through the
  * desktop user's own Codex or Claude Code sign-in. Tools are disabled and the
@@ -65,7 +65,8 @@ export const codexTextPrompt = (request: LocalTextRequest): string => [
 
 const LABELS: Record<LocalAgent, string> = { codex: 'Codex', 'claude-code': 'Claude Code', 'gemini-cli': 'Gemini CLI', opencode: 'opencode' };
 const run = (agent: LocalAgent, binary: string, args: string[], input: string, cwd: string, signal?: AbortSignal, extraEnv: NodeJS.ProcessEnv = {}) => new Promise<LocalTextResult>((resolve, reject) => {
-  const child = spawn(binary, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...agentEnvironment(binary, agent), ...extraEnv } });
+  const { command, args: prefix } = agentCommand(binary);
+  const child = spawn(command, [...prefix, ...args], { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...agentEnvironment(binary, agent), ...extraEnv } });
   let whole = '';
   let buffer = '', size = 0, stderr = '', text = '', sessionId: string | null = null, failure = '', lastError = '';
   const stop = (error: Error) => { child.kill('SIGTERM'); reject(error); };
@@ -132,7 +133,7 @@ const writeImages = (directory: string, parts: LocalTextPart[]) => parts.filter(
 
 export async function runLocalAgentText(request: LocalTextRequest, signal?: AbortSignal): Promise<LocalTextResult> {
   const binary = findAgentBinary(request.agent);
-  if (!binary || !localAgentAvailable(request.agent)) throw Object.assign(new Error(SIGN_IN[request.agent]), { status: 401 });
+  if (!binary || !(await localAgentStatusWarm(request.agent)).available) throw Object.assign(new Error(SIGN_IN[request.agent]), { status: 401 });
   // An empty private directory: the agent has nothing to read even with a read-only sandbox.
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), `banana-${request.agent}-${randomUUID().slice(0, 8)}-`));
   try {

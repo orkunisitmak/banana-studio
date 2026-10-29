@@ -38,8 +38,11 @@ test('Claude Code status reports install, version and sign-in without account de
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-claude-'));
   try {
     const binary = fakeClaude(directory);
-    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: binary, CLAUDE_CODE_ENABLED: undefined }, () => {
-      const status = agents.localAgentStatus('claude-code', { fresh: true });
+    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: binary, CLAUDE_CODE_ENABLED: undefined }, async () => {
+      const cold = agents.localAgentStatus('claude-code');
+      assert.equal(cold.available, false, 'a cache miss answers at once instead of waiting for the CLI');
+      const status = await agents.refreshLocalAgentStatus('claude-code');
+      assert.deepEqual(agents.localAgentStatus('claude-code'), status, 'the cached result is served afterwards');
       assert.deepEqual(status, { installed: true, version: '2.1.310', auth: 'signed-in', authMethod: 'Claude subscription', available: true, disabled: false });
       assert.ok(!JSON.stringify(status).includes('example.invalid'), 'the account email never leaves the probe');
     });
@@ -47,13 +50,13 @@ test('Claude Code status reports install, version and sign-in without account de
       const status = agents.localAgentStatus('claude-code');
       assert.equal(status.disabled, true); assert.equal(status.available, false);
     });
-    await withEnv({ BANANA_RUNTIME: undefined, CLAUDE_BIN: binary }, () => assert.equal(agents.localAgentStatus('claude-code', { fresh: true }).available, false, 'hosted workspaces never run local agents'));
-    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: fakeClaude(directory, { method: 'console' }) }, () =>
-      assert.equal(agents.localAgentStatus('claude-code', { fresh: true }).auth, 'api-key', 'an API-key login is not a subscription route'));
-    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: fakeClaude(directory, { loggedIn: false }) }, () =>
-      assert.equal(agents.localAgentStatus('claude-code', { fresh: true }).auth, 'signed-out'));
-    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: path.join(directory, 'missing') }, () =>
-      assert.equal(agents.localAgentStatus('claude-code', { fresh: true }).installed, false));
+    await withEnv({ BANANA_RUNTIME: undefined, CLAUDE_BIN: binary }, async () => assert.equal((await agents.refreshLocalAgentStatus('claude-code')).available, false, 'hosted workspaces never run local agents'));
+    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: fakeClaude(directory, { method: 'console' }) }, async () =>
+      assert.equal((await agents.refreshLocalAgentStatus('claude-code')).auth, 'api-key', 'an API-key login is not a subscription route'));
+    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: fakeClaude(directory, { loggedIn: false }) }, async () =>
+      assert.equal((await agents.refreshLocalAgentStatus('claude-code')).auth, 'signed-out'));
+    await withEnv({ BANANA_RUNTIME: 'local', CLAUDE_BIN: path.join(directory, 'missing') }, async () =>
+      assert.equal((await agents.refreshLocalAgentStatus('claude-code')).installed, false));
   } finally { agents.resetAgentStatusCache(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -124,12 +127,35 @@ test('opencode runs a private tool-less agent and counts only an OpenCode accoun
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-opencode-'));
   try {
     const fake = (name, providers) => { const file = path.join(directory, name); fs.writeFileSync(file, `#!${process.execPath}\nif(process.argv[2]==='--version')console.log('opencode v2.1.4');else console.log(${JSON.stringify(JSON.stringify(providers))});`, { mode: 0o755 }); return file; };
-    await withEnv({ BANANA_RUNTIME: 'local', OPENCODE_BIN: fake('zen', [{ id: 'opencode', connections: [{ id: 'cred_secret', label: 'Personal' }] }]) }, () => {
-      const status = agents.localAgentStatus('opencode', { fresh: true });
+    await withEnv({ BANANA_RUNTIME: 'local', OPENCODE_BIN: fake('zen', [{ id: 'opencode', connections: [{ id: 'cred_secret', label: 'Personal' }] }]) }, async () => {
+      const status = (await agents.refreshLocalAgentStatus('opencode'));
       assert.equal(status.available, true); assert.equal(status.version, '2.1.4');
       assert.ok(!JSON.stringify(status).includes('cred_secret'));
     });
-    await withEnv({ BANANA_RUNTIME: 'local', OPENCODE_BIN: fake('go-only', [{ id: 'opencode-go', connections: [{ id: 'x' }] }]) }, () =>
-      assert.equal(agents.localAgentStatus('opencode', { fresh: true }).auth, 'signed-out', 'other opencode providers do not serve these models'));
+    await withEnv({ BANANA_RUNTIME: 'local', OPENCODE_BIN: fake('go-only', [{ id: 'opencode-go', connections: [{ id: 'x' }] }]) }, async () =>
+      assert.equal((await agents.refreshLocalAgentStatus('opencode')).auth, 'signed-out', 'other opencode providers do not serve these models'));
   } finally { agents.resetAgentStatusCache(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a Windows npm shim resolves to its Node script, which runs under the bundled Node without a shell', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-shim-'));
+  try {
+    const script = path.join(directory, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    fs.mkdirSync(path.dirname(script), { recursive: true }); fs.writeFileSync(script, '');
+    // The shape npm writes for global installs.
+    const shim = path.join(directory, 'codex.cmd');
+    fs.writeFileSync(shim, '@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\nIF EXIST "%dp0%\\node.exe" (SET "_prog=%dp0%\\node.exe") ELSE (SET "_prog=node")\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n');
+    assert.equal(agents.resolveCmdShim(shim), script);
+    const short = path.join(directory, 'short.cmd');
+    fs.writeFileSync(short, '@node "%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js" %*');
+    assert.equal(agents.resolveCmdShim(short), script);
+    const broken = path.join(directory, 'broken.cmd');
+    fs.writeFileSync(broken, '@echo off');
+    assert.equal(agents.resolveCmdShim(broken), null, 'a shim without a script is refused');
+    fs.writeFileSync(path.join(directory, 'gone.cmd'), '"%dp0%\\missing.js" %*');
+    assert.equal(agents.resolveCmdShim(path.join(directory, 'gone.cmd')), null, 'a script that does not exist is refused');
+    assert.deepEqual(agents.agentCommand(script), { command: process.execPath, args: [script] });
+    assert.deepEqual(agents.agentCommand('/usr/local/bin/codex'), { command: '/usr/local/bin/codex', args: [] });
+    withEnv({ CODEX_BIN: shim }, () => assert.equal(agents.findAgentBinary('codex'), script));
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

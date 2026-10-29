@@ -1,10 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { LOCAL_AGENT_PROVIDERS, PROVIDER_KEYS, type KeyedProvider } from '../src/lib/providers.js';
-import { localAgentStatus } from './_lib/localAgents.js';
+import { localAgentStatusWarm } from './_lib/localAgents.js';
 
 /** Detailed provider health for the Providers panel. Reports only whether a
- * key exists, never its value; local agents report install and sign-in state. */
+ * key exists, never its value; local agents report install and sign-in state.
+ * `?refresh=1` re-probes the CLIs (Check again, key changes); otherwise cached
+ * status is served. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res); res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -17,6 +19,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }]));
   return res.status(200).json({ local, keys,
     youtube: { configured: Boolean(process.env.YOUTUBE_API_KEY?.trim()) },
-    agents: local ? Object.fromEntries(LOCAL_AGENT_PROVIDERS.map(agent => [agent, localAgentStatus(agent, { fresh })])) : {},
+    agents: local ? Object.fromEntries(await Promise.all(LOCAL_AGENT_PROVIDERS.map(async agent => [agent, await localAgentStatusWarm(agent, { fresh })]))) : {},
   });
 }

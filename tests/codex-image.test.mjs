@@ -47,8 +47,12 @@ test('Codex is offered only in the desktop runtime with a ChatGPT sign-in', { sk
     const binary = fakeCodex(home);
     await withEnv({ BANANA_RUNTIME: undefined, CODEX_HOME: home, CODEX_BIN: binary }, () => assert.equal(codexAvailable(), false));
     await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: 'false' }, () => assert.equal(codexAvailable(), false));
-    // Positive control. codexAvailable() caches this result, so the conditions below check its two inputs directly.
-    await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: undefined }, () => assert.equal(codexAvailable(), true));
+    // Positive control. codexAvailable() reads a cache that a background probe fills, so wait for it;
+    // the conditions below check its two inputs directly.
+    await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: undefined }, async () => {
+      for (let i = 0; i < 200 && !codexAvailable(); i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(codexAvailable(), true);
+    });
     await withEnv({ CODEX_HOME: home, CODEX_BIN: binary }, () => {
       assert.equal(findCodexBinary(), binary);
       assert.equal(hasChatGPTLogin(), true);

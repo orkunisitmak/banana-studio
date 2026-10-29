@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,18 +44,36 @@ export const candidateDirectories = (agent?: LocalAgent): string[] => {
   ].filter(Boolean);
 };
 
+/** npm on Windows installs `name.cmd` shims that start `node <script>`. The script
+ * is read out of the shim and later run with the app's own Node, so a prompt never
+ * passes through cmd.exe. Returns null when the shim does not point at a script. */
+export const resolveCmdShim = (shim: string): string | null => {
+  let text: string;
+  try { text = fs.readFileSync(shim, 'utf8'); } catch { return null; }
+  const match = text.match(/"%~?dp0%?\\?([^"%]+?\.[cm]?js)"/i);
+  if (!match) return null;
+  const script = path.resolve(path.dirname(shim), match[1].replace(/\\/g, path.sep));
+  try { return fs.statSync(script).isFile() ? script : null; } catch { return null; }
+};
+const usable = (file: string): string | null => {
+  if (/\.(cmd|bat)$/i.test(file)) return resolveCmdShim(file);
+  try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
+};
+
+/** The executable, or on Windows the Node script behind an npm shim. */
 export const findAgentBinary = (agent: LocalAgent): string | null => {
   const { exe, binEnv } = SPEC[agent];
   const configured = process.env[binEnv]?.trim();
-  // Windows .cmd/.bat shims cannot be started without a shell, and prompts must never pass through one.
-  if (configured) return path.isAbsolute(configured) && !/\.(cmd|bat)$/i.test(configured) && fs.existsSync(configured) ? configured : null;
-  const file = process.platform === 'win32' ? `${exe}.exe` : exe;
+  if (configured) return path.isAbsolute(configured) ? usable(configured) : null;
+  const files = process.platform === 'win32' ? [`${exe}.exe`, `${exe}.cmd`] : [exe];
   for (const directory of candidateDirectories(agent)) {
-    const candidate = path.join(directory, file);
-    try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* Not installed here. */ }
+    for (const file of files) { const found = usable(path.join(directory, file)); if (found) return found; }
   }
   return null;
 };
+/** How to start a binary without a shell: scripts run under the app's own Node. */
+export const agentCommand = (binary: string): { command: string; args: string[] } =>
+  /\.[cm]?js$/i.test(binary) ? { command: process.execPath, args: [binary] } : { command: binary, args: [] };
 
 // Only what an agent CLI needs to run and reach the network. Provider keys and
 // server secrets in this process's environment never reach the child, so an
@@ -70,10 +88,13 @@ export const agentEnvironment = (binary: string, agent?: LocalAgent): NodeJS.Pro
   return env;
 };
 
-const probe = (binary: string, agent: LocalAgent, args: string[]): string | null => {
-  const result = spawnSync(binary, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5_000, windowsHide: true, env: agentEnvironment(binary, agent), cwd: os.tmpdir(), maxBuffer: 256 * 1024 });
-  return result.status === 0 && typeof result.stdout === 'string' ? result.stdout : null;
-};
+const probe = (binary: string, agent: LocalAgent, args: string[]): Promise<string | null> => new Promise(resolve => {
+  const { command, args: prefix } = agentCommand(binary);
+  const child = execFile(command, [...prefix, ...args], { encoding: 'utf8', timeout: 5_000, windowsHide: true, env: agentEnvironment(binary, agent), cwd: os.tmpdir(), maxBuffer: 256 * 1024 },
+    (error, stdout) => resolve(error ? null : stdout));
+  // No input: a CLI that reads stdin must see it closed instead of waiting for the timeout.
+  child.stdin?.end();
+});
 
 const codexHome = () => process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
 /** Only the auth mode is inspected; tokens are never read into the app. */
@@ -87,8 +108,8 @@ export const codexAuth = (): { auth: LocalAgentAuth; authMethod: string | null }
 };
 
 /** `claude auth status` prints JSON; only the sign-in flag and method are kept. */
-export const claudeAuth = (binary: string): { auth: LocalAgentAuth; authMethod: string | null } => {
-  const output = probe(binary, 'claude-code', ['auth', 'status']);
+export const claudeAuth = async (binary: string): Promise<{ auth: LocalAgentAuth; authMethod: string | null }> => {
+  const output = await probe(binary, 'claude-code', ['auth', 'status']);
   if (output == null) return { auth: 'signed-out', authMethod: null };
   try {
     const value = JSON.parse(output);
@@ -112,8 +133,8 @@ export const geminiCliAuth = (): { auth: LocalAgentAuth; authMethod: string | nu
 
 /** `opencode auth list --format json` lists connections by provider; only the
  * OpenCode provider (which serves the studio's models) counts. Ids and labels are dropped. */
-export const opencodeAuth = (binary: string): { auth: LocalAgentAuth; authMethod: string | null } => {
-  const output = probe(binary, 'opencode', ['auth', 'list', '--format', 'json']);
+export const opencodeAuth = async (binary: string): Promise<{ auth: LocalAgentAuth; authMethod: string | null }> => {
+  const output = await probe(binary, 'opencode', ['auth', 'list', '--format', 'json']);
   if (output == null) return { auth: 'signed-out', authMethod: null };
   try {
     const providers = JSON.parse(output);
@@ -122,26 +143,55 @@ export const opencodeAuth = (binary: string): { auth: LocalAgentAuth; authMethod
   } catch { return { auth: 'unknown', authMethod: null }; }
 };
 
-const AUTH: Record<LocalAgent, (binary: string) => { auth: LocalAgentAuth; authMethod: string | null }> = {
-  codex: () => codexAuth(), 'claude-code': claudeAuth, 'gemini-cli': () => geminiCliAuth(), opencode: opencodeAuth,
+const AUTH: Record<LocalAgent, (binary: string) => Promise<{ auth: LocalAgentAuth; authMethod: string | null }>> = {
+  codex: async () => codexAuth(), 'claude-code': claudeAuth, 'gemini-cli': async () => geminiCliAuth(), opencode: opencodeAuth,
 };
 
 const cache = new Map<string, { at: number; value: LocalAgentStatus }>();
-export const resetAgentStatusCache = () => cache.clear();
-export const localAgentStatus = (agent: LocalAgent, { fresh = false } = {}): LocalAgentStatus => {
+const pending = new Map<string, Promise<LocalAgentStatus>>();
+export const resetAgentStatusCache = () => { cache.clear(); pending.clear(); };
+const STALE_MS = 15_000;
+const unavailable = (disabled: boolean, installed = false): LocalAgentStatus => ({ installed, version: null, auth: 'unknown', authMethod: null, available: false, disabled });
+const withDisabled = (value: LocalAgentStatus, disabled: boolean): LocalAgentStatus => ({ ...value, disabled, available: value.available && !disabled });
+const locate = (agent: LocalAgent) => {
   const disabled = process.env[SPEC[agent].enabledEnv] === 'false';
-  if (process.env.BANANA_RUNTIME !== 'local') return { installed: false, version: null, auth: 'unknown', authMethod: null, available: false, disabled };
+  if (process.env.BANANA_RUNTIME !== 'local') return { disabled };
   const binary = findAgentBinary(agent);
-  if (!binary) return { installed: false, version: null, auth: 'unknown', authMethod: null, available: false, disabled };
   // Keyed by binary so a changed install or CLAUDE_BIN/CODEX_BIN is seen at once.
-  const key = `${agent}\0${binary}`, hit = cache.get(key);
-  let value = !fresh && hit && Date.now() - hit.at < 15_000 ? hit.value : undefined;
-  if (!value) {
-    const version = probe(binary, agent, ['--version'])?.match(/\d+\.\d+\.\d+[\w.-]*/)?.[0] || null;
-    const { auth, authMethod } = AUTH[agent](binary);
-    value = { installed: true, version, auth, authMethod, available: auth === 'signed-in', disabled: false };
-    cache.set(key, { at: Date.now(), value });
+  return { disabled, binary, key: binary ? `${agent}\0${binary}` : undefined };
+};
+
+/** Probes the CLI without blocking the server: the version and sign-in checks run
+ * as child processes. Concurrent callers share one probe per binary. */
+export const refreshLocalAgentStatus = (agent: LocalAgent): Promise<LocalAgentStatus> => {
+  const { disabled, binary, key } = locate(agent);
+  if (!binary || !key) return Promise.resolve(unavailable(disabled));
+  let run = pending.get(key);
+  if (!run) {
+    run = (async () => {
+      const [versionOutput, { auth, authMethod }] = await Promise.all([probe(binary, agent, ['--version']), AUTH[agent](binary)]);
+      const value: LocalAgentStatus = { installed: true, version: versionOutput?.match(/\d+\.\d+\.\d+[\w.-]*/)?.[0] || null, auth, authMethod, available: auth === 'signed-in', disabled: false };
+      cache.set(key, { at: Date.now(), value });
+      return value;
+    })().finally(() => pending.delete(key));
+    pending.set(key, run);
   }
-  return { ...value, disabled, available: value.available && !disabled };
+  return run.then(value => withDisabled(value, process.env[SPEC[agent].enabledEnv] === 'false'));
+};
+
+/** Cached status only; never starts a process on the caller's path. A stale or
+ * missing entry is refreshed in the background, and a never-probed CLI reports
+ * itself unavailable until that first probe finishes. */
+export const localAgentStatus = (agent: LocalAgent): LocalAgentStatus => {
+  const { disabled, binary, key } = locate(agent);
+  if (!binary || !key) return unavailable(disabled);
+  const hit = cache.get(key);
+  if (!hit || Date.now() - hit.at >= STALE_MS) void refreshLocalAgentStatus(agent).catch(() => { /* Reported by the next status read. */ });
+  return hit ? withDisabled(hit.value, disabled) : unavailable(disabled, true);
 };
 export const localAgentAvailable = (agent: LocalAgent): boolean => localAgentStatus(agent).available;
+/** Cached status, waiting for the first probe only when nothing is cached yet. */
+export const localAgentStatusWarm = async (agent: LocalAgent, { fresh = false } = {}): Promise<LocalAgentStatus> => {
+  const { key } = locate(agent);
+  return fresh || (key && !cache.has(key)) ? refreshLocalAgentStatus(agent) : localAgentStatus(agent);
+};

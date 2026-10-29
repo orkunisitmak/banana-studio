@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
-import { isGenerationId, prepareTaskRegistry, registerProviderTask, saveGenerationTask } from './_lib/providerTasks.js';
+import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
@@ -194,6 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
 
     const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',

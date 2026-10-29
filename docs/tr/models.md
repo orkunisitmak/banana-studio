@@ -64,6 +64,23 @@ Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya W
 
 YouTube için kendi Google Cloud projeni oluştur/seç, **YouTube Data API v3** servisini etkinleştir ve bu projeye ait API anahtarı oluştur. Gemini anahtarı, bu servisin etkinleştirilmesi ve kotasının yerine geçmez. API kullanımı ile tüketici sohbet abonelikleri ayrı ürünlerdir; sohbet aboneliğinin API isteklerini karşıladığını varsayma.
 
+## Claude veya Codex aboneliğini kullan (masaüstü, yalnız metin)
+
+Mac ve Windows uygulaması **Enhance, Brainstorm ve varyasyonları** zaten kullandığın komut satırı aracı üzerinden çalıştırabilir; bu metin özellikleri için API anahtarı gerekmez:
+
+| Model | Bağlantı adı | Gerekenler |
+| --- | --- | --- |
+| Claude Opus 5.5 | Claude subscription (CLI) | `claude` komutu ([Claude Code](https://docs.claude.com/en/docs/claude-code)), giriş yapılmış |
+| GPT-6.1 Sol | Codex / ChatGPT subscription (CLI) | `codex` komutu ([Codex CLI](https://developers.openai.com/codex/cli)), giriş yapılmış |
+
+Bu bağlantı inceleme adayıdır; gerçek hesapla doğrulanmış bir entegrasyon değildir. **AI settings** içinden abonelik bağlantısını açıkça seçmek gerekir; **Auto hiçbir zaman CLI başlatmaz veya kişisel aboneliğe geri düşmez**. Uygulama `PATH` ile standart yerel kurulum konumlarını arar; macOS grafik arayüzünden açıldığında da bu konumlar kullanılabilir. Windows için yerel `.exe` gerekir; kabuk çalıştırmamak için `.cmd`/`.bat` başlatıcıları reddedilir.
+
+Hazırlanan bağlantılar `claude-opus-5-5` ve `gpt-6.1-sol` modellerini sabitler, seçilen düşünme düzeyini korur, yalnız işletim sistemi/dil ortam değişkenlerini aktarır ve dış araçlarla kullanıcı yapılandırmasını kapatan seçenekler ister. Claude'a görseller dosya erişim aracı olmadan doğrudan iletilir. Codex geçici görselleri/çıktıları istek sonunda temizlenir; bağlantı kesilince işlem iptal edilir. Bu seçenekler her CLI sürümünde tam yalıtım kanıtı değildir. Claude için `--restricted` ve Opus 5.5 destekli resmî CLI (2.1.280 veya üzeri) gerekir; Codex seçenekleri resmî 0.165.0 Darwin ARM64 paketinin çevrimdışı yardım çıktısıyla kontrol edildi.
+
+Oturum açılmış gerçek hesap testi ve çalışma zamanında araç yalıtımı ayrıca sahip onayı ister; hazırlık sırasında yapılmadı. Banana Studio oturum bilgilerini kendisi okumaz veya saklamaz; onaylanmış CLI çalışması CLI'ın mevcut oturumunu kullanır. Abonelik uygunluğu, kullanım limitleri ve ücretlendirme sağlayıcıya/hesaba bağlıdır; ücretsiz kullanım garantisi yoktur. İsteğe bağlı hesap testi `BANANA_ALLOW_SUBSCRIPTION_TESTS=1` koşuluna bağlıdır; açık hesap/kota onayı olmadan çalıştırma.
+
+Sınırlar: yalnız metin ve görsel referansları destekler; YouTube görüntü analizi hâlâ Gemini, görsel ve video üretimi hâlâ API anahtarı ister. Barındırılan web çalışma alanlarında kullanılamaz, çünkü sunucu ziyaretçilerin istemlerini sahibinin kişisel aboneliğinden geçirmemelidir. Bir bağlantıyı kapatmak için sunucu ortamında `CLAUDE_CLI_ENABLED=false` ya da `CODEX_CLI_ENABLED=false` ayarla.
+
 ## Örnek kurulumlar
 
 | İsteğin | Ekle ve seç |
@@ -82,3 +99,13 @@ Uygulamadaki tahmin sağlayıcı bakiyesi veya fatura değildir. Metin düşünm
 Anahtarlar masaüstünde **macOS Anahtar Zinciri / Windows Credential Manager'a**, webde **sunucu ortam değişkenlerine** aittir. Prompt, ekran görüntüsü, GitHub issue'su, public repo veya `VITE_*` değişkenine koyma. Üretim için yönetici seviyesinde faturalama anahtarları gerekmez. `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY` ve `OPENAI_PROJECT_ID`, web sürümünün isteğe bağlı faturalama raporu ayarlarıdır.
 
 Geliştiriciler için doğruluk kaynağı: [sağlayıcı kaydı](../../src/lib/providers.ts), [model seçenekleri](../../src/types.ts), [görsel yönlendirme](../../src/services/geminiService.ts), [video yönlendirme](../../src/services/runwayService.ts), [YouTube analizi](../../src/services/youtubeBriefService.ts), [yerel anahtar alanları](../../desktop/macos/Sources/BananaStudio/KeyVault.swift).
+
+
+### Preview activation hold
+
+`BANANA_SUBSCRIPTION_CLI_PREVIEW` defaults to disabled. Do not set it to `true`
+until the owner separately authorizes the signed-in account/quota test and the
+CLI confinement policy is independently validated. Offline Codex prompt rendering
+still exposed collaboration/image/patch tool declarations despite some disabling
+settings; offline argument tests do not prove these tools cannot execute. This
+candidate must remain unmerged and inactive while that gap is unresolved.

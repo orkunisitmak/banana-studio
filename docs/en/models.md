@@ -64,6 +64,23 @@ Create an account with the provider, open its key dashboard, create a key and co
 
 For YouTube, create/select your own Google Cloud project, enable **YouTube Data API v3**, then create an API key for that project. A Gemini key is not a replacement for this enabled API and its quota. API billing and consumer chat subscriptions are separate products; check the provider's API account rather than assuming a chat subscription covers requests.
 
+## Use your Claude or Codex subscription (desktop, text only)
+
+The Mac and Windows apps can run **Enhance, Brainstorm and variations** through the command-line tool you already use, so no API key is needed for those text features:
+
+| Model | Route name | Needs |
+| --- | --- | --- |
+| Claude Opus 5.5 | Claude subscription (CLI) | The `claude` command ([Claude Code](https://docs.claude.com/en/docs/claude-code)), signed in |
+| GPT-6.1 Sol | Codex / ChatGPT subscription (CLI) | The `codex` command ([Codex CLI](https://developers.openai.com/codex/cli)), signed in |
+
+This route is a review candidate, not a verified account integration. It requires an explicitly selected subscription route in **AI settings**; **Auto never starts a CLI or falls back to your personal subscription**. The app searches `PATH` and standard native install locations. macOS GUI launches can therefore find commands outside the shell PATH. Windows needs a native `.exe`; `.cmd`/`.bat` launchers are deliberately rejected rather than invoking a shell.
+
+The prepared adapters pin `claude-opus-5-5` and `gpt-6.1-sol`, preserve the selected reasoning effort, pass only OS/locale environment variables, and request text-only execution with external tools/configuration disabled. Claude references are inline images, without filesystem tools. Codex temporary references and output files are scoped to one request and removed afterward; cancellation disconnects the child process. These flags are defense in depth, not a proof of confinement for every CLI version. Claude requires the official `--restricted`/Opus 5.5-capable CLI (2.1.280 or newer); the Codex argument surface was checked offline with the official 0.165.0 Darwin ARM64 package.
+
+A real signed-in account test and runtime tool-isolation verification still require separate owner permission. None were run for this preparation. The application does not read or store sign-in credentials itself; an approved CLI execution would use the CLI's existing sign-in. Subscription eligibility, usage limits and billing are determined by the provider and account, not guaranteed free by Banana Studio. The optional account probe is gated behind `BANANA_ALLOW_SUBSCRIPTION_TESTS=1`; do not run it without explicit account/quota approval.
+
+Limits: it is text and image references only, so YouTube footage analysis still needs Gemini and image or video generation still needs an API key. It is unavailable in hosted web workspaces, because a server must never run visitors' prompts through its owner's personal subscription. Set `CLAUDE_CLI_ENABLED=false` or `CODEX_CLI_ENABLED=false` in the server environment to turn a route off.
+
 ## Example setups
 
 | You want… | Add and select… |
@@ -82,3 +99,13 @@ The app's estimates are not a provider balance or invoice. Charges can include t
 Provider keys belong in **macOS Keychain / Windows Credential Manager** on desktop or **server environment variables** for web. Do not put them in a prompt, screenshot, GitHub issue, public repo or `VITE_*` variable. You do not need administrator-level billing keys to generate content. `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY` and `OPENAI_PROJECT_ID` are optional hosted billing-report settings, not starter requirements.
 
 Developer source of truth: [route registry](../../src/lib/providers.ts), [model choices](../../src/types.ts), [image routing](../../src/services/geminiService.ts), [video routing](../../src/services/runwayService.ts), [YouTube extraction](../../src/services/youtubeBriefService.ts), [native key fields](../../desktop/macos/Sources/BananaStudio/KeyVault.swift).
+
+
+### Preview activation hold
+
+`BANANA_SUBSCRIPTION_CLI_PREVIEW` defaults to disabled. Do not set it to `true`
+until the owner separately authorizes the signed-in account/quota test and the
+CLI confinement policy is independently validated. Offline Codex prompt rendering
+still exposed collaboration/image/patch tool declarations despite some disabling
+settings; offline argument tests do not prove these tools cannot execute. This
+candidate must remain unmerged and inactive while that gap is unresolved.

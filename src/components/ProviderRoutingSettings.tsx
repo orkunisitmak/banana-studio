@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider, type AIProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
+import { MODEL_ROUTES, PROVIDER_LABELS, isCliProvider, resolveProvider, type AIProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
 import { getProviderAvailability, getProviderPreferences, saveProviderPreference } from '../services/providerRouting';
 import { Dropdown } from './ControlDropdown';
 
@@ -38,7 +38,7 @@ export function ProviderRouteControl({ model, compact = false, showError = true 
     finally { setSaving(false); }
   };
   const options = [{value:'auto',label:`Auto${route.provider && route.choice === 'auto' ? ` · ${PROVIDER_LABELS[route.provider]}` : ''}`},
-    ...(MODEL_ROUTES[model] || []).map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : ' · key needed'}`}))];
+    ...(MODEL_ROUTES[model] || []).map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : isCliProvider(provider) ? ' · sign in to the CLI (desktop only)' : ' · key needed'}`}))];
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
     {compact ? <><span className="text-gray-500">Provider</span><Dropdown label="Provider" value={route.choice} options={options} onSelect={value => void save(value)} disabled={saving} compact /></> : <label className="flex items-center gap-2 text-gray-400">Provider
       <select aria-label={`${MODELS[model] || model} provider`} value={route.choice} disabled={saving}
@@ -55,6 +55,6 @@ export function ProviderRoutingSettings() {
     <div><h3 id="provider-routing-title" className="font-semibold">Provider routing</h3>
       <p className="mt-2 text-xs leading-relaxed text-gray-400">Add only the keys you need. Auto uses the first configured provider shown for each model. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p></div>
     {Object.keys(MODELS).map(model => <div key={model}><p className="mb-1.5 text-sm text-gray-200">{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} /></div>)}
-    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5.</p>
+    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini. Desktop subscription routes use your own CLI account and limits. Select them explicitly; Auto never starts a CLI session. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5.</p>
   </section>;
 }

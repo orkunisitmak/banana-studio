@@ -53,6 +53,7 @@ export function sanitizeProviderPreferences(value: unknown): Record<string, Prov
   const sanitized: Record<string, ProviderChoice> = {};
   for (const [model, choice] of Object.entries(value)) {
     const routes = MODEL_ROUTES[model];
+    if (!Array.isArray(routes)) continue;
     if (choice === 'auto') {
       sanitized[model] = 'auto';
     } else if (Array.isArray(routes) && routes.includes(choice as AIProvider)) {

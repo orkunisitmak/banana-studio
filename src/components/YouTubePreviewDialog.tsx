@@ -5,6 +5,7 @@ import type { GeneratedMedia } from '../types';
 import { DESKTOP_PREVIEW_WIDTHS, MOBILE_PREVIEW_WIDTHS, PREVIEW_EXAMPLES, getPreviewLayout, type PreviewDevice } from './youtubePreview';
 import { youtubePreviewStyles } from './youtubePreviewStyles';
 import { YouTubeSafeZoneOverlay } from './YouTubeSafeZoneOverlay';
+import { useTranslation } from '../lib/i18n';
 
 interface Props {
   media: GeneratedMedia;
@@ -54,6 +55,7 @@ const PreviewImage: React.FC<{ media: GeneratedMedia; refreshSource: Props['refr
 };
 
 export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, channelName, currentIndex, totalImages, favoritesOnly, onNavigate, onClose, refreshSource }) => {
+  const { language } = useTranslation();
   const [device, setDevice] = useState<PreviewDevice>(() => window.innerWidth < 768 ? 'mobile' : 'desktop');
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [desktopWidth, setDesktopWidth] = useState(0);
@@ -153,10 +155,12 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
         className="ytp-action"
         style={showSafeZones ? { background: 'rgba(234, 179, 8, 0.25)', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.5)' } : undefined}
         onClick={() => setShowSafeZones(value => !value)}
-        title="Toggle YouTube Safe Zones & Rule of Thirds"
+        title={language === 'tr' ? 'YouTube Güvenli Bölgeleri ve Üçler Kuralını Aç/Kapat' : 'Toggle YouTube Safe Zones & Rule of Thirds'}
       >
         <Grid size={16} />
-        {showSafeZones ? 'Safe Zones ON' : 'Safe Zones'}
+        {showSafeZones
+          ? (language === 'tr' ? 'Güvenli Bölgeler AÇIK' : 'Safe Zones ON')
+          : (language === 'tr' ? 'Güvenli Bölgeler' : 'Safe Zones')}
       </button>
       <span className="ytp-dimensions" role="status">{Math.round(layout.thumbnailWidth)} × {Math.round(layout.thumbnailHeight)} px <span>· 100% size</span></span>
     </div>

@@ -29,7 +29,7 @@ export function YouTubeSafeZoneOverlay({ isVisible }: YouTubeSafeZoneOverlayProp
 
       {/* Sağ Alt Süre Etiketi Kör Noktası (Duration Badge Dead Zone) */}
       <div
-        className="absolute bottom-2 right-2 flex items-center justify-center rounded bg-red-600/80 border border-red-400 px-2 py-1 text-[10px] font-bold tracking-wider text-white shadow-lg backdrop-blur-sm animate-pulse"
+        className="absolute bottom-2 right-2 flex items-center justify-center rounded bg-red-600/80 border border-red-400 px-2 py-1 text-[10px] font-bold tracking-wider text-white shadow-lg backdrop-blur-sm motion-safe:animate-pulse"
         style={{ minWidth: '55px', minHeight: '22px' }}
       >
         <span>⚠️ {language === 'tr' ? 'KÖR NOKTA (00:00)' : 'DEAD ZONE (00:00)'}</span>

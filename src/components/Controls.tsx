@@ -395,6 +395,7 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [config.prompt, config.originalPrompt, config.referenceImages, config.imageModel, config.mode, config.videoModel, config.videoOperation, config.h3MaxMode]);
   const latestConfigRef = useRef(config);
   latestConfigRef.current = config;
+  const videoModeSwitchEpochRef = useRef(0);
   const h3DimensionAttemptsRef = useRef(new Map<string, string>());
   const h3DimensionsMountedRef = useRef(true);
   useEffect(() => {
@@ -760,6 +761,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
     if (files.length === 0) return;
+    const modeSwitchEpoch = typeof videoModeSwitchEpochRef === 'undefined' ? null : videoModeSwitchEpochRef.current;
     setAttachmentError(null);
     if (isH3VideoConfig && h3State.mode === 'insert_video' && currentReferenceVideos.length === 0 && files[0].size > 50 * 1024 * 1024) {
       // Dropping the first file would turn a supplemental reference into the
@@ -794,7 +796,7 @@ export const Controls: React.FC<ControlsProps> = ({
           return {
             ...previous,
             referenceVideos: [...(previous.referenceVideos || []), ...kept],
-            ...(switchToVideo ? { mode: 'video' as const } : {}),
+            ...(switchToVideo && modeSwitchEpoch === (typeof videoModeSwitchEpochRef === 'undefined' ? null : videoModeSwitchEpochRef.current) ? { mode: 'video' as const } : {}),
           };
         }));
       }
@@ -2610,7 +2612,9 @@ export const Controls: React.FC<ControlsProps> = ({
                 
                 {/* YouTube Thumbnail Presets */}
                 <YouTubeThumbnailPresets
-                    onSelectPreset={presetPrompt => onChange({
+                    onSelectPreset={presetPrompt => {
+                        videoModeSwitchEpochRef.current++;
+                        onChange({
                         ...config,
                         prompt: presetPrompt,
                         originalPrompt: undefined,
@@ -2624,9 +2628,11 @@ export const Controls: React.FC<ControlsProps> = ({
                         enhancedForVideoReferenceKey: undefined,
                         enhancedForH3MaxMode: undefined,
                         enhancedForH3MaxOptionsKey: undefined,
+                        openaiImageOptions: { ...getOpenAIImageOptions(config.openaiImageOptions), size: 'preset' },
                         aspectRatio: '16:9',
                         mode: 'image'
-                    })}
+                        })
+                    }}
                 />
 
                 {/* Template Button - Icon only */}

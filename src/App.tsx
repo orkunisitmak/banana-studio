@@ -188,12 +188,12 @@ const AuthorizedWorkspace: React.FC<{
   const lastStaleVideoCheckRef = useRef(new Map<string, number>());
   const checkingStaleVideosRef = useRef(new Set<string>());
   useEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
-  useUnloadWarning(hasUnresumableVideoSubmission(generatedMedia));
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);
   const [isGalleryIndexLoading, setIsGalleryIndexLoading] = useState(false);
   const [galleryHistoryError, setGalleryHistoryError] = useState<string | null>(null);
+  useUnloadWarning(hasUnresumableVideoSubmission(generatedMedia));
 
   // Generation progress tracking
   const [generationProgress, setGenerationProgress] = useState<{ completed: number; total: number } | null>(null);

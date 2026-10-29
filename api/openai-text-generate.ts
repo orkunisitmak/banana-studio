@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return res.status(503).json({ error: 'OPENAI_API_KEY sunucuda tanımlı değil. GPT-6.1 Sol için OpenAI anahtarını ekle.' });
+  if (!key) return res.status(503).json({ error: 'OPENAI_API_KEY is not configured on the server. Add an OpenAI key for GPT-6.1 Sol.' });
 
   let body: any;
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
@@ -126,20 +126,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn('Could not confirm GPT-6.1 Sol text usage recording');
     } finally { accounting.dispose(); }
 
-    if (data?.status !== 'completed') return fail(502, 'GPT-6.1 Sol yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
+    if (data?.status !== 'completed') return fail(502, 'The GPT-6.1 Sol response did not finish. Shorten the request and try again.');
     const output = (Array.isArray(data.output) ? data.output : [])
       .filter((item: any) => item?.type === 'message' && item.role === 'assistant')
       .flatMap((item: any) => Array.isArray(item.content) ? item.content : []);
     const refusal = output.find((item: any) => item?.type === 'refusal');
-    if (refusal) return fail(422, 'GPT-6.1 Sol bu isteği yanıtlayamadı.');
+    if (refusal) return fail(422, 'GPT-6.1 Sol declined this request.');
     let text = output.filter((item: any) => item?.type === 'output_text' && typeof item.text === 'string').map((item: any) => item.text).join('\n');
-    if (!text.trim()) return fail(502, 'GPT-6.1 Sol boş yanıt döndürdü. Yeniden dene.');
+    if (!text.trim()) return fail(502, 'GPT-6.1 Sol returned an empty response. Try again.');
     if (usageContext.action === 'brainstorm') {
       // Keep the browser's existing array contract while enforcing provider-side
       // structure. A clarification or prose response must never become an idea.
       const normalized = normalizeBrainstormOutput(text, wardrobeFormat, body.brainstormCount);
       if (!normalized) {
-        return fail(502, 'GPT-6.1 Sol fikirleri beklenen biçimde döndürmedi. Yeniden dene.');
+        return fail(502, 'GPT-6.1 Sol did not return ideas in the expected format. Try again.');
       }
       // Missing wardrobe is recoverable in the client. Keep otherwise usable
       // scenes and metadata intact; do not convert objects to strings.
@@ -154,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     return fail(timeout ? 504 : 502, timeout
-      ? 'GPT-6.1 Sol yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.'
+      ? 'GPT-6.1 Sol took too long to respond. Shorten the request and try again.'
       : openAIErrorMessage());
   } finally {
     provider.dispose(); clearInterval(heartbeat); res.off?.('close', close);

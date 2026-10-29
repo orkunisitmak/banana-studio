@@ -2,6 +2,8 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import { OLLAMA_TEXT_MODEL, getOllamaModel } from '../lib/prompts/textModels';
+import { getTextModelLabel } from '../types';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -40,6 +42,10 @@ export interface GenerateContentRequest {
   brainstormFormat?: 'wardrobe';
   brainstormCount?: number;
   outputFormat?: 'youtube_analysis';
+  /** Installed model and server for the local text route. */
+  localModel?: string;
+  provider?: string;
+  fallbackFor?: string;
   usageContext?: { action: 'enhance' | 'video_enhance' | 'brainstorm' | 'variation'; prompt: string };
 }
 
@@ -55,7 +61,7 @@ const STATUS_ENDPOINT = '/api/gemini-status';
 
 const getAuthHeaders = async (signal: AbortSignal, onIdentity?: (userId: string | undefined) => void): Promise<Record<string, string>> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const auth = createTaskDeadline(15_000, signal, 'Oturum doğrulanamadı. Sayfayı yenileyip yeniden dene.');
+  const auth = createTaskDeadline(15_000, signal, 'Your session could not be verified. Refresh the page and try again.');
   try {
     const { data } = await waitForTask(supabase.auth.getSession(), auth.signal);
     const token = data?.session?.access_token;
@@ -86,7 +92,7 @@ const generateContent = async (
   const reportStage = (stage: TextTaskStage) => {
     if (lastStage !== stage) { lastStage = stage; options.onStage?.(stage); }
   };
-  const task = createTaskDeadline(285_000, options.signal, 'Model yanıt süresi aşıldı. İstek otomatik olarak tekrarlanmadı.');
+  const task = createTaskDeadline(285_000, options.signal, 'The model took too long to respond. The request was not retried automatically.');
   // iOS may suspend both timers and stream reads in the background. Enforce
   // the same wall-clock deadline on return, including Enhance (which has no
   // Brainstorm batch owner), without submitting another provider request.
@@ -101,11 +107,11 @@ const generateContent = async (
     let initiatingUserId: string | undefined;
     const headers = await getAuthHeaders(task.signal, userId => { initiatingUserId = userId; });
     const requireSameSession = async () => {
-      const auth = createTaskDeadline(15_000, task.signal, 'Oturum doğrulanamadı. Sayfayı yenileyip yeniden dene.');
+      const auth = createTaskDeadline(15_000, task.signal, 'Your session could not be verified. Refresh the page and try again.');
       try {
         const { data: { session } } = await waitForTask(supabase.auth.getSession(), auth.signal);
         ensureActive();
-        if (session?.user?.id !== initiatingUserId) throw new Error('Oturum değişti. Devam etmek için yeniden giriş yap.');
+        if (session?.user?.id !== initiatingUserId) throw new Error('Your session changed. Sign in again to continue.');
       } finally { auth.dispose(); }
     };
     headers.Accept = 'application/x-ndjson';
@@ -116,7 +122,7 @@ const generateContent = async (
     ensureActive();
     if (!res.ok) throw new Error(await waitForTask(extractError(res), task.signal));
     if (res.headers?.get('content-type')?.includes('application/x-ndjson')) {
-      if (!res.body) throw new Error('Model bağlantısı kapandı. İstek otomatik olarak tekrarlanmadı.');
+      if (!res.body) throw new Error('The model connection closed. The request was not retried automatically.');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -139,7 +145,7 @@ const generateContent = async (
             }
             if (event.type === 'status' && ['generating', 'finishing'].includes(event.stage)) reportStage(event.stage);
           }
-          if (done) throw new Error('Model bağlantısı yanıt tamamlanmadan kapandı. İstek otomatik olarak tekrarlanmadı.');
+          if (done) throw new Error('The model connection closed before the response finished. The request was not retried automatically.');
         }
       } finally { void reader.cancel().catch(() => {}); }
     }
@@ -169,6 +175,11 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
+  if (provider === 'ollama' || provider === 'openaicompat') {
+    // Auto may fall back from a cloud text model with no key to the local server.
+    return generateContent({ ...normalized, model: OLLAMA_TEXT_MODEL, provider, localModel: getOllamaModel(provider) || undefined,
+      ...(request.model !== OLLAMA_TEXT_MODEL ? { fallbackFor: getTextModelLabel(request.model) } : {}) }, '/api/ollama-text-generate', options);
+  }
   return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({

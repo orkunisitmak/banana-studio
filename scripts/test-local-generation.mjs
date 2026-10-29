@@ -47,7 +47,7 @@ try {
  const combinations=[['openai','OPENAI_API_KEY','gpt-image-2.5-sunburst'],['openrouter','OPENROUTER_API_KEY','gpt-image-2.5-sunburst'],['openrouter','OPENROUTER_API_KEY','gemini-3-pro-image-preview'],['openrouter','OPENROUTER_API_KEY','gemini-nano-banana-2.1'],['fal','FAL_KEY','gpt-image-2.5-sunburst'],['fal','FAL_KEY','gemini-3-pro-image-preview'],['fal','FAL_KEY','gemini-nano-banana-2.1'],['gemini','GEMINI_API_KEY','gemini-3-pro-image-preview'],['gemini','GEMINI_API_KEY','gemini-nano-banana-2.1']];
  const setKeys=async keys=>{
   child.stdin.write(JSON.stringify({action:'keys',keys})+'\n');
-  for(let i=0;i<100;i++){const status=await(await fetch(origin+'/api/gemini-status',{headers:{Cookie:cookie}})).json();if(Object.entries(status.providers).every(([provider,enabled])=>enabled===Object.hasOwn(keys,{openai:'OPENAI_API_KEY',openrouter:'OPENROUTER_API_KEY',fal:'FAL_KEY',gemini:'GEMINI_API_KEY',evolink:'EVOLINK_API_KEY'}[provider])))return;await new Promise(resolve=>setTimeout(resolve,10));}
+  for(let i=0;i<100;i++){const status=await(await fetch(origin+'/api/gemini-status',{headers:{Cookie:cookie}})).json();if(Object.entries(status.providers).filter(([provider])=>!['ollama','openaicompat','sdwebui','comfyui'].includes(provider)).every(([provider,enabled])=>enabled===Object.hasOwn(keys,{openai:'OPENAI_API_KEY',openrouter:'OPENROUTER_API_KEY',fal:'FAL_KEY',gemini:'GEMINI_API_KEY',evolink:'EVOLINK_API_KEY'}[provider])))return;await new Promise(resolve=>setTimeout(resolve,10));}
   throw new Error('Provider key update did not become ready.');
  };
  const readRow=async id=>{

@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const startedAt = Date.now();
-  const provider = createTaskDeadline(250_000, undefined, 'Gemini yanıt süresi aşıldı. İstek otomatik olarak tekrarlanmadı. Yeniden deneyebilirsin.');
+  const provider = createTaskDeadline(250_000, undefined, 'Gemini took too long to respond. The request was not retried automatically; you can try again.');
   // Negotiate the same status/result protocol as the text proxy. Heartbeats
   // prevent a long video read from becoming a silent, idle HTTP connection.
   // Existing clients continue to receive the original JSON response.

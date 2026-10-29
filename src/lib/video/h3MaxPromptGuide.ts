@@ -38,7 +38,7 @@ export const getH3MaxPromptImages = (context: H3MaxEnhancementContext, images: R
   const selected = (label: string, id?: string, data?: string) => {
     if (id) {
       const image = images.find(image => image.id === id);
-      if (!image) throw new Error(`H3 Max ${label} referansı artık ekli değil. Kareyi yeniden seç.`);
+      if (!image) throw new Error(`The H3 Max ${label} reference is no longer attached. Choose the frame again.`);
       result.push({ label, image });
     } else explicit(label, data);
   };

@@ -37,7 +37,7 @@ const nextIdentityNumber = (ids: number[], prompts: (string | undefined)[]): num
   const next = Math.max(...used) + 1;
   if (next <= 9999) return next;
   for (let id = 3; id <= 9999; id++) if (!used.has(id)) return id;
-  throw new Error('Kişi grubu sınırına ulaşıldı.');
+  throw new Error('The person group limit was reached.');
 };
 
 export const nextPersonId = (references: ReferenceImage[], ...prompts: (string | undefined)[]): number =>
@@ -156,7 +156,7 @@ export const findPersonMentions = (references: ReferenceImage[], query: string) 
 export const normalizeReferencePrompt = (prompt: string, references: ReferenceImage[], inputs = references): string => {
   const label = (ref?: ReferenceImage) => {
     const index = ref ? inputs.indexOf(ref) : -1;
-    if (index < 0) throw new Error('Prompttaki referans bu üretime ekli değil. Ekli referansları kontrol et.');
+    if (index < 0) throw new Error('A reference in the prompt is not attached to this generation. Check the attached references.');
     return `image ${index + 1}`;
   };
   return resolveStableImageReferences(prompt, inputs).replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)|@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|@ME\b|@PERSON_(\d+)\b/gi,
@@ -165,7 +165,7 @@ export const normalizeReferencePrompt = (prompt: string, references: ReferenceIm
       if (imageIndex) return label(references[Number(imageIndex) - 1]);
       const id = personIndex ? Number(personIndex) : token.toUpperCase() === '@SECOND_PERSON' ? 2 : 1;
       const group = getPersonGroups(inputs).find(person => person.id === id);
-      if (!group) throw new Error(`${getPersonLabel(id)} için bu üretime ekli kişi referansı yok. Kişiye fotoğraf ata veya prompttaki etiketi kaldır.`);
+      if (!group) throw new Error(`${getPersonLabel(id)} has no person reference in this generation. Assign a photo or remove the tag from the prompt.`);
       const name = group.images.map(ref => cleanPersonName(ref.personName || '')).find(Boolean);
       return `the ${getPersonDescription(id)} shown in ${group.images.map(label).join(' and ')} (all these photos show the SAME single person)${name ? ` (identity label ${JSON.stringify(name)})` : ''}`;
     });
@@ -201,10 +201,10 @@ export const mergePersonReferenceInputs = (primary: ReferenceImage[], secondary:
     const ids = new Set(getPersonGroups(refs, definitions).map(group => group.id));
     prompt.replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)|@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|@ME\b|@PERSON_(\d+)\b/gi, (token, imageIndex, personIndex) => {
       if (!token.startsWith('@')) return token;
-      if (imageIndex) { if (!refs[Number(imageIndex) - 1]) throw new Error('Şablon birleştirilirken prompttaki referans bulunamadı.'); }
+      if (imageIndex) { if (!refs[Number(imageIndex) - 1]) throw new Error('A prompt reference was not found while merging the template.'); }
       else {
         const id = personIndex ? Number(personIndex) : token.toUpperCase() === '@SECOND_PERSON' ? 2 : 1;
-        if (!ids.has(id)) throw new Error(`${getPersonLabel(id)} için kişi referansı yok.`);
+        if (!ids.has(id)) throw new Error(`${getPersonLabel(id)} has no person reference.`);
       }
       return token;
     });
@@ -220,7 +220,7 @@ export const mergePersonReferenceInputs = (primary: ReferenceImage[], secondary:
   for (const group of secondaryGroups) {
     const sharedImages = primary.filter(ref => group.images.some(image => image.id === ref.id));
     const sharedIds = new Set(sharedImages.map(getPersonId));
-    if (sharedIds.size > 1 || sharedIds.has(undefined)) throw new Error('Aynı fotoğraf şablonda farklı bir role atanmış. Birleştirmeden önce kişi rollerini eşleştir.');
+    if (sharedIds.size > 1 || sharedIds.has(undefined)) throw new Error('The same photo has a different role in the template. Match the person roles before merging.');
     const shared = sharedImages[0];
     let id = shared ? getPersonId(shared)! : group.id;
     if (!shared && id !== 1 && primaryGroups.some(person => person.id === id)) {
@@ -240,11 +240,11 @@ export const mergePersonReferenceInputs = (primary: ReferenceImage[], secondary:
     if (!token.startsWith('@')) return token;
     if (imageIndex) {
       const ref = secondary[Number(imageIndex) - 1];
-      if (!ref) throw new Error('Şablon birleştirilirken prompttaki referans bulunamadı.');
+      if (!ref) throw new Error('A prompt reference was not found while merging the template.');
       return `@REF_IMAGE_${references.findIndex(image => image.id === ref.id) + 1}`;
     }
     const id = personIndex ? Number(personIndex) : token.toUpperCase() === '@SECOND_PERSON' ? 2 : 1;
-    if (!personMap.has(id)) throw new Error(`${getPersonLabel(id)} için mevcut taslakta kişi referansı yok.`);
+    if (!personMap.has(id)) throw new Error(`${getPersonLabel(id)} has no person reference in the current draft.`);
     return getPersonTag(personMap.get(id)!);
   });
   return { references, personGroups, prompt: `${primaryPrompt} ${prompt}`.trim() };

@@ -42,6 +42,16 @@ export const getEditSource = (image: GeneratedMedia, region?: ImageEditRegion): 
   editRegion: region,
 });
 
+/** Upscale runs as a local image job so it gets the queue, gallery result and recovery. */
+export const buildGalleryUpscaleConfig = (image: GeneratedMedia, scale: 2 | 4): GenerationConfig => ({
+  mode: 'image', prompt: image.prompt?.trim() || 'Upscale', count: 1, imageModel: 'local-image', localUpscale: scale,
+  aspectRatio: image.aspectRatio || '1:1', resolution: image.resolution || '1K', imagePromptCategory: image.imagePromptCategory,
+  referenceImages: [{ id: `gallery-${image.id}`, data: image.url, mimeType: getSourceMimeType(image) }],
+  referenceVideos: [], referenceAudios: [],
+  videoModel: 'seedance-2.5', videoOperation: 'generate', videoAspectRatio: '16:9', videoQuality: '720p',
+  videoDuration: 5, audioEnabled: false, videoPromptExpansionMode: 'disabled',
+});
+
 export const getSourceAspectRatio = (width: number, height: number): AspectRatio => {
   const ratio = width / height;
   return RATIOS.reduce((best, current) => {

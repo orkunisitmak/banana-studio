@@ -10,6 +10,7 @@ import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { compressBase64Image } from "./imageCompression";
 import { generateOpenAIImage, type ImageGenerationContext } from "./openaiImageService";
 import { getSunburstReferences, SUNBURST_MODEL } from "../lib/images/openaiImage";
+import { LOCAL_IMAGE_MODEL } from "../lib/localModels";
 import { assembleSunburstBrainstormIdea, buildReferenceGenerationRule, buildSunburstGuidance, prepareImagePromptResult, buildYouTubeCameraGazeRule, buildYouTubeWardrobeRule, buildYouTubeEditorialRule, buildYouTubeStyleReferenceRule, describeSunburstReference, getSunburstEditIntent, isYouTubeChannelBannerPrompt, isYouTubeThumbnailPrompt, normalizeSunburstPrompt, preserveSunburstEditBrief, preserveSunburstSourceBrief, preserveSunburstThumbnailBrief, stripLegacyOutputCanvas, type ImagePromptSettings } from "../lib/images/imagePrompting";
 import { logUsage } from "./authService";
 import { refreshMediaAccessUrl } from './storageService';
@@ -53,7 +54,8 @@ const isSupportedImageModel = (model: unknown): model is ImageModelId => {
   return model === 'gemini-3-pro-image-preview'
     || model === 'gemini-3.1-flash-image-preview'
     || model === 'gemini-nano-banana-2.1'
-    || model === SUNBURST_MODEL;
+    || model === SUNBURST_MODEL
+    || model === LOCAL_IMAGE_MODEL;
 };
 
 /**
@@ -107,7 +109,7 @@ const fetchAsBase64 = async (img: ReferenceImage, signal?: AbortSignal): Promise
  * the call sites below hard-code that string instead of using `img.mimeType`.
  */
 const resolveReferenceImageData = async (img: ReferenceImage, signal?: AbortSignal): Promise<string> => {
-  const task = createTaskDeadline(20_000, signal, 'Referans görsel hazırlanamadı. Bağlantıyı kontrol edip referansı yeniden ekle.');
+  const task = createTaskDeadline(20_000, signal, 'A reference image could not be prepared. Check your connection and attach it again.');
   try {
     task.signal.throwIfAborted();
     const raw = await waitForTask(fetchAsBase64(img, task.signal), task.signal);
@@ -262,7 +264,7 @@ const runImagePromptTask = async (
   for (const [index, ref] of inputs.entries()) {
     const data = await resolveReferenceImageData(ref, options.signal);
     // Silently skipping one input would shift the numbered reference contract.
-    if (!data) throw new Error(`Referans görsel ${index + 1} okunamadı. Yeniden ekleyip tekrar dene.`);
+    if (!data) throw new Error(`Reference image ${index + 1} could not be read. Attach it again and retry.`);
     parts.push({ text: describeSunburstReference(ref, index) }, { inlineData: { data, mimeType: 'image/jpeg' } });
   }
   parts.push({ text: `${customInstructions ? `USER CREATIVE DIRECTION:\n${prepareTextStagePrompt(customInstructions, references)}\n\n` : ''}USER BRIEF:\n${prepareTextStagePrompt(prompt, references) || 'Use the attached visual concept and the selected reference roles.'}` });
@@ -300,7 +302,7 @@ export const enhancePrompt = async (
 
   for (const [index, img] of referenceImages.entries()) {
     const base64Data = await resolveReferenceImageData(img);
-    if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
+    if (!base64Data) throw new Error(`Reference ${index + 1} could not be read; stopped to keep person matching correct.`);
     parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
   }
 
@@ -402,7 +404,7 @@ export const enhanceVideoPrompt = async (
 ): Promise<string> => {
   const h3 = videoModel === 'minimax-h3' ? h3Context || { mode: resolveH3MaxMode('auto', { images: referenceImages.length, videos: referenceVideos.length, audios: referenceAudios.length }) } : undefined;
   if (h3 && !h3MaxAcceptsPrompt(h3.mode)) {
-    throw new Error('Bu H3 Max modu prompt kabul etmiyor. Görsel, video ve ses girdileri doğrudan kullanılır; prompt geliştirme gerekmiyor.');
+    throw new Error('This H3 Max mode does not accept a prompt. Image, video and audio inputs are used directly; Enhance is not needed.');
   }
   if (videoModel === 'seedance-2.5' && !referenceVideos.some(video => video.isContinuation)) {
     const error = getSeedanceFrameError(referenceImages, referenceVideos.length, referenceAudios.length, videoOperation);
@@ -418,7 +420,7 @@ export const enhanceVideoPrompt = async (
     const references = { images: referenceImages, videos: referenceVideos, audios: referenceAudios };
     for (const { label, image } of getH3MaxPromptImages(h3, referenceImages)) {
       const data = await resolveReferenceImageData(image, options.signal);
-      if (!data) throw new Error(`H3 Max ${label} görseli okunamadı; prompt eksik referansla oluşturulmadı.`);
+      if (!data) throw new Error(`The H3 Max ${label} image could not be read; no prompt was written with a missing reference.`);
       parts.push({ text: `=== ${label} ===` }, { inlineData: { data, mimeType: 'image/jpeg' } });
     }
     const sourceContext = referenceVideos.map((video, index) => ({
@@ -434,7 +436,7 @@ export const enhanceVideoPrompt = async (
     }));
     const enhanced = normalizeH3MaxPromptLanguage(response.text || prompt, h3, references);
     if (h3.mode === 'recast' && enhanced.length > 2000) {
-      throw new Error('H3 Max için geliştirilen prompt 2000 karakteri aşıyor. Taslağı kısaltıp yeniden dene.');
+      throw new Error('The enhanced H3 Max prompt exceeds 2,000 characters. Shorten the draft and try again.');
     }
     return enhanced;
   }
@@ -469,7 +471,7 @@ export const enhanceVideoPrompt = async (
     parts.push({ text: `=== @MAIN_PERSON (${mainPersonImgs.length} photo(s) of the first/main character) ===` });
     for (const img of mainPersonImgs) {
       const base64Data = await resolveReferenceImageData(img);
-      if (!base64Data) throw new Error('Ana kişi referansı okunamadı; kişi eşleşmesini korumak için işlem durduruldu.');
+      if (!base64Data) throw new Error('The main person reference could not be read; stopped to keep person matching correct.');
       parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
     }
   }
@@ -479,7 +481,7 @@ export const enhanceVideoPrompt = async (
     parts.push({ text: `=== @SECOND_PERSON (${secondPersonImgs.length} photo(s) of the second character) ===` });
     for (const img of secondPersonImgs) {
       const base64Data = await resolveReferenceImageData(img);
-      if (!base64Data) throw new Error('İkinci kişi referansı okunamadı; kişi eşleşmesini korumak için işlem durduruldu.');
+      if (!base64Data) throw new Error('The second person reference could not be read; stopped to keep person matching correct.');
       parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
     }
   }
@@ -489,7 +491,7 @@ export const enhanceVideoPrompt = async (
     parts.push({ text: `=== ${group.tag} (${group.images.length} photos of the SAME SINGLE person; label ${JSON.stringify(group.label)}) ===` });
     for (const img of group.images) {
       const base64Data = await resolveReferenceImageData(img);
-      if (!base64Data) throw new Error('Kişi referansı okunamadı.');
+      if (!base64Data) throw new Error('A person reference could not be read.');
       parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
     }
   }
@@ -501,21 +503,21 @@ export const enhanceVideoPrompt = async (
     if (img.isFirstFrame || img.isLastFrame || getPersonId(img) != null) continue;
     parts.push({ text: `=== @REF_IMAGE_${i + 1} ===` });
     const base64Data = await resolveReferenceImageData(img);
-    if (!base64Data) throw new Error(`Referans görsel ${i + 1} okunamadı; video promptu eksik kimlikle oluşturulmadı.`);
+    if (!base64Data) throw new Error(`Reference image ${i + 1} could not be read; no video prompt was written with a missing identity.`);
     parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
   }
 
   if (firstFrame) {
     parts.push({ text: "=== FIRST FRAME (video starts with this image) ===" });
     const base64Data = await resolveReferenceImageData(firstFrame);
-    if (!base64Data) throw new Error('İlk kare referansı okunamadı; video promptu eksik kareyle oluşturulmadı.');
+    if (!base64Data) throw new Error('The first-frame reference could not be read; no video prompt was written with a missing frame.');
     parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
   }
 
   if (lastFrame) {
     parts.push({ text: "=== LAST FRAME (video ends with this image) ===" });
     const base64Data = await resolveReferenceImageData(lastFrame);
-    if (!base64Data) throw new Error('Son kare referansı okunamadı; video promptu eksik kareyle oluşturulmadı.');
+    if (!base64Data) throw new Error('The last-frame reference could not be read; no video prompt was written with a missing frame.');
     parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
   }
 
@@ -734,7 +736,7 @@ export const generatePromptVariation = async (
   if (referenceImages.length > 0) {
     for (const [index, img] of referenceImages.entries()) {
       const base64Data = await resolveReferenceImageData(img);
-      if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
+      if (!base64Data) throw new Error(`Reference ${index + 1} could not be read; stopped to keep person matching correct.`);
       parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
     }
   }
@@ -806,7 +808,7 @@ const generateSingleImageContent = async (
     parts.push({ text: [normalizeReferencePrompt(prompt, refs), buildPersonIdentityContract(refs), buildYouTubeEditorialRule(prompt, refs, config), buildYouTubeWardrobeRule(prompt, refs, config), buildPersonSeparationRule(refs)].filter(Boolean).join('\n\n') });
     for (const [index, img] of refs.entries()) {
       const base64Data = await resolveReferenceImageData(img);
-      if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı.`);
+      if (!base64Data) throw new Error(`Reference ${index + 1} could not be read.`);
       parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: img.mimeType || 'image/jpeg' } });
     }
 
@@ -1025,7 +1027,7 @@ export const brainstormIdeas = async (
   userBrief?: string, customInstructions?: string, ideaCount: number = 5,
   settings?: ImagePromptSettings, options: TextTaskOptions = {},
 ): Promise<BrainstormIdea[]> => {
-  const task = createTaskDeadline(330_000, options.signal, 'Brainstorm zaman sınırını aştı. İstek otomatik olarak tekrarlanmadı.');
+  const task = createTaskDeadline(330_000, options.signal, 'Brainstorm exceeded its time limit. The request was not retried automatically.');
   try {
     task.signal.throwIfAborted();
     options.onStage?.('preparing');
@@ -1078,7 +1080,7 @@ const brainstormIdeasInternal = async (
   
   for (const [index, img] of referenceImages.entries()) {
     const base64Data = await resolveReferenceImageData(img, options.signal);
-    if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
+    if (!base64Data) throw new Error(`Reference ${index + 1} could not be read; stopped to keep person matching correct.`);
     parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
   }
 

@@ -86,7 +86,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const busy = isEnhancing || isGenerating || isUploading;
   const nanoCanvasSupported = canvas ? canUseNanoEditCanvas(canvas) : true;
   const canvasError = canvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${canvas.width}x${canvas.height}`)
-    : !nanoCanvasSupported ? 'Choose GPT Image 2.5 to keep this canvas.' : null : null;
+    : imageModel !== 'local-image' && !nanoCanvasSupported ? 'Choose GPT Image 2.5 to keep this canvas.' : null : null;
   const canGenerate = !providerRoute.error && !busy && !preview && !!prompt.trim() && !!config && !isStale && !canvasError && !referenceError;
   const imageCostPreview = config ? getImageCostPreview({ ...config, imageProvider: providerRoute.provider }) : undefined;
 
@@ -285,7 +285,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
       <div className="px-4 py-2"><ProviderRouteControl model={imageModel} compact /></div>
       <div className={PROMPT_TOOLBAR_CLASS}>
         <div className={PROMPT_SETTINGS_CLASS} role="group" aria-label="Edit settings">
-          <Dropdown label="Edit model" value={imageModel} options={IMAGE_MODEL_OPTIONS.map(model => ({ ...model, disabled: model.value !== SUNBURST_MODEL && (!nanoCanvasSupported || references.length > getGalleryEditReferenceLimit(model.value)) }))} onSelect={value => { if (busyRef.current) return; setImageModel(value as ImageModelId); setError(null); setGenerationStarted(false); }} icon={ImageIcon} compact disabled={busy} />
+          <Dropdown label="Edit model" value={imageModel} options={IMAGE_MODEL_OPTIONS.map(model => ({ ...model, disabled: model.value !== SUNBURST_MODEL && ((model.value !== 'local-image' && !nanoCanvasSupported) || references.length > getGalleryEditReferenceLimit(model.value)) }))} onSelect={value => { if (busyRef.current) return; setImageModel(value as ImageModelId); setError(null); setGenerationStarted(false); }} icon={ImageIcon} compact disabled={busy} />
           {imageModel === SUNBURST_MODEL && <Dropdown label="Quality" value={quality} options={SUNBURST_QUALITY_OPTIONS} onSelect={(value: OpenAIImageOptions['quality']) => { if (!busyRef.current) setQuality(value); }} icon={Sparkles} compact disabled={busy} />}
           <ImageCountControl count={count} onChange={value => { if (!busyRef.current) { setCount(value); setGenerationStarted(false); } }} disabled={busy} />
         </div>

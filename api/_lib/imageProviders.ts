@@ -1,6 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
 import { OPENROUTER_MODELS, type AIProvider } from '../../src/lib/providers.js';
 import { providerImageData } from './providerMedia.js';
+import { comfyImage, comfyUpscale, MAX_UPSCALE_PIXELS, sdwebuiImage, sdwebuiUpscale } from './localMedia.js';
+import { editMaskPNG } from './protectedImageEdit.js';
+import { readImageDimensions } from './imageDimensions.js';
+import { localImageSize } from '../../src/lib/localModels.js';
 import { requestCodexImage } from './codexImage.js';
 
 export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'codex' ? 'codex/image_gen' : provider === 'openrouter'
@@ -55,6 +59,28 @@ export async function requestImage(provider: AIProvider, model: string, input: R
     }
     if (bytes.length > 50 * 1024 * 1024) throw new Error('Generated image exceeds the output limit.');
     return Response.json({ data: [{ b64_json: bytes.toString('base64') }], output_format: input.output_format }, { headers: { 'x-request-id': response.headers.get('x-fal-request-id') || '' } });
+  }
+  if (provider === 'sdwebui' || provider === 'comfyui') {
+    // Diffusion models read the user's prompt; the edit compositor still protects pixels outside the selection.
+    const init = input.images?.[input.localInit ?? 0]?.image_url;
+    const match = init ? (await providerImageData(db, init)).match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/s) : null;
+    if (init && !match) throw new Error('This reference could not be prepared for the local server.');
+    const image = match ? Buffer.from(match[2], 'base64') : undefined;
+    let bytes: Buffer;
+    if (input.localUpscale) {
+      const size = image && readImageDimensions(image)?.split('x').map(Number);
+      if (!image || !size) throw new Error('Choose a PNG, JPEG or WebP image to upscale.');
+      if (size[0] * size[1] * input.localUpscale ** 2 > MAX_UPSCALE_PIXELS) throw new Error('The upscaled image would be too large. Choose 2x or a smaller source.');
+      bytes = provider === 'sdwebui' ? await sdwebuiUpscale(image, input.localUpscale, signal)
+        : await comfyUpscale(image, match![1], { width: size[0], height: size[1] }, input.localUpscale, signal);
+    } else {
+      const mask = image && input.localSource && input.localMaskRegion ? await editMaskPNG(input.localMaskRegion, input.localSource.width, input.localSource.height) : undefined;
+      const job = { prompt: input.localPrompt || input.prompt, ...localImageSize(input.aspect_ratio, input.resolution, input.localSource),
+        checkpoint: input.localModel, workflow: input.localWorkflow, seed: input.localSeed, negative: input.localNegative,
+        ...(image ? { image, imageMime: match![1], mask } : {}) };
+      bytes = provider === 'sdwebui' ? await sdwebuiImage(job, signal) : await comfyImage(job, signal);
+    }
+    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage: { cost: 0 }, output_format: 'png' });
   }
   if (provider === 'gemini' && model.startsWith('gemini-')) {
     const parts: any[] = [];

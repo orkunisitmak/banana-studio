@@ -1,4 +1,6 @@
 import { selectProvider } from './providerRouting';
+import { LOCAL_IMAGE_MODEL } from '../lib/localModels';
+import { getLocalChoice } from './localModelsService';
 import type { GeneratedMedia, GenerationConfig } from '../types';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
@@ -152,7 +154,9 @@ export const generateOpenAIImage = async (
           body: JSON.stringify({ id, model: config.imageModel, provider: config.imageProvider, prompt, displayPrompt: config.prompt,
             originalPrompt: config.originalPrompt, promptPreparation: normalizePromptPreparation(config.promptPreparation), youtubeSource: config.youtubeSource,
             aspectRatio: config.aspectRatio, resolution: config.resolution, imagePromptCategory: config.imagePromptCategory,
-            options, referenceImages, folderId: context?.folderId }),
+            options, referenceImages, folderId: context?.folderId,
+            ...(config.imageModel === LOCAL_IMAGE_MODEL ? { localModel: getLocalChoice('imageModel') || undefined, localWorkflow: getLocalChoice('imageWorkflow') || undefined,
+              localSeed: config.localSeed, localNegativePrompt: config.localNegativePrompt?.trim() || undefined, localUpscale: config.localUpscale } : {}) }),
         });
       } catch {
         // The enqueue transaction may have committed. Reconnect to its saved ID;

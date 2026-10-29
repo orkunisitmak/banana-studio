@@ -23,6 +23,13 @@ export const readEditSource = async (db: any, url: string, userId: string) => {
   return { ...decoded, sha256: imageSha256(bytes) };
 };
 
+/** White = repaint, black = keep. Same rasterization and inward feather as the compositor. */
+export const editMaskPNG = async (region: ImageEditRegion, width: number, height: number): Promise<Buffer> => {
+  const black = new Uint8Array(width * height * 4), white = new Uint8Array(width * height * 4).fill(255);
+  for (let i = 3; i < black.length; i += 4) black[i] = 255;
+  return Buffer.from(await encodeRasterPNG(compositeEditPixels(black, white, width, height, region), width, height));
+};
+
 /** The model may redraw the full canvas. Accept only its selected area.
  * Blend a narrow border INSIDE the selection; outside pixels are never touched. */
 export const compositeProtectedEdit = async (

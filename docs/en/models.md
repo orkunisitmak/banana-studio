@@ -21,6 +21,7 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
+| Local text / image / video — see [Local models](#local-models-no-key-no-credits) | Ollama / LM Studio · SD WebUI → ComfyUI · ComfyUI | No key. Desktop uses default local addresses; web needs `*_BASE_URL` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
@@ -35,6 +36,31 @@ Images count toward your ChatGPT plan's Codex usage limits instead of API billin
 All three image providers support reference-based generation. Uploading references does not enable protected editing automatically: explicitly select **Edit area** for that. The final selected area is composited onto the source; outside pixels stay original regardless of provider. Tier-based Nano outputs may be resized to the source canvas before compositing, only when their proportions match. A different canvas ratio is rejected. A provider's reference-image API may be named “edit”; the app's reference-generation prompt does not carry an area edit's source-preservation instructions.
 
 Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable Enhance or Brainstorm: fal's deprecated Any LLM endpoint is not used. An Anthropic key is not an OpenRouter key. A saved key still needs model access and sufficient API credit.
+
+## Local models (no key, no credits)
+
+Text, images and video can run on servers on your own computer or network. Image and video quality depends on the model you install; the app's protected-edit compositing still keeps pixels outside an edit selection unchanged.
+
+| Feature | Model in the app | Local server · default address | Server variable |
+| --- | --- | --- | --- |
+| Enhance, Brainstorm, variations, video brief | Local model (Ollama / LM Studio) | Ollama · `http://127.0.0.1:11434` | `OLLAMA_BASE_URL` |
+| | | LM Studio, llama.cpp, vLLM, LocalAI · `http://127.0.0.1:1234/v1` | `LOCAL_OPENAI_BASE_URL` |
+| Images, references, area edits | Local · Stable Diffusion / ComfyUI | AUTOMATIC1111 / Forge / SD.Next (start with `--api`) · `http://127.0.0.1:7860` | `SDWEBUI_BASE_URL` |
+| | | ComfyUI · `http://127.0.0.1:8188` | `COMFYUI_BASE_URL` |
+| Video (text or one image) | Local · ComfyUI workflow | ComfyUI | `COMFYUI_BASE_URL` |
+
+**Desktop (macOS, Windows):** the app connects to the default addresses automatically; start the server and choose the model. **Self-hosted web (any OS, including Linux):** set the variables on the server; the address must be reachable from the server, not only from your browser. To hide a route, set `OLLAMA_ENABLED=false`, `OPENAICOMPAT_ENABLED=false` (LM Studio / OpenAI-compatible), `SDWEBUI_ENABLED=false` or `COMFYUI_ENABLED=false`.
+
+1. **Text:** `ollama pull qwen3:8b`, or `ollama pull gemma3` for image references. In **AI settings → AI Text Model** choose **Local model (Ollama / LM Studio)**, pick the installed model and save. Pick Ollama or LM Studio in **Provider routing**. Without any cloud key, Auto also sends Opus / GPT / Gemini text tasks to the local server. YouTube footage itself is still read by Gemini.
+2. **Images:** choose **Local · Stable Diffusion / ComfyUI** as the image model. In **AI settings → Local models** pick a checkpoint (empty = first installed). References become an img2img source; for **Edit area** the selection is composited back onto the original.
+3. **Custom ComfyUI workflows (Flux, SD3, Wan, LTX-Video, …):** in ComfyUI use **Save (API Format)** and put the `.json` file in the workflows folder: `comfyui-workflows` inside the app's data folder on desktop (shown in Local models), or `COMFYUI_WORKFLOWS_DIR` on a server. Write placeholders as values: `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, `{{seed}}`, `{{steps}}`, `{{cfg}}`, `{{denoise}}`, `{{checkpoint}}`, `{{image}}` (uploaded reference), `{{frames}}`, `{{fps}}`, `{{duration}}`. A value that is exactly a placeholder keeps its number type.
+4. **Video:** choose **Local · ComfyUI workflow** and a video workflow in Local models. The finished file (mp4, webm, gif or animated webp) is saved to your gallery.
+5. **Seed and negative prompt:** with the local image model the generation bar shows **Negative prompt** and **Seed** (empty = random). Every local image records its seed; **Re-create** repeats it. The local video model also takes a negative prompt.
+6. **Area edits** send a real inpaint mask (SD WebUI `mask`, ComfyUI `SetLatentNoiseMask`; custom workflows can use `{{mask}}`), and the result is still composited so outside pixels stay original.
+7. **Upscale 2x / 4x:** open any image in the gallery and choose **Upscale**. SD WebUI uses its extras upscaler (`LOCAL_UPSCALER`, default `R-ESRGAN 4x+`); ComfyUI uses the first model in `models/upscale_models` (or `LOCAL_UPSCALER`), otherwise Lanczos. The result is a new gallery image.
+8. The desktop app runs one local image job at a time so a single GPU is not shared; cloud jobs still run alongside.
+
+Optional tuning: `OLLAMA_MODEL` / `LOCAL_OPENAI_MODEL` (default text model), `OLLAMA_NUM_CTX` (context, default 16384), `LOCAL_IMAGE_STEPS` (25), `LOCAL_IMAGE_CFG` (6), `LOCAL_IMAGE_DENOISE` (0.6), `LOCAL_INPAINT_DENOISE` (0.75), `LOCAL_NEGATIVE_PROMPT` (default when the field is empty), `LOCAL_UPSCALER`, `LOCAL_VIDEO_FPS` (16). Small text models may miss Brainstorm's JSON format; choose a larger one if ideas are rejected. Local jobs share the 250-second image limit; use a faster model or lower resolution on slow hardware.
 
 ## Video differences
 
@@ -75,6 +101,7 @@ For YouTube, create/select your own Google Cloud project, enable **YouTube Data 
 | You want… | Add and select… |
 | --- | --- |
 | One AI billing account for images + text + supported video | OpenRouter; choose GPT Image / Nano images, Opus/GPT/Gemini text and supported Seedance modes |
+| Everything free on your own computer | Ollama + SD WebUI or ComfyUI; select the Local text, image and video models |
 | Only images and video, writing prompts yourself | fal.ai; GPT Image / Nano, Seedance or H3 Max; no text key needed |
 | Nano images + Gemini Enhance / Brainstorm | Gemini key; select Gemini 3.8 Flash as the text model |
 | Direct GPT images + GPT text | OpenAI key; GPT Image 2.5 + GPT-6.1 Sol |
@@ -82,6 +109,8 @@ For YouTube, create/select your own Google Cloud project, enable **YouTube Data 
 | Existing direct-provider setup | Keep your keys; Auto preserves the current primary route when configured, or pin your preference |
 
 ## Costs and key safety
+
+**AI settings → My usage** shows your own recorded estimates for today, 7 or 30 days by model. **Daily spending warning** adds a header indicator that turns red at your amount; it warns but does not block requests.
 
 The app's estimates are not a provider balance or invoice. Charges can include text reasoning, references, output quality, video duration and preprocessing. Set spending limits with your providers and review their usage dashboards.
 

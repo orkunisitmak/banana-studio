@@ -22,7 +22,7 @@ const readEntries = (): Entry[] => {
 };
 
 const currentOwner = async (signal: AbortSignal, timeout = 15_000): Promise<string | undefined> => {
-  const task = createTaskDeadline(timeout, signal, 'Oturum doğrulanamadı. Sayfayı yenileyip yeniden dene.');
+  const task = createTaskDeadline(timeout, signal, 'Your session could not be verified. Refresh the page and try again.');
   try {
     const { data: { session } } = await waitForTask(supabase.auth.getSession(), task.signal);
     task.signal.throwIfAborted();

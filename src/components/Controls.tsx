@@ -32,6 +32,8 @@ import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
 import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
+import { PromptDiffText } from './PromptDiffText';
+import { LocalImageComposerOptions } from './LocalImageActions';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
@@ -403,6 +405,7 @@ export const Controls: React.FC<ControlsProps> = ({
     ? getOriginalImagePrompt(config.prompt, config.originalPrompt)
     : config.originalPrompt) ?? null;
   const [isMinimized, setIsMinimized] = useState(false);
+  const [showPromptDiff, setShowPromptDiff] = useState(false);
   const lastPromptLoadRef = useRef(0);
   useLayoutEffect(() => {
     if (lastPromptLoadRef.current === promptLoadVersion) return;
@@ -587,17 +590,18 @@ export const Controls: React.FC<ControlsProps> = ({
   // Seedance 2.5 accepts up to 30 images, 10 videos and 10 audio clips. Edit
   // and Extend have one source video; keeping that constraint in the picker
   // prevents a request that the provider cannot interpret unambiguously.
-  const maxReferenceVideos = isH3VideoConfig ? (h3State.available ? h3State.capabilities.videos.max : 0) : config.videoModel === 'seedance-2.5'
+  const isLocalVideoConfig = config.mode === 'video' && config.videoModel === 'local-video';
+  const maxReferenceVideos = isLocalVideoConfig ? 0 : isH3VideoConfig ? (h3State.available ? h3State.capabilities.videos.max : 0) : config.videoModel === 'seedance-2.5'
     ? (config.videoOperation === 'edit' || config.videoOperation === 'extend' ? 1 : 10)
     : 3;
-  const maxReferenceAudios = isH3VideoConfig ? (h3State.available ? h3State.capabilities.audios.max : 0) : config.videoModel === 'seedance-2.5' ? 10 : 3;
+  const maxReferenceAudios = isLocalVideoConfig ? 0 : isH3VideoConfig ? (h3State.available ? h3State.capabilities.audios.max : 0) : config.videoModel === 'seedance-2.5' ? 10 : 3;
   const seedanceFrameOnly = config.videoModel === 'seedance-2.5'
     && (config.videoOperation || 'generate') === 'generate'
     && currentReferenceVideos.length === 0
     && currentReferenceAudios.length === 0
     && (config.referenceImages || []).length > 0
     && (config.referenceImages || []).some(image => image.isFirstFrame || image.isLastFrame);
-  const maxReferenceImages = isH3VideoConfig
+  const maxReferenceImages = isLocalVideoConfig ? 1 : isH3VideoConfig
     ? h3State.imageLimit
     : config.mode === 'video' && config.videoModel === 'seedance-2.5'
       ? (seedanceFrameOnly ? 2 : 30)
@@ -615,7 +619,7 @@ export const Controls: React.FC<ControlsProps> = ({
       ? 'Seedance 2.5 Relaxed'
       : model === 'minimax-h3'
         ? 'MiniMax H3 Max'
-        : 'Video';
+        : model === 'local-video' ? 'Local video' : 'Video';
   const formatVideoOperation = (operation?: VideoPromptIntent) => operation === 'reference_edit'
     ? 'Ref Edit'
     : operation === 'edit'
@@ -914,7 +918,7 @@ export const Controls: React.FC<ControlsProps> = ({
       // their decoded metadata must survive the enhanced prompt update.
       const enhancementDraft = latestConfigRef.current;
       if (enhancementDraft !== config && !(isH3VideoConfig && isH3MetadataOnlyUpdate(config, enhancementDraft))) {
-        setEnhanceError('Enhance sırasında prompt veya ayarlar değişti. Güncel seçimler için yeniden Enhance yap.');
+        setEnhanceError('The prompt or settings changed during Enhance. Enhance again for the current selections.');
         return;
       }
       if (enhanced) {
@@ -928,7 +932,7 @@ export const Controls: React.FC<ControlsProps> = ({
       }
     } catch (e) {
       console.error("Failed to enhance", e);
-      setEnhanceError(e instanceof Error ? e.message : 'Prompt Enhance başarısız oldu. Tekrar dene.');
+      setEnhanceError(e instanceof Error ? e.message : 'Enhance failed. Try again.');
     } finally {
       setIsEnhancing(false);
     }
@@ -1840,7 +1844,7 @@ export const Controls: React.FC<ControlsProps> = ({
       videoAspectRatio: input === 'frames' && providerRoute.provider !== 'openrouter' ? 'adaptive' : current.videoAspectRatio,
     }));
   };
-  const videoOperationOptions = (selectedVideoModel === 'seedance-2.0'
+  const videoOperationOptions = (selectedVideoModel === 'local-video' ? [{ label: 'Generate', value: 'generate' }] : selectedVideoModel === 'seedance-2.0'
     ? [
         { label: 'Generate', value: 'generate' },
         { label: 'Ref Edit', value: 'reference_edit' },
@@ -1895,8 +1899,12 @@ export const Controls: React.FC<ControlsProps> = ({
   const requiresSourceVideo = isVideoMode && selectedVideoModel !== 'minimax-h3' && selectedVideoOperation !== 'generate';
   const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
   const isSunburst = config.imageModel === SUNBURST_MODEL;
-  const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
-  const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
+  const localVideoReferenceError = isLocalVideoConfig
+    && (config.referenceImages.length > 1 || currentReferenceVideos.length > 0 || currentReferenceAudios.length > 0)
+    ? 'Local video accepts one reference image and no video or audio references.'
+    : null;
+  const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && selectedVideoModel !== 'local-video' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
+  const canGenerate = !routeInputError && !localVideoReferenceError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
     : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
@@ -1921,7 +1929,7 @@ export const Controls: React.FC<ControlsProps> = ({
     );
   }
 
-  const modelInputError = routeInputError || h3InputError || sunburstError || (
+  const modelInputError = routeInputError || localVideoReferenceError || h3InputError || sunburstError || (
     isH3VideoConfig ? null : isVideoMode
       ? requiresSourceVideo && !(config.referenceVideos?.length)
         ? 'Add a source video for this action.'
@@ -1976,7 +1984,7 @@ export const Controls: React.FC<ControlsProps> = ({
     ? config.referenceVideos[0].duration!
     : 0;
   const videoCost = isVideoMode
-    ? selectedVideoModel === 'minimax-h3' ? estimateH3MaxCost(config) : providerRoute.provider !== 'evolink' ? null : estimateVideoCost(
+    ? selectedVideoModel === 'minimax-h3' ? estimateH3MaxCost(config) : selectedVideoModel === 'local-video' ? { usd: 0, source: 'published_estimate' as const } : providerRoute.provider !== 'evolink' ? null : estimateVideoCost(
         selectedVideoModel,
         config.videoQuality,
         selectedVideoOperation === 'edit' ? -1 : config.videoDuration,
@@ -2552,16 +2560,28 @@ export const Controls: React.FC<ControlsProps> = ({
           {modelInputError && <p role={sunburstError ? 'alert' : 'status'} className="px-1 text-xs leading-5 text-amber-300">{modelInputError}</p>}
           {generationError && generationError !== modelInputError && <p role="alert" className="px-1 text-xs leading-5 text-red-400">{generationError}</p>}
           {attachmentError && <div role="alert" className="flex items-start justify-between gap-3 px-1 text-xs leading-5 text-red-400"><span className="whitespace-pre-line">{attachmentError}</span><button type="button" aria-label="Dismiss attachment message" onClick={() => setAttachmentError(null)} className="shrink-0 rounded p-1 text-gray-400 hover:text-white"><X className="h-3.5 w-3.5" /></button></div>}
+        {showPromptDiff && preEnhancePrompt !== null && (
+          <div className="rounded-xl border border-white/[0.07] bg-[#11161d] px-3.5 py-3" aria-label="Changes from your original prompt">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-gray-400">
+              <span><span className="text-red-300 line-through">removed</span> · <span className="text-emerald-300">added</span> since your original prompt</span>
+              <button type="button" aria-label="Close changes" onClick={() => setShowPromptDiff(false)} className="rounded p-1 hover:text-white"><X className="h-3.5 w-3.5" /></button>
+            </div>
+            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-gray-300">
+              {/* Compare what the user sees: image prompts display reference names, not stored tags. */}
+              <PromptDiffText before={displayPrompt(preEnhancePrompt)} after={displayPrompt(config.prompt)} />
+            </p>
+          </div>
+        )}
         {hasStaleEnhancedPrompt && (
           <div className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
             <div className="flex min-w-0 items-start gap-2.5">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-amber-100">Seçimler değişti — yeniden Enhance gerekli</p>
+                <p className="text-xs font-semibold text-amber-100">Selections changed — Enhance again</p>
                 <p className="mt-1 text-[11px] leading-5 text-amber-100/65">
                   {enhancedPromptTargetLabel !== currentPromptTargetLabel && <><span className="font-medium text-amber-200/80">{enhancedPromptTargetLabel}</span><span className="mx-1.5 text-amber-400/50">→</span></>}
                   <span className="font-medium text-white">{currentPromptTargetLabel}</span>
-                  . Mevcut prompt önceki seçimler için hazırlandı. Revert ile kendi promptuna dön, ardından yeniden Enhance yap.
+                  . The current prompt was prepared for earlier selections. Revert to your own prompt, then Enhance again.
                 </p>
               </div>
             </div>
@@ -2889,7 +2909,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     className={`px-2.5 h-full flex items-center gap-1 text-xs font-semibold transition-colors ${
                       isVideoMode ? 'rounded-lg bg-violet-600 text-white shadow-sm' : 'rounded-lg text-gray-400 hover:bg-white/[0.05] hover:text-white'
                     }`}
-                    title={`Video Generation (${selectedVideoModel === 'seedance-2.0' ? 'Seedance 2.0' : selectedVideoModel === 'seedance-2.5' ? providerRoute.provider === 'evolink' ? 'Seedance 2.5 Relaxed' : 'Seedance 2.5' : 'MiniMax H3 Max'})`}
+                    title={`Video Generation (${selectedVideoModel === 'seedance-2.0' ? 'Seedance 2.0' : selectedVideoModel === 'seedance-2.5' ? providerRoute.provider === 'evolink' ? 'Seedance 2.5 Relaxed' : 'Seedance 2.5' : formatVideoModel(selectedVideoModel)})`}
                     aria-label="Video generation"
                     aria-pressed={isVideoMode}
                   >
@@ -2900,6 +2920,9 @@ export const Controls: React.FC<ControlsProps> = ({
                 {isVideoMode ? (
                   <>
                     <Dropdown label="Model" value={selectedVideoModel} options={videoModelOptions} onSelect={(val: VideoModelId) => updateVideoModel(val)} icon={Video} compact />
+                    {isLocalVideoConfig && <input type="text" aria-label="Negative prompt" placeholder="Negative prompt" maxLength={2000} value={config.localNegativePrompt || ''}
+                      onChange={event => updateConfig('localNegativePrompt', event.target.value || undefined)}
+                      className="h-8 w-40 min-w-0 rounded-lg border border-white/[0.07] bg-[#171e28] px-2.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:border-violet-400" />}
                     {isH3VideoConfig && <Dropdown label="H3 Max action" value={h3State.available ? h3State.mode : 'Choose action'} options={H3_MAX_MODE_OPTIONS} onSelect={updateH3Mode} icon={Film} compact />}
                     {(selectedVideoModel === 'seedance-2.0' || selectedVideoModel === 'seedance-2.5') && (
                       <Dropdown label="Action" value={selectedVideoIntent} options={videoOperationOptions} onSelect={(val: VideoPromptIntent) => updateVideoOperation(val)} icon={Film} compact />
@@ -2924,6 +2947,7 @@ export const Controls: React.FC<ControlsProps> = ({
                       <Dropdown label="Aspect Ratio" value={config.aspectRatio} options={aspectRatioOptions} onSelect={(val) => updateConfig('aspectRatio', val)} icon={Ratio} compact />
                       <Dropdown label="Resolution" value={config.resolution} options={resolutionOptions} onSelect={(val) => updateConfig('resolution', val)} icon={Scan} compact />
                     </>}
+                    {config.imageModel === 'local-image' && <LocalImageComposerOptions config={config} update={updateConfig} />}
                     <ImageCountControl count={config.count} onChange={value => updateConfig('count', value)} />
                   </>
                 )}
@@ -2941,6 +2965,12 @@ export const Controls: React.FC<ControlsProps> = ({
                   >
                     <RotateCcw className="w-4 h-4" />
                     <span>Revert</span>
+                  </button>
+                )}
+                {preEnhancePrompt !== null && preEnhancePrompt !== config.prompt && (
+                  <button type="button" onClick={() => setShowPromptDiff(value => !value)} aria-pressed={showPromptDiff}
+                    aria-label="Show changes from the original prompt" title="Compare the enhanced prompt with your original" className={PROMPT_REVERT_CLASS}>
+                    <span>Changes</span>
                   </button>
                 )}
                 <button

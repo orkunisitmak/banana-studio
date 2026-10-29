@@ -98,7 +98,7 @@ export async function requireUser(
     return { id: data.user.id, email };
   } catch (err: any) {
     if (signal?.aborted) {
-      res.status(504).json({ error: 'Oturum doğrulama süresi aşıldı. Sayfayı yenileyip yeniden dene.' });
+      res.status(504).json({ error: 'Session verification timed out. Refresh the page and try again.' });
       return null;
     }
     console.error('Auth verification failed:', err?.message || err);

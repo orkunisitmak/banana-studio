@@ -6,7 +6,7 @@ export type ImageEditRegion = NonNullable<ReferenceImage['editRegion']>;
 export type ImageEditPoint = { x: number; y: number };
 export const MAX_EDIT_REGION_POINTS = 256;
 export const MAX_EDIT_LAYERS = 32;
-export const EDIT_REGION_REQUIRED = 'Düzenlenecek alanı Edit area ile seç. Alanın dışındaki yüz ve diğer ayrıntılar kaynak görselden aynen korunacak.';
+export const EDIT_REGION_REQUIRED = 'Select the area to change with Edit area. Faces and other details outside it are kept exactly from the source image.';
 
 const isValidShape = (region: unknown): region is ImageEditRegion => {
   if (!region || typeof region !== 'object' || Array.isArray(region)) return false;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider, type AIProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
+import { LOCAL_PROVIDERS, MODEL_ROUTES, PROVIDER_LABELS, resolveProvider, type AIProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
 import { getProviderAvailability, getProviderPreferences, saveProviderPreference } from '../services/providerRouting';
 import { Dropdown } from './ControlDropdown';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
@@ -7,8 +7,9 @@ import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 const EVENT = 'banana-provider-routes-changed';
 const MODELS: Record<string,string> = {
   'gpt-image-2.5-sunburst':'GPT Image 2.5', 'gemini-3-pro-image-preview':'Nano Banana Pro', 'gemini-nano-banana-2.1':'Nano Banana 2.1',
-  'anthropic/claude-opus-5.5':'Claude Opus 5.5', 'gpt-6.1-sol':'GPT-6.1 Sol', 'gemini-3.8-flash':'Gemini 3.8 Flash · text / video analysis',
+  'anthropic/claude-opus-5.5':'Claude Opus 5.5', 'gpt-6.1-sol':'GPT-6.1 Sol', 'gemini-3.8-flash':'Gemini 3.8 Flash · text / video analysis', 'ollama/local':'Local model (Ollama / LM Studio) · text',
   'seedance-2.0':'Seedance 2.0', 'seedance-2.5':'Seedance 2.5', 'minimax-h3':'MiniMax H3 Max',
+  'local-image':'Local image · SD WebUI / ComfyUI', 'local-video':'Local video · ComfyUI',
 };
 export function useProviderRoute(model: string) {
   const [state,setState] = useState<{ model:string; provider?:AIProvider; choice:ProviderChoice; available:ProviderAvailability; error?:string }>({ model:'',choice:'auto',available:{} });
@@ -27,7 +28,8 @@ export function useProviderRoute(model: string) {
     void refresh(); window.addEventListener(EVENT,refresh); window.addEventListener('focus',refresh);
     return () => { active = false; window.removeEventListener(EVENT,refresh); window.removeEventListener('focus',refresh); };
   },[model]);
-  return state.model === model ? state : { model,choice:'auto' as const,available:{} };
+  // loaded tells callers the route reflects saved preferences and availability, not the initial placeholder.
+  return state.model === model ? { ...state, loaded:true } : { model,choice:'auto' as const,available:{},loaded:false };
 }
 export function ProviderRouteControl({ model, compact = false, showError = true }: { model:string; compact?:boolean; showError?:boolean }) {
   const route = useProviderRoute(model);
@@ -39,12 +41,15 @@ export function ProviderRouteControl({ model, compact = false, showError = true 
     finally { setSaving(false); }
   };
   const options = [{value:'auto',label:`Auto${route.provider && route.choice === 'auto' ? ` · ${PROVIDER_LABELS[route.provider]}` : ''}`},
+    // Local servers appear as Auto fallbacks for cloud models; they are pinned only on local models.
     // Codex runs the desktop user's own CLI; hosted workspaces never offer it.
-    ...(MODEL_ROUTES[model] || []).filter(provider => provider !== 'codex' || isLocalWorkspace()).map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : provider === 'codex' ? ' · sign-in needed' : ' · key needed'}`}))];
+    ...(MODEL_ROUTES[model] || []).filter(provider => (provider !== 'codex' || isLocalWorkspace())
+      && (!LOCAL_PROVIDERS.includes(provider) || MODEL_ROUTES[model].every(route => LOCAL_PROVIDERS.includes(route))))
+      .map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : provider === 'codex' ? ' · sign-in needed' : LOCAL_PROVIDERS.includes(provider) ? ' · not running' : ' · key needed'}`}))];
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-    {compact ? <><span className="text-gray-500">Provider</span><Dropdown label="Provider" value={route.choice} options={options} onSelect={value => void save(value)} disabled={saving} compact /></> : <label className="flex items-center gap-2 text-gray-400">Provider
+    {compact ? <><span className="text-gray-500">Provider</span><Dropdown label="Provider" value={route.choice} options={options} onSelect={value => void save(value)} disabled={saving} compact /></> : <label className="flex min-w-0 max-w-full flex-1 items-center gap-2 text-gray-400">Provider
       <select aria-label={`${MODELS[model] || model} provider`} value={route.choice} disabled={saving}
-        className="max-w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-gray-200 focus:border-violet-400"
+        className="min-w-0 max-w-full flex-1 truncate rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-gray-200 focus:border-violet-400"
         onChange={event => void save(event.target.value as ProviderChoice)}>
         {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
@@ -56,7 +61,11 @@ export function ProviderRoutingSettings() {
   return <section className="space-y-4 border-t border-white/10 pt-5" aria-labelledby="provider-routing-title">
     <div><h3 id="provider-routing-title" className="font-semibold">Provider routing</h3>
       <p className="mt-2 text-xs leading-relaxed text-gray-400">Add only the keys you need. Auto uses the first configured provider shown for each model. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p></div>
-    {Object.keys(MODELS).map(model => <div key={model}><p className="mb-1.5 text-sm text-gray-200">{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} /></div>)}
-    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5. In the desktop app, GPT Image 2.5 can also use your ChatGPT plan through the Codex CLI after <code>codex login</code>, with no API key.</p>
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      {Object.keys(MODELS).map(model => <div key={model} className="min-w-0 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 transition hover:border-white/[0.12]">
+        <p className="mb-2 truncate text-sm font-medium text-gray-100" title={MODELS[model]}>{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} />
+      </div>)}
+    </div>
+    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI, Gemini or a local server (Ollama, LM Studio; no key). Without a cloud key, Auto falls back to the local text server. Local image and video run on your own Stable Diffusion WebUI or ComfyUI; choose models in Local models. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5. In the desktop app, GPT Image 2.5 can also use your ChatGPT plan through the Codex CLI after <code>codex login</code>, with no API key.</p>
   </section>;
 }

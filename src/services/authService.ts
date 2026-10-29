@@ -4,7 +4,7 @@ import { createLocalWorkspaceClient } from '../../desktop/shared/browserClient';
 import { createSessionReader, isTransientReadError, retryTransientRead } from '../lib/shared/transientRead';
 import { buildAdminUsageSummary } from '../lib/admin/adminUsage';
 import { AdminUsageRange, validateAdminUsageRange } from '../lib/admin/adminUsageRange';
-import { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from '../lib/prompts/textModels';
+import { OLLAMA_TEXT_MODEL, OPENAI_TEXT_MODEL, calculateOpenAITextCost } from '../lib/prompts/textModels';
 import { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from '../lib/prompts/openrouterText';
 import { UserProfile, AdminUserSummary, Resolution, AspectRatio, VideoModelId, VideoOperation, VideoQuality, estimateImageCost, estimateVideoCost } from '../types';
 
@@ -243,6 +243,7 @@ const estimateUsageCost = (
     return perImage * normalizedImageCount;
   }
 
+  if (model === OLLAMA_TEXT_MODEL) return 0;
   if (metadata?.openrouterUsage) return calculateOpenRouterTextCost(metadata.openrouterUsage, model);
   if (model === OPENAI_TEXT_MODEL) return calculateOpenAITextCost(metadata?.openaiUsage);
   if (model === OPENROUTER_TEXT_MODEL) return calculateOpenRouterTextCost(metadata?.openrouterUsage);

@@ -1,4 +1,5 @@
 import { PROVIDER_LABELS } from '../lib/providers';
+import { LocalImageActions } from './LocalImageActions';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -3441,6 +3442,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 className="w-full py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium">
                 <Play className="w-4 h-4 text-red-400" /> YouTube Preview
               </button>}
+              {isComparableImage(selectedMedia) && <LocalImageActions media={selectedMedia} onEditGenerate={isReadOnly ? undefined : onEditGenerate} />}
               {!isReadOnly && <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => { onRecreate(selectedMedia); setSelectedMediaId(null); }} className="py-4 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw className="w-5 h-5" /> Re-create</button>
                 {onGenerateVariation && (

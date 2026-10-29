@@ -26,6 +26,6 @@ export const resolveStableImageReferences = (prompt: string, inputs: ReferenceIm
     let id: string | undefined;
     try { id = encodedId == null ? undefined : decodeURIComponent(encodedId); } catch { /* invalid token stays unresolved */ }
     const index = id == null ? -1 : inputs.findIndex(ref => ref.id === id);
-    if (index < 0) throw new Error('Prompttaki bir görsel referansı artık ekli değil veya eski eşleşmesi bulunamadı. İlgili etiketi kaldırıp @ menüsünden referansı yeniden seç.');
+    if (index < 0) throw new Error('An image reference in the prompt is no longer attached or its match was lost. Remove that tag and choose the reference again from the @ menu.');
     return `image ${index + 1}`;
   }));

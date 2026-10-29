@@ -9,6 +9,7 @@ import { normalizePromptPreparation } from '../../src/lib/prompts/promptPreparat
 import { normalizeYouTubeSource } from '../../src/lib/youtube/youtubeSource.js';
 import { canonicalMediaUrl, signedMediaUrl } from './imageStorage.js';
 import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
+import { LOCAL_IMAGE_MODEL, localImageOptionsError } from '../../src/lib/localModels.js';
 
 export class ImageJobInputError extends Error {}
 const invalid = (message: string): never => { throw new ImageJobInputError(message); };
@@ -27,7 +28,7 @@ export const privateReferencePath = (value: string): string | null => {
  * worker/claim flags are copied into durable storage. */
 export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Invalid image job.');
-  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
+  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1',LOCAL_IMAGE_MODEL].includes(body.model) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) invalid('Prompt must contain 1–32,000 characters.');
   if (!['1:1','4:3','3:4','16:9','9:16'].includes(body.aspectRatio) || !['1K','2K','4K'].includes(body.resolution)) invalid('Invalid ratio or resolution.');
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) invalid('Invalid image options.');
@@ -36,6 +37,8 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...body, openaiImageOptions: options }));
   if (optionError) invalid(optionError);
+  const localError = localImageOptionsError(body);
+  if (localError) invalid(localError);
   if (body.originalPrompt != null && (typeof body.originalPrompt !== 'string' || body.originalPrompt.length > 32000)) invalid('Invalid original prompt.');
   if (body.imagePromptCategory != null && !['simple','youtube_thumbnail','product_shot','portrait','social_media','custom'].includes(body.imagePromptCategory)) invalid('Invalid image category.');
   if (body.folderId != null && (typeof body.folderId !== 'string' || body.folderId.length > 200)) invalid('Invalid folder.');
@@ -76,6 +79,8 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
     displayPrompt: typeof body.displayPrompt === 'string' && body.displayPrompt.length <= 32000 ? body.displayPrompt : body.prompt,
     originalPrompt: body.originalPrompt, aspectRatio: body.aspectRatio, resolution: body.resolution,
     options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
+    ...(body.model === LOCAL_IMAGE_MODEL ? { localModel: body.localModel, localWorkflow: body.localWorkflow, localSeed: body.localSeed,
+      localNegativePrompt: body.localNegativePrompt, localUpscale: body.localUpscale } : {}),
     imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource) };
   const prepared = prepareSunburstGeneration(payload.prompt, refs, { ...payload, imageModel: body.model, openaiImageOptions: options });
   if (prepared.prompt.length > 32000) invalid('Shorten the prompt to leave room for reference instructions.');

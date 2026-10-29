@@ -1,4 +1,6 @@
 import { selectProvider } from './providerRouting';
+import { getLocalChoice } from './localModelsService';
+import { LOCAL_VIDEO_MODEL } from '../lib/localModels';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
@@ -768,7 +770,7 @@ const cleanPromptForVideoModel = (
   cleaned = cleaned.replace(/@PERSON_(\d+)\b/gi, (_tag, number) => {
     const id = Number(number);
     const group = getPersonGroups(refs).find(person => person.id === id);
-    if (!group) throw new Error(`Person ${id} için ekli referans yok.`);
+    if (!group) throw new Error(`Person ${id} has no attached reference.`);
     return `person ${id} shown in ${group.images.map(image => `@image${refs.indexOf(image) + 1}`).join(' and ')} (the SAME single person)`;
   });
   if (getPersonGroups(refs).some(group => group.id > 2)) cleaned += `\n${buildPersonIdentityContract(refs, index => `@image${index + 1}`)}`;
@@ -856,6 +858,27 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     cost:estimateH3MaxCost(resolved),mode,referenceImages:resolved.referenceImages,referenceVideos:resolved.referenceVideos,referenceAudios};
 };
 
+/** Self-hosted ComfyUI video: prompt plus one optional reference image, no provider credits. */
+const createLocalVideoTask = async (config: GenerationConfig, initiatingUserId?: string) => {
+  const workflow = getLocalChoice('videoWorkflow');
+  if (!workflow) throw new Error('Choose a ComfyUI video workflow in AI settings → Local models.');
+  if ((config.videoOperation || 'generate') !== 'generate' || config.referenceVideos?.length || config.referenceAudios?.length) {
+    throw new Error('Local video uses the prompt and one optional reference image. Remove video and audio references.');
+  }
+  const provider = await selectProvider(LOCAL_VIDEO_MODEL);
+  const image = config.referenceImages.find(ref => ref.isFirstFrame) || config.referenceImages[0];
+  const imageUrl = image ? await resolveImageUrl(image) : null;
+  if (image && !imageUrl) throw new Error('The reference image could not be loaded. Restore it before generating.');
+  const response = await fetch('/api/local-video', { method: 'POST', headers: await getServerAuthHeaders(initiatingUserId),
+    body: JSON.stringify({ provider, videoModel: LOCAL_VIDEO_MODEL, prompt: config.prompt, duration: config.videoDuration, quality: config.videoQuality,
+      aspectRatio: config.videoAspectRatio, imageUrls: imageUrl ? [imageUrl] : [], localWorkflow: workflow, localModel: getLocalChoice('videoModel') || undefined,
+      localNegativePrompt: config.localNegativePrompt?.trim() || undefined }) });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.taskId) throw new Error(data?.error || 'ComfyUI could not start the video.');
+  return { taskId: data.taskId as string, endpoint: typeof data.endpoint === 'string' ? data.endpoint : undefined, queueEndpoint: undefined,
+    cost: { usd: 0, source: 'published_estimate' as const }, mode: (imageUrl ? 'image_to_video' : 'text_only') as EvoMode, referenceVideos: [], referenceAudios: [] };
+};
+
 export const createVideoTask = async (
   config: GenerationConfig, context?:{id:string}
 ): Promise<{ taskId: string; endpoint?: string; queueEndpoint?: string; cost: VideoCost | undefined; mode: EvoMode; referenceImages?: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[] }> => {
@@ -865,6 +888,7 @@ export const createVideoTask = async (
   const videoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
   const videoOperation = config.videoOperation || 'generate';
   if(videoModel==='minimax-h3')return createH3MaxVideoTask(config,initiatingUserId,context);
+  if (videoModel === LOCAL_VIDEO_MODEL) return createLocalVideoTask(config, initiatingUserId);
 
   const selectedProvider = await selectProvider(videoModel);
   const refVids = referenceVideos || [];
@@ -1085,8 +1109,9 @@ export const pollVideoTask = async (
     endpoint?.startsWith('minimax/h3-max/') === true
     || effectiveQueueEndpoint === 'minimax/h3-max'
   );
+  const local = taskId.startsWith('bs_comfyui_');
   const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_');
-  const providerName = isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+  const providerName = local ? 'ComfyUI' : isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
   let consecutiveErrors = 0;
   const MAX_ERRORS = 5;
   let retryableStatusErrors = 0;
@@ -1097,7 +1122,7 @@ export const pollVideoTask = async (
     if (pollingSession?.user?.id !== initiatingUserId) throw new Error('Session changed while checking the video.');
     try {
       const res = await fetch(
-        routed ? `/api/seedance-video?taskId=${encodeURIComponent(taskId)}` : isH3
+        local ? `/api/local-video?taskId=${encodeURIComponent(taskId)}` : routed ? `/api/seedance-video?taskId=${encodeURIComponent(taskId)}` : isH3
           ? `/api/fal-h3-video?requestId=${encodeURIComponent(taskId)}${effectiveQueueEndpoint ? `&endpoint=${encodeURIComponent(effectiveQueueEndpoint)}` : ''}`
           : `/api/evolink-status?taskId=${encodeURIComponent(taskId)}`,
         { headers: await getServerAuthHeaders(initiatingUserId), cache: 'no-store' },

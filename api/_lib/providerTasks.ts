@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createServiceRoleClient, createUserScopedClient } from './auth.js';
 
-type Provider = 'fal' | 'evolink' | 'openrouter';
+type Provider = 'fal' | 'evolink' | 'openrouter' | 'comfyui';
 type RegistryWriter = NonNullable<ReturnType<typeof createServiceRoleClient>>;
 
 /** Fail before charging a provider if durable, server-owned tracking is unavailable. */

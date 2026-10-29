@@ -22,9 +22,9 @@ export const calculateOpenRouterTextCost = (usage: any, model: string = OPENROUT
 };
 
 export const openRouterErrorMessage = (status?: number): string => {
-  if (status === 401 || status === 403) return 'OpenRouter anahtarı veya model izni kontrol edilmeli. Yöneticiye başvur.';
-  if (status === 402) return 'OpenRouter kredisi yetersiz. Yönetici hesaba kredi eklemeli.';
-  if (status === 429 || status === 503) return 'Opus 5.5 şu anda yoğun veya istek limiti doldu. Biraz sonra yeniden dene.';
-  if (status === 400 || status === 422) return 'OpenRouter bu isteği kabul edemedi. Prompt ve referansları kontrol et.';
-  return 'Opus 5.5 isteği tamamlanamadı. Kayıtlı kullanım durumunu kontrol edip yeniden dene.';
+  if (status === 401 || status === 403) return 'Check the OpenRouter key and model access, or contact your administrator.';
+  if (status === 402) return 'OpenRouter credit is insufficient. Add credit to the account.';
+  if (status === 429 || status === 503) return 'Opus 5.5 is busy or the rate limit was reached. Try again shortly.';
+  if (status === 400 || status === 422) return 'OpenRouter rejected this request. Check the prompt and references.';
+  return 'The Opus 5.5 request did not finish. Check recorded usage, then try again.';
 };

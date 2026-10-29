@@ -1761,7 +1761,7 @@ const AuthorizedWorkspace: React.FC<{
       const imageModel = resolveImageModel(template.config.imageModel ?? config.imageModel);
       const merged = mergePersonReferenceInputs(template.config.referenceImages || [], config.referenceImages || [], template.config.prompt, config.prompt, template.config.personGroups, config.personGroups);
       const limit = imageModel === SUNBURST_MODEL ? 16 : 14;
-      if (merged.references.length > limit) throw new Error(`Bu şablonla toplam ${merged.references.length} referans oluyor. Önce referans sayısını ${limit} veya altına indir.`);
+      if (merged.references.length > limit) throw new Error(`This template brings the total to ${merged.references.length} references. Reduce them to ${limit} or fewer first.`);
       recreateLoadIdRef.current += 1;
       recreateLoadingRef.current = null;
       setIsRecreateLoading(false);

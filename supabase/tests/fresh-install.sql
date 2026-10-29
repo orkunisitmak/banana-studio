@@ -22,6 +22,7 @@ DO $$ DECLARE prefs jsonb; BEGIN
  IF public.is_admin() THEN RAISE EXCEPTION 'Member has admin rights';END IF;
  IF (SELECT count(*) FROM public.generations)<>1 THEN RAISE EXCEPTION 'Cross-owner gallery access';END IF;
  prefs:=public.get_text_model_preferences();IF prefs->>'model'<>'anthropic/claude-opus-5.5' OR prefs->>'reasoningEffort'<>'medium' THEN RAISE EXCEPTION 'Default preferences are incorrect';END IF;
+ prefs:=public.save_text_model_preferences('me','ollama/local','MEDIUM','medium',auth.uid());IF prefs->>'model'<>'ollama/local' THEN RAISE EXCEPTION 'Local model preference was not saved';END IF;
  BEGIN
   UPDATE public.profiles SET role='admin' WHERE id=auth.uid();RAISE EXCEPTION 'Member could alter roles';
  EXCEPTION WHEN insufficient_privilege THEN NULL;END;

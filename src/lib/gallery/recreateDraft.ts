@@ -26,6 +26,8 @@ export const createRecreateConfig = (media: GeneratedMedia, imageModel: Generati
     imageModel,
     openaiImageOptions: media.openaiImageOptions,
     imagePromptCategory: media.imagePromptCategory,
+    // Re-create with the local model repeats the recorded seed and negative prompt.
+    ...(imageModel === 'local-image' && mode === 'image' ? { localSeed: media.localSeed, localNegativePrompt: media.localNegativePrompt } : {}),
     referenceImages,
     referenceVideos: media.referenceVideos || [],
     referenceAudios: media.referenceAudios || [],

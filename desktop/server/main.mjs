@@ -1,14 +1,19 @@
 import readline from 'node:readline';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { LocalWorkspace } from './store.mjs';
 import { setWorkspace } from './context.mjs';
 import { startLocalServer } from './http.mjs';
 import { setQueueWake } from './queue.mjs';
 import { createMediaUploader } from './uploads.mjs';
+import { selectJobs } from './scheduler.mjs';
 import { runImageJob, ImageJobWait } from '../../api/_lib/imageJobRunner.ts';
 import openaiText from '../../api/openai-text-generate.ts';
 import openrouterText from '../../api/openrouter-text-generate.ts';
+import ollamaText from '../../api/ollama-text-generate.ts';
+import localModels from '../../api/local-models.ts';
+import localVideo from '../../api/local-video.ts';
 import geminiGenerate from '../../api/gemini-generate.ts';
 import geminiStatus from '../../api/gemini-status.ts';
 import openaiImage from '../../api/openai-image-generate.ts';
@@ -33,13 +38,16 @@ let launch;try{launch=JSON.parse(first);}catch{process.exit(1);}
 if(!launch||typeof launch.dataDirectory!=='string'||!path.isAbsolute(launch.dataDirectory))process.exit(1);
 const updateKeys=keys=>{for(const name of KEY_NAMES){delete process.env[name];const value=keys?.[name];if(typeof value==='string'&&value.length<4096&&value.trim())process.env[name]=value.trim();}};
 process.env.BANANA_RUNTIME='local';
+// Drop ComfyUI API-format workflows here; same layout on macOS, Windows and Linux.
+process.env.COMFYUI_WORKFLOWS_DIR||=path.join(launch.dataDirectory,'comfyui-workflows');
+try{fs.mkdirSync(process.env.COMFYUI_WORKFLOWS_DIR,{recursive:true});}catch{ /* Listing reports an empty folder. */ }
 updateKeys(launch.keys);
 const workspace=new LocalWorkspace(launch.dataDirectory);setWorkspace(workspace);
-const active=new Set();let closing=false;
+const active=new Map();let closing=false;
 const wake=()=>{
   if(closing||active.size>=2)return;
-  for(const job of workspace.pendingJobs()){
-    if(active.size>=2)break;if(active.has(job.id)||job.retryAt>Date.now())continue;active.add(job.id);
+  for(const job of selectJobs(workspace.pendingJobs(),active)){
+    active.set(job.id,job);
     runImageJob(workspace.client(true),{id:job.id,userId:job.userId}).catch(error=>{
       if(error instanceof ImageJobWait){const latest=workspace.job(job.id);if(latest){latest.retryAt=Date.now()+error.afterSeconds*1000;workspace.job(job.id,latest);}}
       // The dispatch marker is durable. A subsequent run only reconciles a
@@ -48,7 +56,7 @@ const wake=()=>{
   }
 };
 setQueueWake(wake);
-const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
+const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'ollama-text-generate':ollamaText,'local-models':localModels,'local-video':localVideo,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
 const prepareMedia=createMediaUploader(workspace);
 routes['seedance-video']=async(req,res)=>{
  if(req.method==='POST'){

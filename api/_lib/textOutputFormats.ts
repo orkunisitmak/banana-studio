@@ -1,3 +1,6 @@
+/** Shared by every chat-completion route so providers receive the same task. */
+export const ANALYSIS_SYSTEM_PROMPT = 'Prepare the requested factual episode analysis using only the supplied footage or verified observations. Report unavailable footage honestly; never invent events, identities, prices, outcomes or timestamps. Return exactly the requested JSON object.';
+export const TEXT_TASK_SYSTEM_PROMPT = 'Complete the requested prompt-writing task using the supplied brief and references. Make reasonable creative decisions without follow-up questions. Return only the finished deliverable.';
 export const BRAINSTORM_FORMAT = {
   type: 'json_schema', name: 'brainstorm_ideas', strict: true,
   schema: { type: 'object', additionalProperties: false,

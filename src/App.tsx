@@ -7,8 +7,10 @@ import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AuthBoundary } from './components/AuthBoundary';
 import { startTextPreferencesSync } from './services/textPreferencesService';
-import { AdminPanel } from './components/AdminPanel';
+const AdminPanel = React.lazy(() => import('./components/AdminPanel').then(module => ({ default: module.AdminPanel })));
 import { useToast } from './components/Toast';
+import { useWorkspaceSession } from './hooks/useWorkspaceSession';
+import { useGalleryHash } from './hooks/useGalleryHash';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
 import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
 import * as workspaceStorage from './services/storageService';
@@ -20,7 +22,7 @@ import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
 import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
 import { getSeedanceFrameError } from './lib/video/seedanceFrames';
-import { getSession, supabase } from './services/authService';
+import { supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxMode } from './lib/video/h3MaxConfig';
 import { parseErrorMessage } from './services/generationErrors';
@@ -34,12 +36,13 @@ import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
+import { LazyBoundary } from './components/LazyBoundary';
 
 const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => getActiveImageModel(value);
 
 const mergeSavedMedia = (
   media: GeneratedMedia,
-  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string }
+  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | null
 ): GeneratedMedia => {
   if (!savedResult) return media;
 
@@ -89,22 +92,7 @@ const AuthorizedWorkspace: React.FC<{
 }> = ({ userId, userProfile, onSignOut }) => {
   useEffect(() => startTextPreferencesSync(userId), [userId]);
   const isAuthenticated = true;
-  const workspaceActive = useRef(true);
-  useEffect(() => {
-    workspaceActive.current = true;
-    return () => { workspaceActive.current = false; };
-  }, []);
-  const assertWorkspaceSession = async () => {
-    const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new Error('Session changed. Sign in again to continue.');
-  };
-  const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
-    async (...args: Args): Promise<Result> => {
-      await assertWorkspaceSession();
-      const result = await operation(...args);
-      await assertWorkspaceSession();
-      return result;
-    };
+  const { workspaceActive, assertWorkspaceSession, withWorkspaceSession } = useWorkspaceSession(userId);
   const saveImage = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveImage(media, userId));
   const saveVideo = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveVideo(media, userId));
   const getImages = withWorkspaceSession(workspaceStorage.getImages);
@@ -175,37 +163,7 @@ const AuthorizedWorkspace: React.FC<{
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
 
-  // --- URL Hash Sync ---
-  // Restore state from hash on mount
-  useEffect(() => {
-    const parseHash = () => {
-      const params = new URLSearchParams(window.location.hash.slice(1));
-      const folder = params.get('folder') || null;
-      const image = params.get('image') || null;
-      setCurrentFolderId(folder);
-      setSelectedImageId(image);
-    };
-    parseHash();
-    window.addEventListener('popstate', parseHash);
-    return () => window.removeEventListener('popstate', parseHash);
-  }, []);
-
-  // Push hash when navigation state changes (skip the initial mount)
-  const isInitialMount = useRef(true);
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    const params = new URLSearchParams();
-    if (currentFolderId) params.set('folder', currentFolderId);
-    if (selectedImageId) params.set('image', selectedImageId);
-    const hash = params.toString();
-    const newHash = hash ? `#${hash}` : window.location.pathname;
-    if (window.location.hash.slice(1) !== hash) {
-      window.history.pushState(null, '', newHash);
-    }
-  }, [currentFolderId, selectedImageId]);
+  useGalleryHash(currentFolderId, selectedImageId, setCurrentFolderId, setSelectedImageId);
 
   // Toast notifications
   const toast = useToast();
@@ -1724,12 +1682,18 @@ const AuthorizedWorkspace: React.FC<{
 
       <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onSignOut={handleSignOut} />
       {/* Admin Panel */}
-      {!isLocalWorkspace() && userProfile?.role === 'admin' && <AdminPanel
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
-        onViewUserGallery={handleViewUserGallery}
-        onBillingReconciled={refreshReconciledGalleryBilling}
-      />}
+      {!isLocalWorkspace() && userProfile?.role === 'admin' && isAdminPanelOpen && (
+        <LazyBoundary label="Workspace admin" onDismiss={() => setIsAdminPanelOpen(false)}>
+          <React.Suspense fallback={null}>
+            <AdminPanel
+              isOpen={isAdminPanelOpen}
+              onClose={() => setIsAdminPanelOpen(false)}
+              onViewUserGallery={handleViewUserGallery}
+              onBillingReconciled={refreshReconciledGalleryBilling}
+            />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
 
       <Gallery
         key={adminGalleryUser?.user_id || 'own-gallery'}

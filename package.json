@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite",
     "test": "node --test tests/*.test.mjs",
+    "test:ui": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:all": "npm test && npm run test:ui",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check package.json tsconfig.json vite.config.ts eslint.config.js vitest.config.ts",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p api/tsconfig.json",
@@ -18,7 +24,7 @@
     "@fal-ai/client": "1.10.1",
     "@google/genai": "1.37.0",
     "@supabase/supabase-js": "2.39.3",
-    "@vercel/queue": "0.8.0",
+    "@vercel/queue": "0.10.0",
     "jszip": "3.10.1",
     "lucide-react": "0.561.0",
     "react": "19.2.3",
@@ -27,17 +33,38 @@
     "tus-js-client": "4.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "22.19.7",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
     "@vercel/node": "5.10.2",
     "@vitejs/plugin-react": "5.1.2",
+    "@vitest/coverage-v8": "^5.0.5",
     "autoprefixer": "10.4.21",
     "esbuild": "0.25.12",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
     "postcss": "8.5.32",
     "postgres": "3.4.8",
+    "prettier": "^3.9.10",
     "tailwindcss": "3.4.17",
     "typescript": "5.8.3",
-    "vite": "6.4.5"
+    "typescript-eslint": "^8.72.1",
+    "vite": "6.4.5",
+    "vitest": "^5.0.5"
   },
   "license": "MIT",
-  "description": "A self-hosted and local-first AI media studio"
+  "description": "A self-hosted and local-first AI media studio",
+  "contributors": [
+    "MindAeon"
+  ],
+  "overrides": {
+    "zod": "^4.6.7"
+  }
 }

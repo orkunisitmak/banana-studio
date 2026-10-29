@@ -14,6 +14,7 @@ import { readEditSource, compositeProtectedEdit } from './_lib/protectedImageEdi
 import { readImageDimensions } from './_lib/imageDimensions.js';
 import { saveGeneratedImage, readStoredImage, imageSha256, signedMediaUrl, canonicalMediaUrl } from './_lib/imageStorage.js';
 import { startOpenAIRequest } from './_lib/openaiGuard.js';
+import { enforceDailyGenerationQuota } from './_lib/generationQuota.js';
 import { openAIErrorMessage, safeOpenAIErrorCode, imageRateLimitDelay } from './_lib/openaiError.js';
 
 // Match the existing deployment's 300-second function budget. No automatic
@@ -23,12 +24,13 @@ const isImageUrl = isReferenceUrl;
 class SavedImageError extends Error {}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireUser(req, res);
   if (!user) return;
+  if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res)) return;
   return executeOpenAIImage(req,res,{ user,db:createUserScopedClient(req) });
 }
 

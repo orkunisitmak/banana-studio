@@ -99,9 +99,9 @@ MiniMax H3 Max modları: **Text to Video Max · Image to Video Max · Reference 
 
 | Cihazın | Bugün sunulan sürüm | Buradan başla |
 | --- | --- | --- |
-| Apple Silicon işlemcili Mac | Bağımsız uygulama, macOS 13.5+ | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-arm64.zip) · [Kurulum rehberi](desktop.md) |
-| Intel işlemcili Mac | Bağımsız uygulama, macOS 13.5+ | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-x64.zip) · [Kurulum rehberi](desktop.md) |
-| Windows 10/11, 64-bit Intel/AMD | Bağımsız taşınabilir uygulama | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) · [Kurulum rehberi](desktop.md#windows-indir-ve-aç) |
+| Apple Silicon işlemcili Mac | Bağımsız uygulama, macOS 13.5+ | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-arm64.zip) · [Kurulum rehberi](desktop.md) |
+| Intel işlemcili Mac | Bağımsız uygulama, macOS 13.5+ | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-x64.zip) · [Kurulum rehberi](desktop.md) |
+| Windows 10/11, 64-bit Intel/AMD | Bağımsız taşınabilir uygulama | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-windows-x64.zip) · [Kurulum rehberi](desktop.md#windows-indir-ve-aç) |
 | Diğer bilgisayarlar, telefon ve tablet | Tarayıcı üzerinden web sürümü | Kurulmuş web adresini aç; erişimi ve servis anahtarlarını web alanının sahibi yönetir. |
 
 **Masaüstünde hızlı başlangıç:** indir → zip'i ayıkla → aç (Mac'te önce Uygulamalar'a taşı) → **Provider keys** → modelin anahtarını gir → üret. Bağımsız uygulamada **Supabase, Vercel, Google ile giriş veya ayrıca Node kurulumu gerekmez**. Galeri bilgisayarında; anahtarlar Mac'te Anahtar Zinciri'nde, Windows'ta Credential Manager'da tutulur. Üretim sürerken uygulamayı açık tut; pencereyi küçültebilirsin. [İlk açılış izinleri, güncelleme ve yedekleme →](desktop.md)
@@ -144,3 +144,5 @@ Rehberde terminal gerektirmeyen SQL Editor yolu, değişken tablosu, kontrol ad�
 **[Adım adım web kurulum rehberini aç →](deploy.md)**
 
 <p align="center"><sub><a href="../../LICENSE">MIT</a> · <a href="../../SECURITY.md">Güvenlik</a> · <a href="development.md">Katkıda bulun</a> · <a href="../THIRD_PARTY_NOTICES.md">Üçüncü taraf bildirimleri</a> · <a href="../../README.md">English</a></sub></p>
+
+<p align="center"><sub>Mühendislik desteği ve yayın sertleştirme: <strong>MindAeon</strong>.</sub></p>

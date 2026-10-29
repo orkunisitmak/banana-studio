@@ -11,7 +11,7 @@ const policies = path => headersFor(path).filter(h => h.key.toLowerCase() === 'c
 const directives = policy => Object.fromEntries(policy.split(';').map(d => d.trim().split(/\s+/)).filter(d => d[0]).map(([name, ...values]) => [name, values]));
 
 test('the main app gets one enforced CSP with no unsafe script sources', () => {
-  for (const path of ['/', '/index.html', '/assets/index-abc123.js', '/api/workspace-config']) {
+  for (const path of ['/', '/index.html', '/assets/index-abc123.js', '/api/workspace-config', '/share.html-probe']) {
     const found = policies(path);
     assert.equal(found.length, 1, path);
     const csp = directives(found[0]);

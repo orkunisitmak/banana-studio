@@ -2,7 +2,8 @@ import type { Plugin } from 'vite';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const secretPattern = /(?:sk-(?:proj-|svcacct-)?[a-zA-Z0-9_-]{30,}|AIza[a-zA-Z0-9_-]{30,}|sb_secret_[a-zA-Z0-9_-]{20,})/;
+// Only "sk-" needs a left boundary: names such as "task-…", "disk-…" or "dark-sk-…" contain it.
+const secretPattern = /(?:(?<![a-zA-Z0-9_-])sk-(?:proj-|svcacct-)?[a-zA-Z0-9_-]{30,}|AIza[a-zA-Z0-9_-]{30,}|sb_secret_[a-zA-Z0-9_-]{20,})/;
 
 export function assertPublicEnvironment(env: Record<string, string | undefined>) {
   for (const [name, value] of Object.entries(env)) {

@@ -64,6 +64,7 @@ export const getImageCostPreview = (config: CostConfig, count = config.count, hi
       description: 'Choose a positive whole number of images before estimating generation cost.',
       note: '', basis: 'unknown' };
   }
+  if (config.imageProvider === 'codex') return { min: null, max: null, label: 'ChatGPT plan', description: 'Runs through your Codex sign-in. No API charge; each image uses your ChatGPT plan’s Codex usage limits.', note: '', basis: 'unknown' };
   if (config.imageProvider && config.imageProvider !== (config.imageModel === SUNBURST_MODEL ? 'openai' : 'fal')) return { min: null, max: null, label: 'Provider usage-based', description: 'This route uses the selected provider’s billing. Actual cost is shown when returned; another provider’s estimate is not used.', note: '', basis: 'unknown' };
   if (config.imageModel === NANO_BANANA_21_MODEL) {
     const cost = estimateNanoBanana21OutputCost(config.resolution, count);

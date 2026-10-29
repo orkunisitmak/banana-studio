@@ -1,5 +1,5 @@
-import { chooseProvider } from './_lib/providerConfiguration.js';
-import { PROVIDER_KEYS, PROVIDER_LABELS, type AIProvider } from '../src/lib/providers.js';
+import { chooseProvider, providerKey } from './_lib/providerConfiguration.js';
+import { PROVIDER_LABELS, type AIProvider } from '../src/lib/providers.js';
 import { imageProviderModel, requestImage } from './_lib/imageProviders.js';
 import { isReferenceUrl, providerImageUrl } from './_lib/providerMedia.js';
 import { getPersonId, cleanPersonName } from '../src/lib/references/personReferences.js';
@@ -56,7 +56,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) return res.status(400).json({ error: 'Invalid image options.' });
   let provider: AIProvider;
   try { provider = chooseProvider(body.model, body.provider ?? (context.guard && body.model === SUNBURST_MODEL ? 'openai' : 'auto')); } catch (error) { return res.status(503).json({ error: (error as Error).message }); }
-  const key = process.env[PROVIDER_KEYS[provider]]!;
+  const key = providerKey(provider) || '';
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
   let size = getOpenAIImageSize({ ...body, openaiImageOptions: options });
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(size);
@@ -92,7 +92,8 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       if (!isValidEditRegion(editReference.editRegion)) return res.status(400).json({ error: EDIT_REGION_REQUIRED });
       protectedSource = await readEditSource(db, editReference.data, user.id);
       size = `${protectedSource.info.width}x${protectedSource.info.height}`;
-      const sourceSizeError = body.model === SUNBURST_MODEL ? validateOpenAIImageSize(size) : null;
+      // OpenAI's size rules apply to API routes; Codex picks its own canvas and is resized to the source at the same ratio.
+      const sourceSizeError = body.model === SUNBURST_MODEL && provider !== 'codex' ? validateOpenAIImageSize(size) : null;
       if (sourceSizeError) return res.status(400).json({ error: `Protected edits use the source canvas (${size}). ${sourceSizeError}` });
       generationPrompt += '\n\n' + describeEditRegion(editReference.editRegion, protectedSource.info.width, protectedSource.info.height);
     } else if (safeRefs.some(ref => ref.editRegion)) {
@@ -107,6 +108,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   let providerStatus: number | undefined;
   let providerErrorCode: string | undefined;
   let outcome: 'completed' | 'failed' | 'rejected' = 'rejected';
+  let storedPath: string | undefined;
   // Keep references/settings and the result durable even if the browser closes.
   // An INSERT also makes duplicate submissions with the same ID fail before
   // OpenAI is charged; no upsert may take over another user's generation.
@@ -142,7 +144,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
 
     if (context.dispatch && !await context.dispatch(metadata)) {
       await guard.finish('rejected');
-      return res.status(409).json({ error:'The saved worker claim is no longer active. No provider request was sent.' });
+      return res.status(409).json({ code:'IMAGE_CLAIM_LOST', error:'The saved worker claim is no longer active. No provider request was sent.' });
     }
     outcome = 'failed';
     const response = await requestImage(provider, body.model, input, db, key, guard.id);
@@ -163,7 +165,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
         return res.status(202).json({ code:deferred?'IMAGE_PROVIDER_RATE_WAIT':'IMAGE_PROVIDER_RATE_STATE_UNKNOWN',retryAfter });
       }
       metadata.openaiError = { status: response.status, ...(providerErrorCode ? { code: providerErrorCode } : {}) };
-      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
+      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode) : provider === 'codex' ? `Codex could not create the image: ${String(data?.error?.message || response.status).slice(0, 500)}` : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
       error.status = response.status;
       throw error;
     }
@@ -184,7 +186,8 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     let imageBytes = Buffer.from(b64, 'base64');
     if (protectedSource && editReference?.editRegion) {
       const providerOutputSha256 = imageSha256(imageBytes);
-      const result = await compositeProtectedEdit(protectedSource, imageBytes, editReference.editRegion, body.model !== SUNBURST_MODEL);
+      // Codex picks its own supported canvas; accept it only at the source's aspect ratio.
+      const result = await compositeProtectedEdit(protectedSource, imageBytes, editReference.editRegion, body.model !== SUNBURST_MODEL || provider === 'codex');
       imageBytes = result.bytes;
       metadata.imageEditProtection = { version: 1, sourceReferenceId: editReference.id, sourceSha256: protectedSource.sha256,
         sourceSize: size, region: editReference.editRegion, pixelRegion: result.bounds, preservedOutsideRegion: true, providerOutputSha256 };
@@ -204,6 +207,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       console.warn('OpenAI image storage failed', body.id, { ...metadata.storageError as object, bytes: imageBytes.length, elapsedMs: Date.now() - startedAt });
       throw new SavedImageError(`${PROVIDER_LABELS[provider]} generated the image, but saving it failed. Usage has been recorded; retrying generation may incur another charge.`);
     }
+    storedPath = storagePath;
     const url = await signedMediaUrl(db.storage.from('media'), storagePath);
     metadata.generationCompletedAt = Date.now();
     metadata.generationTime = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
@@ -215,9 +219,19 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     // deployment's response-size limit. No credential is sent to the browser.
     return res.status(200).json({ id: body.id, url, storagePath, referenceImages: safeRefs, metadata });
   } catch (error: any) {
-    const message = error?.name === 'TimeoutError'
+    if (storedPath) {
+      // The billed image is already stored. A later signing or audit error must
+      // not mark it failed and invite a second paid generation.
+      console.warn('OpenAI image stored; finishing step failed', { id: body.id, auditId: guard.id });
+      outcome = 'completed';
+      metadata.generationCompletedAt ??= Date.now();
+      metadata.generationTime ??= Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      await db.from('generations').update({ status: 'completed', url: '', storage_path: storedPath, metadata }).eq('id', body.id).eq('user_id', user.id);
+      return res.status(200).json({ id: body.id, url: '', storagePath: storedPath, referenceImages: safeRefs, metadata });
+    }
+    const message = error?.name === 'TimeoutError' && provider !== 'codex'
       ? `${PROVIDER_LABELS[provider]} exceeded the request time limit. It may still have billed this request. Check usage before generating again.`
-      : error instanceof SavedImageError ? error.message : provider === 'openai' ? openAIErrorMessage(error?.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} could not finish the image. Check provider usage before submitting again.`;
+      : error instanceof SavedImageError ? error.message : provider === 'codex' ? String(error?.message || 'Codex could not finish the image.').slice(0, 600) : provider === 'openai' ? openAIErrorMessage(error?.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} could not finish the image. Check provider usage before submitting again.`;
     console.warn('OpenAI image request failed', { id: body.id, auditId: guard.id, status: providerStatus ?? null,
       code: providerErrorCode ?? null, elapsedMs: Date.now() - startedAt });
     await db.from('generations').update({ status: 'failed', metadata: { ...metadata, error: message } }).eq('id', body.id).eq('user_id', user.id);

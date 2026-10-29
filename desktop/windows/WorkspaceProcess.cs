@@ -32,7 +32,7 @@ internal sealed class WorkspaceProcess : IDisposable
         process.Exited += (_, _) => { if (!closing) Failed?.Invoke(); };
         if (!process.Start()) throw new IOException("The local workspace could not start.");
         // Discard diagnostics; provider errors must not persist prompts, media or keys.
-        _ = DrainErrors(process.StandardError);
+        _ = Drain(process.StandardError);
         await Send(new { dataDirectory = DataDirectory, webRoot = Path.Combine(root, "workspace", "web"), bootstrap = token, keys = KeyVault.All() });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         while (await process.StandardOutput.ReadLineAsync(timeout.Token) is { } line)
@@ -41,11 +41,13 @@ internal sealed class WorkspaceProcess : IDisposable
             using var message = JsonDocument.Parse(line);
             if (message.RootElement.GetProperty("event").GetString() != "ready") continue;
             if (!Uri.TryCreate(message.RootElement.GetProperty("origin").GetString(), UriKind.Absolute, out var origin) || origin.Scheme != "http" || origin.Host != "127.0.0.1" || origin.IsDefaultPort) throw new InvalidDataException();
+            // Keep reading stdout: a full pipe blocks Node's console writes and stalls the server.
+            _ = Drain(process.StandardOutput);
             return (origin, token);
         }
         throw new IOException("The local workspace did not become ready.");
     }
-    private static async Task DrainErrors(StreamReader stream) { try { var buffer = new char[4096]; while (await stream.ReadAsync(buffer) > 0) { } } catch (IOException) { } }
+    private static async Task Drain(StreamReader stream) { try { var buffer = new char[4096]; while (await stream.ReadAsync(buffer) > 0) { } } catch (IOException) { } }
     private async Task Send(object value)
     {
         await writer.WaitAsync();

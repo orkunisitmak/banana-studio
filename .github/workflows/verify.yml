@@ -72,7 +72,7 @@ jobs:
         run: node scripts/package-macos.mjs --community --prepare
         env:
           BANANA_NODE_RUNTIME: ${{ github.workspace }}/.build/node-runtime/bin/node
-          BANANA_BUILD_NUMBER: '5'
+          BANANA_BUILD_NUMBER: '7'
       - run: node scripts/test-local-generation.mjs
       - run: node scripts/audit-distribution.mjs ".build/staging/Banana Studio.app"
       - name: Archive the audited app with permissions and framework links

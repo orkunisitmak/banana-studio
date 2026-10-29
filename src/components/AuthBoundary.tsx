@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import type { UserProfile } from '../types';
-import { getProfile, getSession, isUserAuthorized, onAuthStateChange, signOut } from '../services/authService';
+import { checkUserAuthorization, getProfile, getSession, onAuthStateChange, signOut } from '../services/authService';
 import { clearLocalMediaCache } from '../services/storageService';
-import { LoginScreen } from './LoginScreen';
+import { isTransientReadError } from '../lib/shared/transientRead';
+import { LoginScreen, LoginNotice } from './LoginScreen';
 
 type Access = { userId: string; profile: UserProfile | null };
 
@@ -13,8 +14,11 @@ export function AuthBoundary({ children }: {
 }) {
   const [access, setAccess] = useState<Access | null>(null);
   const [loading, setLoading] = useState(true);
-  const [denied, setDenied] = useState(false);
+  const [notice, setNotice] = useState<LoginNotice | null>(null);
   const identity = useRef<string | null>(null);
+  // The user whose workspace is currently open, if any.
+  const verified = useRef<string | null>(null);
+  const retry = useRef<() => void>(() => {});
   const revision = useRef(0);
   const signingOut = useRef(false);
   const cacheCleanup = useRef<Promise<void>>(Promise.resolve());
@@ -22,6 +26,7 @@ export function AuthBoundary({ children }: {
   const forgetIdentity = useCallback(() => {
     const previousId = identity.current;
     identity.current = null;
+    verified.current = null;
     setAccess(null);
     cacheCleanup.current = cacheCleanup.current
       .then(() => clearLocalMediaCache(previousId || undefined))
@@ -33,13 +38,13 @@ export function AuthBoundary({ children }: {
     revision.current += 1;
     forgetIdentity();
     setLoading(false);
-    setDenied(false);
+    setNotice(null);
     try {
       await signOut();
       signingOut.current = false;
     } catch {
       // Keep the workspace closed even if the remote logout request fails.
-      setDenied(true);
+      setNotice('signout-failed');
     }
   }, [forgetIdentity]);
 
@@ -66,28 +71,46 @@ export function AuthBoundary({ children }: {
           setLoading(false);
           return;
         }
-        const authorized = await isUserAuthorized(userId);
+        const authorization = await checkUserAuthorization(userId);
         if (!isCurrent(check)) return;
-        if (!authorized) {
+        if (authorization === 'unavailable') {
+          // A network blip is not a denial. An open workspace stays open (server
+          // routes and RLS still enforce access) and the next refresh retries;
+          // first entry waits on a retryable message instead of "not authorized".
+          if (verified.current !== userId) {
+            setNotice('unavailable');
+            setLoading(false);
+          }
+          return;
+        }
+        if (authorization === 'unauthorized') {
           forgetIdentity();
-          setDenied(true);
+          setNotice('unauthorized');
           setLoading(false);
           return;
         }
-        const profile = await getProfile();
+        // undefined = the read failed: keep the role already verified for this
+        // user (periodic refresh) instead of treating it as "no profile".
+        const profile = await getProfile().catch(() => undefined);
         if (!isCurrent(check)) return;
         // Another identity cannot supply this workspace's profile/admin role.
         if (profile && profile.id !== userId) throw new Error('Session changed');
         await cacheCleanup.current;
         if (!isCurrent(check)) return;
         identity.current = userId;
-        setAccess({ userId, profile });
-        setDenied(false);
+        verified.current = userId;
+        setAccess(previous => ({ userId, profile: profile !== undefined ? profile : previous?.userId === userId ? previous.profile : null }));
+        setNotice(null);
         setLoading(false);
-      } catch {
+      } catch (error) {
         if (!isCurrent(check)) return;
+        // A failed session read is a blip too: keep an open workspace and retry
+        // on the next refresh. First entry still fails closed, with a retryable
+        // message instead of "not authorized".
+        const transient = isTransientReadError(error);
+        if (transient && verified.current && verified.current === identity.current) return;
         forgetIdentity();
-        setDenied(true);
+        setNotice(transient ? 'unavailable' : 'unauthorized');
         setLoading(false);
       } finally {
         if (revision.current === check) checking = false;
@@ -113,8 +136,10 @@ export function AuthBoundary({ children }: {
     const refresh = () => {
       if (!checking && document.visibilityState !== 'hidden') void verify();
     };
+    retry.current = refresh;
     const interval = window.setInterval(refresh, 60_000);
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
     window.addEventListener('pageshow', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
@@ -122,13 +147,15 @@ export function AuthBoundary({ children }: {
       revision.current += 1;
       subscription.unsubscribe();
       window.clearInterval(interval);
+      retry.current = () => {};
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
       window.removeEventListener('pageshow', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [forgetIdentity]);
 
   if (loading) return <div className="h-screen w-screen bg-[#0d1117] flex items-center justify-center"><div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>;
-  if (!access) return <LoginScreen isUnauthorized={denied} />;
+  if (!access) return <LoginScreen notice={notice} onRetry={() => retry.current()} />;
   return <>{children(access, handleSignOut)}</>;
 }

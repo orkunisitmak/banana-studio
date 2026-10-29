@@ -95,9 +95,14 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
       },
     });
     if (rateLimitDelay || result?.code==='IMAGE_PROVIDER_RATE_STATE_UNKNOWN') throw new ImageJobWait(rateLimitDelay || Number(result.retryAfter) || 60);
+    // The lease ended before dispatch, so no provider request was sent. Leave
+    // the job unfinished: claim_image_job reclaims it on redelivery and bounds
+    // consecutive preparations that never reach dispatch.
+    if (!dispatched && result?.code==='IMAGE_CLAIM_LOST') throw new ImageJobWait(5);
+    // As above: an undispatched job stays redeliverable until its audit is final.
+    if (!dispatched) await guard.finish('rejected');
     await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:status===200,
       p_metadata:result?.metadata||null,p_storage_path:result?.storagePath||null,p_error:status===200?null:result?.error||'Saved image generation failed.'});
-    if (!dispatched) await guard.finish('rejected');
   } catch (error) {
     // A redelivery can safely retry preparation if no dispatch was committed.
     // A committed dispatch is observed on redelivery and can never call again.

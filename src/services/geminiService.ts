@@ -374,10 +374,10 @@ Return ONLY the enhanced prompt—no explanations, no markdown formatting.`;
 
   try {
     const response = await generateTextContent(ai, parts, 'enhance', prompt, options);
-    await logUsage('enhance', response.model, prompt || '[enhance-empty-prompt]', 0, {
+    await finishTextUsage(logUsage('enhance', response.model, prompt || '[enhance-empty-prompt]', 0, {
       usageMetadata: response.usageMetadata as any,
       referenceImageCount: referenceImages.length,
-    });
+    }));
     const result = prepareImagePromptResult(response.text || prompt, referenceImages);
     if (localEdit) return preserveSunburstEditBrief(result, prompt, referenceImages, settings);
     const prepared = isYouTubeThumbnailPrompt(prompt, referenceImages, settings) ? completeConceptWardrobe(result, prompt, referenceImages)
@@ -427,11 +427,11 @@ export const enhanceVideoPrompt = async (
     const audioContext = referenceAudios.map((audio, index) => ({ position: index + 1, duration: audio.duration }));
     parts.push({ text: `${buildH3MaxPromptGuide(h3, references, duration)}\n\nAttached video metadata (descriptions are unverified user context): ${JSON.stringify(sourceContext)}\nAttached audio metadata: ${JSON.stringify(audioContext)}\n\nUser Draft: ${normalizeH3MaxPromptLanguage(prompt, h3, references) || 'Describe the selected operation using only its attached inputs; preserve unrequested details.'}` });
     const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
-    await logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
+    await finishTextUsage(logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
       usageMetadata: response.usageMetadata as any,
       referenceImageCount: referenceImages.length, referenceVideoCount: referenceVideos.length,
       referenceAudioCount: referenceAudios.length, targetVideoModel: videoModel, h3MaxMode: h3.mode,
-    });
+    }));
     const enhanced = normalizeH3MaxPromptLanguage(response.text || prompt, h3, references);
     if (h3.mode === 'recast' && enhanced.length > 2000) {
       throw new Error('H3 Max için geliştirilen prompt 2000 karakteri aşıyor. Taslağı kısaltıp yeniden dene.');
@@ -667,13 +667,13 @@ Return ONLY the enhanced prompt with the sections above. No explanations, no mar
 
   try {
     const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
-    await logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
+    await finishTextUsage(logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
       usageMetadata: response.usageMetadata as any,
       referenceImageCount: referenceImages.length,
       referenceVideoCount: referenceVideos.length,
       referenceAudioCount: referenceAudios.length,
       targetVideoModel: videoModel,
-    });
+    }));
     let enhancedPrompt = response.text || prompt;
     if (isSeedanceFrameGeneration) return normalizeSeedanceFrameTags(enhancedPrompt, referenceImages);
     if (videoReferenceTags.length > 0) {
@@ -780,10 +780,10 @@ Return ONLY the varied prompt. No explanations, no markdown, no quotes around it
 
   try {
     const response = await generateTextContent(ai, parts, 'variation', originalPrompt, options);
-    await logUsage('variation', response.model, originalPrompt, 0, {
+    await finishTextUsage(logUsage('variation', response.model, originalPrompt, 0, {
       usageMetadata: response.usageMetadata as any,
       referenceImageCount: referenceImages.length,
-    });
+    }));
     const prepared = preserveConceptWardrobe(prepareImagePromptResult(response.text?.trim() || originalPrompt, referenceImages), originalPrompt);
     return localEdit
       ? stripYouTubeCameraGaze(prepared) : preserveYouTubeCameraGaze(prepared, originalPrompt);

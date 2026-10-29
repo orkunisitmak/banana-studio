@@ -1,6 +1,8 @@
 import type { AspectRatio, GeneratedMedia, GenerationConfig, OpenAIImageOptions, ReferenceImage, Resolution } from '../../types.js';
 
 export const SUNBURST_MODEL = 'gpt-image-2.5-sunburst' as const;
+/** Models executeOpenAIImage saves under openai/<user>/<id>; their stored files can be recovered. */
+export const RECOVERABLE_IMAGE_MODELS: readonly string[] = [SUNBURST_MODEL, 'gemini-3-pro-image-preview', 'gemini-nano-banana-2.1'];
 /** Keep draft/analysis inputs in attachment order. Final filtering is compiled
  * together with the provider prompt by prepareSunburstGeneration. */
 export const getSunburstReferences = (refs: ReferenceImage[]): ReferenceImage[] => refs;

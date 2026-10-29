@@ -3,6 +3,7 @@ import { withoutLegacyMask } from '../lib/references/referenceImages';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { GeneratedMedia, Template, Folder, SavedReferenceImage, SavedPerson, SavedPersonSummary, ReferenceVideo, ReferenceAudio, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VideoModelId, VideoOperation, VideoQuality, estimateVideoCost, normalizeYouTubeSource } from '../types';
+import { isAuthSessionMissingError } from '@supabase/supabase-js';
 import { supabase, getCurrentUserId, SUPABASE_URL } from './authService';
 import { retryTransientRead } from '../lib/shared/transientRead';
 import { signMediaUrl } from '../lib/references/mediaAccess';
@@ -714,6 +715,10 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     generationTime: timestampGenerationTime ?? meta.generationTime,
     generationStartedAt,
     generationCompletedAt,
+    submissionHeartbeatAt: isVideo && typeof meta.submissionHeartbeatAt === 'number'
+      && Number.isFinite(meta.submissionHeartbeatAt) && meta.submissionHeartbeatAt > 0
+      ? meta.submissionHeartbeatAt
+      : undefined,
     referenceVideos,
     referenceAudios: sanitizePublicMediaRefs(meta.referenceAudios as ReferenceAudio[])
       .map(ref => ({ ...ref, url: resolveMediaReference(ref.url) || '' })),
@@ -1174,6 +1179,11 @@ const mergeVideoMetadata = (existing: Record<string, any>, incoming: Record<stri
   return merged;
 };
 
+// A retry after a failed row save reuses the stored file instead of moving the video again.
+const completedVideoTransfers = new Map<string, { source: string; storagePath: string; thumbnailPath: string | null; pendingThumbnail?: Blob }>();
+// Overlapping transfers of one generation can leave either source in the stored file, so none of them records it.
+const activeVideoTransfers = new Map<string, Set<{ overlapped: boolean }>>();
+
 export const saveVideo = async (
   media: GeneratedMedia,
   expectedUserId?: string,
@@ -1201,7 +1211,36 @@ export const saveVideo = async (
     let thumbnailUrl = media.thumbnailUrl;
     let uploadedThumbnailPath: string | null = media.thumbnailPath || null;
 
-    if (!videoUrl.startsWith('data:')) {
+    const transferKey = `${userId}:${media.id}`;
+    const previousTransfer = completedVideoTransfers.get(transferKey);
+    // Another source overwrites the same stored file, so its entry no longer describes it.
+    if (previousTransfer && previousTransfer.source !== videoUrl) completedVideoTransfers.delete(transferKey);
+    const reusedUrl = previousTransfer?.source === videoUrl ? await createMediaAccessUrl(previousTransfer.storagePath) : undefined;
+    if (previousTransfer && reusedUrl) {
+      publicUrl = reusedUrl;
+      uploadedStoragePath = previousTransfer.storagePath;
+      await assertSameUser();
+      // The poster is optional: retry a failed poster upload, but never block the video row on it.
+      try {
+        if (!previousTransfer.thumbnailPath && previousTransfer.pendingThumbnail) {
+          const { error: thumbnailUploadError } = await supabase.storage.from(MEDIA_BUCKET_NAME)
+            .upload(thumbnailPath, previousTransfer.pendingThumbnail, { contentType: 'image/png', cacheControl: '0', upsert: true });
+          if (!thumbnailUploadError) { previousTransfer.thumbnailPath = thumbnailPath; delete previousTransfer.pendingThumbnail; }
+        }
+        if (previousTransfer.thumbnailPath) {
+          // The row stores the durable path; a fresh signed URL is only for this session.
+          uploadedThumbnailPath = previousTransfer.thumbnailPath;
+          const reusedThumbnailUrl = await createMediaAccessUrl(previousTransfer.thumbnailPath);
+          if (reusedThumbnailUrl) thumbnailUrl = reusedThumbnailUrl;
+        }
+      } catch (thumbnailError: any) {
+        console.warn('Saved video poster could not be renewed:', thumbnailError?.message || thumbnailError);
+      }
+    } else if (!videoUrl.startsWith('data:')) {
+      const activeTransfers = activeVideoTransfers.get(transferKey) || new Set<{ overlapped: boolean }>();
+      const transfer = { overlapped: activeTransfers.size > 0 };
+      activeTransfers.forEach(other => { other.overlapped = true; });
+      activeTransfers.add(transfer); activeVideoTransfers.set(transferKey, activeTransfers);
       try {
         const response = await fetch(await refreshMediaAccessUrl(videoUrl, false));
         if (!response.ok) {
@@ -1266,6 +1305,7 @@ export const saveVideo = async (
         }
         publicUrl = storagePublicUrl;
         uploadedStoragePath = storagePath;
+        if (!transfer.overlapped) completedVideoTransfers.set(transferKey, { source: videoUrl, storagePath, thumbnailPath: null, ...(thumbnailBlob ? { pendingThumbnail: thumbnailBlob } : {}) });
 
         if (thumbnailBlob) {
           await assertSameUser();
@@ -1283,11 +1323,17 @@ export const saveVideo = async (
             if (savedThumbnailUrl) {
               thumbnailUrl = savedThumbnailUrl;
               uploadedThumbnailPath = thumbnailPath;
+              if (!transfer.overlapped) completedVideoTransfers.set(transferKey, { source: videoUrl, storagePath, thumbnailPath });
             }
           }
         }
       } catch (fetchErr: any) {
+        // Never persist the expiring provider URL; the caller retries the copy.
         console.warn("Failed to fetch video for storage upload:", fetchErr.message);
+        return undefined;
+      } finally {
+        activeTransfers.delete(transfer);
+        if (!activeTransfers.size) activeVideoTransfers.delete(transferKey);
       }
     }
 
@@ -1423,6 +1469,7 @@ export const saveVideo = async (
       console.error("saveVideo DB upsert failed:", dbError.code, dbError.message, JSON.stringify(dbError));
       return undefined;
     }
+    completedVideoTransfers.delete(transferKey);
 
     return {
       publicUrl,
@@ -1487,6 +1534,7 @@ export const createPendingVideo = async (
         promptPreparation: normalizePromptPreparation(config.promptPreparation),
         generationCost: config.generationCost,
         generationStartedAt: config.generationStartedAt,
+        submissionHeartbeatAt: Date.now(),
         referenceVideos: sanitizePublicMediaRefs(config.referenceVideos).map(ref => ({ ...ref, url: persistMediaReference(ref.url) })),
         referenceAudios: sanitizePublicMediaRefs(config.referenceAudios).map(ref => ({ ...ref, url: persistMediaReference(ref.url) })),
       },
@@ -2257,14 +2305,20 @@ export const getTemplates = async (): Promise<Template[]> => {
     try {
       const userId = await getCurrentUserId();
       if (!userId) return [];
-      const { data } = await supabase.from('templates').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('templates').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+      // A failed read is not "no templates".
+      if (error) throw new Error(`Templates could not be loaded: ${error.message}`);
       if (data) {
         return data.map((row: any) => ({
           id: row.id, name: row.name, config: { ...row.config, referenceImages: row.config?.referenceImages?.map(withoutLegacyMask) }, createdAt: row.created_at
         }));
       }
       return [];
-    } catch (e) { return []; }
+    } catch (e) {
+      // Signed out is "no templates"; any other failure is reported.
+      if (isAuthSessionMissingError(e)) return [];
+      throw e instanceof Error ? e : new Error('Templates could not be loaded.');
+    }
   }
   return [];
 };
@@ -2323,8 +2377,9 @@ export const saveReferenceImage = async (image: SavedReferenceImage): Promise<vo
 
 export const getReferenceGallery = async (): Promise<SavedReferenceImage[]> => {
   if (supabase) {
+    let userId: string | null = null;
     try {
-      const userId = await getCurrentUserId();
+      userId = await getCurrentUserId();
       if (!userId) return [];
       let query = supabase
         .from('reference_images')
@@ -2355,7 +2410,15 @@ export const getReferenceGallery = async (): Promise<SavedReferenceImage[]> => {
       return [];
     } catch (error) {
       console.error('Supabase get reference gallery failed:', error);
-      return [];
+      // Signed out, or a confirmed different user, shows an empty library. Any
+      // other failure (including a failed identity lookup) is not "no saved
+      // references" and must reach the caller.
+      if (isAuthSessionMissingError(error)) return [];
+      if (userId) {
+        const currentUserId = await getCurrentUserId().catch(currentError => isAuthSessionMissingError(currentError) ? null : userId);
+        if (currentUserId !== userId) return [];
+      }
+      throw new Error('Saved references could not be loaded. Close and reopen Saved References to retry.');
     }
   }
 

@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, ShieldAlert, WifiOff } from 'lucide-react';
 import { signInWithGoogle } from '../services/authService';
 
+export type LoginNotice = 'unauthorized' | 'unavailable' | 'signout-failed';
+
 interface LoginScreenProps {
-  isUnauthorized?: boolean;
+  notice?: LoginNotice | null;
+  onRetry?: () => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ isUnauthorized = false }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ notice = null, onRetry }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +84,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ isUnauthorized = false
             </div>
           )}
 
-          {isUnauthorized && !error && (
+          {notice === 'unauthorized' && !error && (
             <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
               <div>
@@ -89,6 +92,38 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ isUnauthorized = false
                 <p className="text-xs text-amber-400/70 mt-1">
                   Your account is not authorized. Please contact an administrator to get access.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {notice === 'unavailable' && !error && (
+            <div className="mt-4 p-4 bg-sky-500/10 border border-sky-500/20 rounded-lg flex items-start gap-3">
+              <WifiOff className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-sky-400">Can't verify access</p>
+                <p className="text-xs text-sky-400/70 mt-1">
+                  The server could not be reached. Check your connection; we'll retry automatically.
+                </p>
+                {onRetry && (
+                  <button onClick={onRetry} className="mt-2 text-xs font-medium text-sky-300 hover:text-sky-200 underline">
+                    Retry now
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {notice === 'signout-failed' && !error && (
+            <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-400">Sign-out failed</p>
+                <p className="text-xs text-amber-400/70 mt-1">
+                  Your workspace is closed, but the server did not confirm the sign-out. Reload to continue.
+                </p>
+                <button onClick={() => window.location.reload()} className="mt-2 text-xs font-medium text-amber-300 hover:text-amber-200 underline">
+                  Reload
+                </button>
               </div>
             </div>
           )}

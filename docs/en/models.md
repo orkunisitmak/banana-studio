@@ -16,7 +16,7 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 
 | Model / feature | Auto priority | Any matching key |
 | --- | --- | --- |
-| GPT Image 2.5 | OpenAI → OpenRouter → fal.ai | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` |
+| GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT plan (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY`, or [Codex sign-in](#use-gpt-image-with-a-chatgpt-plan) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
@@ -25,6 +25,12 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
 | YouTube search / channel and video metadata | YouTube Data API v3 | `YOUTUBE_API_KEY` |
+
+### Use GPT Image with a ChatGPT plan
+
+On Mac and Windows, GPT Image 2.5 can run through the official [Codex CLI](https://developers.openai.com/codex/cli) signed in with your ChatGPT account, with no API key. Install Codex, run `codex login` and choose **Sign in with ChatGPT**, then pick **ChatGPT plan (Codex)** in Provider routing, or leave Auto with no GPT Image key configured. Banana Studio starts your own `codex` binary in a read-only sandbox, sends the prompt over stdin and reads the saved image. It never reads or forwards your Codex tokens; only the sign-in mode in `~/.codex/auth.json` is checked to show the route as available. Set `CODEX_BIN` to the full path of the Codex executable if it is installed somewhere unusual; on Windows the app looks for `codex.exe` on `PATH`. Codex runs with a minimal environment, so your provider API keys are never passed to it.
+
+Images count toward your ChatGPT plan's Codex usage limits instead of API billing. Each image takes about a minute, Codex chooses the nearest supported canvas for the requested ratio, and quality/moderation settings are not forwarded. Protected edits still composite only the selected area and are rejected if Codex returns a different aspect ratio. Hosted web workspaces cannot use this route. Codex also keeps its own copy of each generated image under `CODEX_HOME` (by default `~/.codex`); Banana Studio does not delete it.
 
 All three image providers support reference-based generation. Uploading references does not enable protected editing automatically: explicitly select **Edit area** for that. The final selected area is composited onto the source; outside pixels stay original regardless of provider. Tier-based Nano outputs may be resized to the source canvas before compositing, only when their proportions match. A different canvas ratio is rejected. A provider's reference-image API may be named “edit”; the app's reference-generation prompt does not carry an area edit's source-preservation instructions.
 

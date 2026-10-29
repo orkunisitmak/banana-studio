@@ -12,7 +12,9 @@ const LEGACY_H3_QUEUE_APP = 'minimax/h3';
 const LEGACY_H3_REFERENCE_ENDPOINT = 'minimax/h3/reference-to-video';
 const H3_MAX_QUEUE_APP = 'minimax/h3-max';
 // Lookup failures do not prove that an already accepted generation failed.
-const RETRYABLE_LOOKUP_STATUSES = new Set([402, 408, 409, 425, 429]);
+// 401/403 (a rotated or wrong key) and 404 (a lookup route miss) included:
+// the client keeps the task recoverable instead of marking it failed.
+const RETRYABLE_LOOKUP_STATUSES = new Set([401, 402, 403, 404, 408, 409, 425, 429]);
 
 const ALLOWED_QUEUE_ENDPOINTS = new Set<string>([
   H3_MAX_QUEUE_APP, ...Object.values(H3_MAX_ENDPOINTS),

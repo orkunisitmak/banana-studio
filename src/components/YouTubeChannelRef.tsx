@@ -67,6 +67,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Browse search filter
   const [browseSearch, setBrowseSearch] = useState('');
@@ -80,6 +81,8 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   const [selectedPersonIds, setSelectedPersonIds] = useState<number[]>([]);
   const people = getPersonGroups(referenceImages.filter(ref => !ref.isVideoContext), personGroups).filter(group => group.images.length);
   const requestRef = useRef<AbortController | null>(null);
+  // Only the latest Top/Browse request may apply its list; reset() also invalidates it.
+  const listRequest = useRef(0);
   const previousDraftKey = useRef(draftKey);
 
   useEffect(() => () => requestRef.current?.abort(), []);
@@ -104,14 +107,18 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     maxHeight: 480,
   });
   const [configured, setConfigured] = useState<boolean>(true);
+  const configRequest = useRef(0);
 
+  // A failed check (no session yet, network error) or a key added after launch
+  // must not stick: check again on each open while it reads as not configured.
+  // Opening must not discard the first check, so only a newer check wins.
   useEffect(() => {
-    let cancelled = false;
+    if (configRequest.current && (!isOpen || configured)) return;
+    const request = ++configRequest.current;
     isYouTubeConfigured().then((ok) => {
-      if (!cancelled) setConfigured(ok);
+      if (configRequest.current === request) setConfigured(ok);
     });
-    return () => { cancelled = true; };
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -183,6 +190,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   }, [isOpen]);
 
   const reset = () => {
+    listRequest.current += 1;
     requestRef.current?.abort();
     requestRef.current = null;
     setIsLoading(false);
@@ -192,6 +200,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     setSelectedIds(new Set());
     setMode('input');
     setError(null);
+    setDownloadError(null);
     setVideoInfo(null);
     setPreparedVideo(null);
     setBrowseSearch('');
@@ -305,15 +314,18 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     setError(null);
     setVideos([]);
     setSelectedIds(new Set());
+    const request = ++listRequest.current;
 
     try {
       const vids = await getTopPerformingVideos(channel.uploadsPlaylistId, 10);
+      if (listRequest.current !== request) return;
       setVideos(vids);
-      setSelectedIds(new Set(vids.map((v) => v.id)));
+      // References may have been added while the list loaded; use the current capacity.
+      setSelectedIds(new Set(vids.slice(0, maxSelectableRef.current).map((v) => v.id)));
     } catch (err: any) {
-      setError(err.message || 'Failed to load videos');
+      if (listRequest.current === request) setError(err.message || 'Failed to load videos');
     } finally {
-      setIsLoading(false);
+      if (listRequest.current === request) setIsLoading(false);
     }
   };
 
@@ -324,14 +336,16 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     setError(null);
     setVideos([]);
     setSelectedIds(new Set());
+    const request = ++listRequest.current;
 
     try {
       const vids = await getLatestVideos(channel.uploadsPlaylistId, 150);
+      if (listRequest.current !== request) return;
       setVideos(vids);
     } catch (err: any) {
-      setError(err.message || 'Failed to load videos');
+      if (listRequest.current === request) setError(err.message || 'Failed to load videos');
     } finally {
-      setIsLoading(false);
+      if (listRequest.current === request) setIsLoading(false);
     }
   };
 
@@ -356,9 +370,12 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
 
     setIsDownloading(true);
     setDownloadProgress(0);
+    setDownloadError(null);
 
-    const selected = videos.filter((v) => selectedIds.has(v.id));
+    // Preselected Top videos and retries can exceed the slots left in the draft.
+    const selected = videos.filter((v) => selectedIds.has(v.id)).slice(0, maxSelectable);
     const results: ReferenceImage[] = [];
+    const failed: string[] = [];
     let done = 0;
 
     for (const video of selected) {
@@ -372,6 +389,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
         });
       } catch (err) {
         console.warn(`Failed to download thumbnail for ${video.id}`, err);
+        failed.push(video.id);
       }
       done++;
       setDownloadProgress(Math.round((done / selected.length) * 100));
@@ -382,11 +400,26 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     }
 
     setIsDownloading(false);
+    if (failed.length > 0) {
+      // Keep the dialog open with only the failed videos selected, so they can be retried.
+      // Slots may have been used during the download: re-select only what still fits.
+      const retry = failed.slice(0, maxSelectableRef.current);
+      setSelectedIds(new Set(retry));
+      const summary = `${failed.length} of ${selected.length} thumbnail${selected.length !== 1 ? 's' : ''} could not be downloaded.`;
+      setDownloadError(retry.length ? `${summary} Try again.` : `${summary} No reference slots are free to retry.`);
+      return;
+    }
     setIsOpen(false);
     reset();
   };
 
   const maxSelectable = Math.max(0, Math.min(10, remainingSlots));
+  const maxSelectableRef = useRef(maxSelectable);
+  maxSelectableRef.current = maxSelectable;
+  // Free slots can shrink while the dialog is open (paste, drop, a partial add).
+  useEffect(() => {
+    setSelectedIds(prev => prev.size > maxSelectable ? new Set([...prev].slice(0, maxSelectable)) : prev);
+  }, [maxSelectable]);
 
   return (
     <>
@@ -725,6 +758,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
 
                     {/* Confirm Button */}
                     <div className="p-3 border-t border-gray-800">
+                      {downloadError && !isDownloading && <p role="alert" className="text-xs text-red-400 mb-2">{downloadError}</p>}
                       {isDownloading ? (
                         <div className="space-y-2">
                           <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">

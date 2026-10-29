@@ -46,7 +46,8 @@ internal sealed class StudioWindow : Form
         file.DropDownItems.Add("Check for Updates…", null, (_, _) => OpenExternal("https://github.com/orkunisitmak/banana-studio/releases/latest"));
         file.DropDownItems.Add("Exit", null, (_, _) => Close());
         var view = new ToolStripMenuItem("View");
-        view.DropDownItems.Add("Full Screen (F11)", null, (_, _) => ToggleFullScreen());
+        view.DropDownItems.Add("Full Screen (F11, Esc to exit)", null, (_, _) => ToggleFullScreen());
+        foreach (var item in file.DropDownItems.Cast<ToolStripItem>().Concat(view.DropDownItems.Cast<ToolStripItem>())) item.ForeColor = Color.Gainsboro;
         menu.Items.Add(file); menu.Items.Add(view); MainMenuStrip = menu;
         Controls.Add(web); Controls.Add(status); Controls.Add(menu);
         Shown += async (_, _) =>
@@ -148,6 +149,7 @@ internal sealed class StudioWindow : Form
             web.KeyDown += (_, args) =>
             {
                 if (args.KeyCode == Keys.F11) { args.Handled = args.SuppressKeyPress = true; BeginInvoke(ToggleFullScreen); }
+                if (args.KeyCode == Keys.Escape && FormBorderStyle == FormBorderStyle.None) BeginInvoke(ToggleFullScreen);
                 if (args.Control && args.KeyCode == Keys.Oemcomma) { args.Handled = args.SuppressKeyPress = true; BeginInvoke(async () => await ShowKeys()); }
                 // Editing shortcuts remain native WebView2 actions so clipboard images,
                 // Unicode text, undo and selection retain real clipboard semantics.

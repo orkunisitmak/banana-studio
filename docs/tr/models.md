@@ -16,7 +16,7 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 
 | Model / özellik | Auto önceliği | Uygun anahtarlardan biri |
 | --- | --- | --- |
-| GPT Image 2.5 | OpenAI → OpenRouter → fal.ai | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` |
+| GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT aboneliği (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` ya da [Codex girişi](#chatgpt-aboneliğiyle-gpt-image) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Opus 5.5 — varsayılan yaratıcı model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, varyasyon | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
@@ -25,6 +25,12 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Gerektiğinde video referansı ön işlemi | fal.ai | `FAL_KEY` |
 | YouTube arama / kanal ve video bilgileri | YouTube Data API v3 | `YOUTUBE_API_KEY` |
+
+### ChatGPT aboneliğiyle GPT Image
+
+Mac ve Windows'ta GPT Image 2.5, ChatGPT hesabınla giriş yapılmış resmi [Codex CLI](https://developers.openai.com/codex/cli) üzerinden API anahtarı olmadan çalışabilir. Codex'i kur, `codex login` çalıştırıp **Sign in with ChatGPT** seç, sonra Provider routing'de **ChatGPT plan (Codex)** seç ya da GPT Image anahtarı yoksa Auto'da bırak. Banana Studio kendi `codex` programını salt okunur bir sandbox'ta başlatır, prompt'u stdin ile gönderir ve kaydedilen görseli okur. Codex token'larını hiçbir zaman okumaz veya iletmez; rotanın uygun görünmesi için `~/.codex/auth.json` içindeki yalnızca giriş türü kontrol edilir. Codex alışılmadık bir yerdeyse `CODEX_BIN` değişkenine çalıştırılabilir dosyanın tam yolunu yaz; Windows'ta uygulama `PATH` üzerinde `codex.exe` arar. Codex en az ortam değişkeniyle çalışır, API anahtarların ona hiç aktarılmaz.
+
+Görseller API faturası yerine ChatGPT aboneliğinin Codex kullanım limitinden düşer. Her görsel yaklaşık bir dakika sürer, Codex istenen orana en yakın desteklenen tuvali seçer, kalite/moderasyon ayarları iletilmez. Korumalı editlerde yine yalnızca seçili alan birleştirilir; Codex farklı oranda görsel döndürürse sonuç reddedilir. Web kurulumları bu rotayı kullanamaz. Codex her üretilen görselin bir kopyasını `CODEX_HOME` altında (varsayılan `~/.codex`) kendisi de saklar; Banana Studio bu kopyayı silmez.
 
 Üç görsel sağlayıcısı da referanslı yeni üretimi destekler. Referans eklemek kendiliğinden korumalı editi açmaz: bunun için **Edit area** seç. Son seçili alan kaynak görsele yerleştirilir; dışındaki pikseller sağlayıcıdan bağımsız olarak korunur. Nano'nun çözünürlük katmanlarından gelen çıktı, oranı kaynakla uyuşuyorsa birleştirmeden önce kaynak boyutuna ölçeklenebilir; farklı oran reddedilir. Sağlayıcının referans görsel kabul eden API adı “edit” olabilir; bu, uygulamada otomatik alan editi anlamına gelmez.
 

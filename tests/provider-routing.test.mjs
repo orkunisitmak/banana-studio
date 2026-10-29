@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODEL_ROUTES, PROVIDER_KEYS, resolveProvider, sanitizeProviderAvailability, sanitizeProviderPreferences } from '../src/lib/providers.ts';
+import { MODEL_ROUTES, PROVIDER_KEYS, PROVIDER_LABELS, resolveProvider, sanitizeProviderAvailability, sanitizeProviderPreferences } from '../src/lib/providers.ts';
 import { browserIsOffline } from '../src/lib/networkStatus.ts';
 import { falSeedanceInput, openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
 import { resizePixels } from '../src/lib/images/resizePixels.ts';
@@ -22,13 +22,14 @@ test('offline state is conservative and only treats an explicit false as offline
   assert.equal(browserIsOffline(undefined),false);
 });
 test('every key combination selects only a configured route for the same model',()=>{
-  const providers=Object.keys(PROVIDER_KEYS);
-  for(let mask=0;mask<32;mask++){
+  const providers=Object.keys(PROVIDER_LABELS);
+  for(let mask=0;mask<2**providers.length;mask++){
     const available=Object.fromEntries(providers.map((provider,index)=>[provider,!!(mask&(1<<index))]));
     for(const [model,routes] of Object.entries(MODEL_ROUTES)){
       const expected=routes.find(provider=>available[provider]);
       if(expected)assert.equal(resolveProvider(model,'auto',available),expected);
       else assert.throws(()=>resolveProvider(model,'auto',available),/key|keys/);
+      if(routes.includes('codex'))assert.equal(routes.at(-1),'codex','Auto prefers configured API keys over the ChatGPT plan');
       for(const provider of providers){
         if(routes.includes(provider)&&available[provider])assert.equal(resolveProvider(model,provider,available),provider);
         else assert.throws(()=>resolveProvider(model,provider,available));

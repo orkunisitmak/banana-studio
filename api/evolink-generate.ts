@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
+import { isReferenceUrl } from './_lib/providerMedia.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 
@@ -20,9 +21,9 @@ interface GenerateRequest {
   editSourcePreparationVersion?: number;
 }
 
-const hasInvalidMediaUrls = (urls: unknown): boolean => urls != null && (
+export const hasInvalidMediaUrls = (urls: unknown): boolean => urls != null && (
   !Array.isArray(urls)
-  || urls.some(url => typeof url !== 'string' || !/^https?:\/\//i.test(url))
+  || urls.some(url => !isReferenceUrl(url))
 );
 
 const ensureVideoTargetTag = (prompt: string, mode: GenerateRequest['mode']): string => {
@@ -86,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if ([imageUrls, videoUrls, audioUrls].some(hasInvalidMediaUrls)) {
       return res.status(400).json({
-        error: 'Reference media must be arrays of public HTTP(S) URLs. Local blob/data URLs cannot be used by Seedance.',
+        error: 'Reference media must be arrays of public HTTPS URLs. Local blob/data or plain HTTP URLs cannot be used by Seedance.',
       });
     }
     const maxImages = mode === 'image_to_video' ? 2 : videoModel === 'seedance-2.5' ? 30 : 9;

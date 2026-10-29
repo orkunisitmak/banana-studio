@@ -1104,10 +1104,11 @@ export const pollVideoTask = async (
       );
 
       let data: any;
+      // Read the body once: after json() fails, text() is always empty.
+      const text = await res.text().catch(() => '');
       try {
-        data = await res.json();
+        data = JSON.parse(text);
       } catch {
-        const text = await res.text().catch(() => '');
         throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 100)}`);
       }
 

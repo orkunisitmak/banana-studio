@@ -145,8 +145,9 @@ export function ImageCompareDialog({ images, onClose, onToggleFavorite, isReadOn
     else if (key === 'g') { setView('gallery'); setLayout(value => value === 'grid' ? 'strip' : 'grid'); }
     else if (key === 'l') toggleSync();
     else if (key === 'a' || key === 'b') activate(pair[key === 'a' ? 0 : 1]);
-    else if (key === '+' || key === '=' || key === '-' || key === '_') setViewport(value => zoomViewport(value, value.zoom * (key === '+' || key === '=' ? 1.25 : 1 / 1.25)));
+    // Shift+0 types '=' on Turkish and German layouts; check the physical key before zoom.
     else if (key === '0' || event.code === 'Digit0') { if (event.shiftKey) fitAll(); else setViewport(FIT_VIEWPORT); }
+    else if (key === '+' || key === '=' || key === '-' || key === '_') setViewport(value => zoomViewport(value, value.zoom * (key === '+' || key === '=' ? 1.25 : 1 / 1.25)));
     else if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
       setViewport(value => clampViewport({ ...value, x: value.x + (event.key === 'ArrowLeft' ? .05 : event.key === 'ArrowRight' ? -.05 : 0), y: value.y + (event.key === 'ArrowUp' ? .05 : event.key === 'ArrowDown' ? -.05 : 0) }));
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') navigate(event.key === 'ArrowLeft' ? -1 : 1);

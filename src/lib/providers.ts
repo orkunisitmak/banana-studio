@@ -1,15 +1,20 @@
 /** Application routes, verified against the providers' catalogues on 2026-10-20.
  * Auto selects an available route BEFORE submission, never after a paid call. */
-export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink';
+export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'codex';
+/** Codex uses the desktop user's own ChatGPT sign-in instead of an API key. */
+export type KeyedProvider = Exclude<AIProvider, 'codex'>;
 export type ProviderChoice = AIProvider | 'auto';
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink',
+  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)',
 };
-export const PROVIDER_KEYS: Record<AIProvider, string> = {
+export const PROVIDER_KEYS: Record<KeyedProvider, string> = {
   openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
 };
+export const providerSetup = (provider: AIProvider): string => provider === 'codex'
+  ? 'install the Codex CLI and run `codex login` with your ChatGPT account (desktop app only)'
+  : `add your ${PROVIDER_LABELS[provider]} key in Provider keys`;
 export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
-  'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal'],
+  'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'codex'],
   'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
   'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
   'anthropic/claude-opus-5.5': ['openrouter'],
@@ -35,11 +40,11 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
   if (!Array.isArray(routes)) throw new Error('Unsupported model.');
   if (choice != null && choice !== 'auto') {
     if (!routes.includes(choice as AIProvider)) throw new Error('This provider does not serve the selected model.');
-    if (!available[choice as AIProvider]) throw new Error(`Add your ${PROVIDER_LABELS[choice as AIProvider]} key in Provider keys, or choose Auto in AI settings.`);
+    if (!available[choice as AIProvider]) { const setup = providerSetup(choice as AIProvider); throw new Error(`${setup[0].toUpperCase()}${setup.slice(1)}, or choose Auto in AI settings.`); }
     return choice as AIProvider;
   }
   const selected = routes.find(provider => available[provider]);
-  if (!selected) throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. Add one key in Provider keys; the other keys are optional.`);
+  if (!selected) throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. Add one key in Provider keys${routes.includes('codex') ? ' or sign in to Codex with ChatGPT' : ''}; the other keys are optional.`);
   return selected;
 }
 

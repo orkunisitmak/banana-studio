@@ -199,6 +199,9 @@ export const resolveChannel = async (input: string): Promise<YouTubeChannel> => 
   }
 
   if (!data.items?.length) {
+    // A channel ID is exact: never substitute a search match for it. This also
+    // stops the search result's own ID lookup from searching again.
+    if (parsed.type === 'channelId') throw new Error('Channel not found');
     // Fallback: search for the channel (costs 100 quota units)
     const search = await apiFetch('search', {
       part: 'snippet',

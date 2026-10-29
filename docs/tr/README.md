@@ -112,7 +112,7 @@ API anahtarı, uygulamanın ilgili yapay zekâ servisindeki hesabını kullanmas
 
 | Model veya özellik | Sağlayıcılar (Auto önceliği) | Uygun anahtarlardan biri yeterli |
 | --- | --- | --- |
-| GPT Image 2.5 — yeni görsel ve korumalı alan editi | OpenAI → OpenRouter → fal.ai | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` |
+| GPT Image 2.5 — yeni görsel ve korumalı alan editi | OpenAI → OpenRouter → fal.ai → ChatGPT aboneliği (Codex, yalnızca masaüstü) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` ya da anahtarsız: ChatGPT ile `codex login` |
 | Nano Banana Pro / Nano Banana 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Claude Opus 5.5 — Enhance, Brainstorm, varyasyon ve yaratıcı brief | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — metin özellikleri | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |

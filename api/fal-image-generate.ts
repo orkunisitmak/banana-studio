@@ -131,10 +131,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     let data: any;
+    // Read the body once: after json() fails, text() is always empty.
+    const text = await response.text().catch(() => '');
     try {
-      data = await response.json();
+      data = JSON.parse(text);
     } catch {
-      const text = await response.text().catch(() => '');
       return res
         .status(502)
         .json({ error: `fal.ai returned non-JSON response (${response.status}): ${text.slice(0, 160)}` });

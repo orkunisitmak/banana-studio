@@ -19,7 +19,7 @@
 | Detay paneli | Shift + B | Shift + B |
 | Yeni maske katmanı | Shift + çizim | Shift + çizim |
 | Sağlayıcı anahtarları | Command + virgül | Ctrl + virgül veya File menüsü |
-| Pencereyi tam ekran yapma | Control + Command + F | F11 |
+| Pencereyi tam ekran yapma | Control + Command + F | F11 (çıkmak için F11 veya Esc) |
 
 Metin yapıştırma odaktaki editörde gerçekleşir; Türkçe karakterler, satırlar ve `@` referansları korunur. Görsel yapıştırma, panonun görsel öğelerini veya dosya listesini okur ve ortak referans yükleme akışını kullanır. Arka planda pano takip edilmez. Dosya yolunu metin olarak kopyalamak dosyayı yüklemez; kaynak uygulama görsel verisi sunmuyorsa yükleme düğmesini kullan.
 

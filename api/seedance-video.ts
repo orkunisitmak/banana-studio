@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser, createUserScopedClient } from './_lib/auth.js';
-import { chooseProvider } from './_lib/providerConfiguration.js';
-import { PROVIDER_KEYS } from '../src/lib/providers.js';
+import { chooseProvider, providerKey } from './_lib/providerConfiguration.js';
 import { seedanceProviderError, falSeedanceInput, openRouterSeedanceInput } from '../src/lib/video/seedanceProviders.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
@@ -32,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const registry = await prepareTaskRegistry(res); if (!registry) return;
       const fal = falSeedanceInput(body);
       const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${process.env[PROVIDER_KEYS[provider]]}`, 'Content-Type':'application/json' },
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${providerKey(provider)}`, 'Content-Type':'application/json' },
         body: JSON.stringify(provider === 'fal' ? fal.input : openRouterSeedanceInput(body)),
       });
       const data = await response.json().catch(() => null);

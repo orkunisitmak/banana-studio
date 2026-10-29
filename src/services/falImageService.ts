@@ -97,10 +97,11 @@ export const createImageTask = async (params: {
   });
 
   let data: any;
+  // Read the body once: after json() fails, text() is always empty.
+  const text = await res.text().catch(() => '');
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
-    const text = await res.text().catch(() => '');
     throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 120)}`);
   }
 
@@ -126,10 +127,11 @@ export const submitFalTask = async (
   });
 
   let data: any;
+  // Read the body once: after json() fails, text() is always empty.
+  const text = await res.text().catch(() => '');
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
-    const text = await res.text().catch(() => '');
     throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 120)}`);
   }
 
@@ -167,10 +169,11 @@ export const pollImageTask = async (
         { headers }
       );
 
+      // Read the body once: after json() fails, text() is always empty.
+      const text = await res.text().catch(() => '');
       try {
-        data = await res.json();
+        data = JSON.parse(text);
       } catch {
-        const text = await res.text().catch(() => '');
         throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 100)}`);
       }
 

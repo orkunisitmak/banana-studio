@@ -102,7 +102,10 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
         const target = event.target;
         const editing = target instanceof HTMLElement && (target.isContentEditable ||
           target.closest('input, textarea, select, [role="slider"], [role="combobox"], [role="textbox"]'));
-        if (!editing) {
+        // The focused mockup keeps its arrow keys while it is wider than the window.
+        const region = scroll.current;
+        const scrollsSideways = !!region && target instanceof Node && region.contains(target) && region.scrollWidth > region.clientWidth;
+        if (!editing && !scrollsSideways) {
           event.preventDefault(); event.stopPropagation();
           const navigation = navigationRef.current;
           if (event.key === 'ArrowLeft' ? navigation.hasPrevious : navigation.hasNext) {

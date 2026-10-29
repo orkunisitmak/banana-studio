@@ -15,7 +15,11 @@ export function auditDistribution(directory,{privateMarkers=[]}={}) {
   files++;
   if(/(?:^|\/)(?:\.env(?:\..*)?|workspace\.sqlite(?:-wal|-shm)?)(?:$)|\.(?:p12|pfx|p8|pem|key|sqlite3?|db|log)$/i.test(name))findings.push({path:name,rule:'private-artifact-file'});
   const bytes=fs.readFileSync(file),text=bytes.toString('utf8');
-  if(/(?<![A-Za-z0-9_])(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{30,}|AIza[A-Za-z0-9_-]{30,}|sb_secret_[A-Za-z0-9_-]{12,}|-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\s*[A-Za-z0-9+/=\r\n]{64,}-----END (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----)/.test(text))findings.push({path:name,rule:'artifact-credential'});
+  if(/(?<![A-Za-z0-9_])(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{30,}|AIza[A-Za-z0-9_-]{30,}|sb_secret_[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{24,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}(?![0-9a-f])|-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\s*[A-Za-z0-9+/=\r\n]{64,}-----END (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----)/.test(text))findings.push({path:name,rule:'artifact-credential'});
+  // Session/service JWTs (a public anon key is allowed).
+  for(const token of text.matchAll(/\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\b/g)){
+   try{const payload=JSON.parse(Buffer.from(token[0].split('.')[1],'base64url').toString());if((payload.role&&payload.role!=='anon')||payload.sub||payload.session_id){findings.push({path:name,rule:'artifact-session-or-api-jwt'});break;}}catch{/* Not a JWT. */}
+  }
   if(privateMarkers.some(marker=>marker.length>=12&&bytes.includes(Buffer.from(marker))))findings.push({path:name,rule:'private-artifact-marker'});
  }};visit(root);return {ok:findings.length===0,files,findings};
 }

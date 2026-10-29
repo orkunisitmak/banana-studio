@@ -19,7 +19,7 @@ Both shells load the same production React build and local Node/SQLite server. L
 | Viewer details | Shift + B | Shift + B |
 | New selection layer | Shift + draw | Shift + draw |
 | Provider keys | Command + comma | Ctrl + comma or File menu |
-| Window fullscreen | Control + Command + F | F11 |
+| Window fullscreen | Control + Command + F | F11 (F11 or Esc to exit) |
 | Image zoom / fit | + / − / 0 | + / − / 0 |
 
 Text paste stays in the focused native editor, preserving Turkish characters, line breaks and `@` reference syntax. Image paste reads the browser's image items or file collection, then goes through the same reference upload path. Clipboard access is requested by an actual paste; no background clipboard reader is installed. Copying a file's path as text does not upload the file. Use the upload button if an application does not provide clipboard image data.

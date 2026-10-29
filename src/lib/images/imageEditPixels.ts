@@ -1,5 +1,7 @@
 import { editRegionPixels, getEditRegionLayers, type ImageEditRegion } from './imageEditRegion.js';
 
+const MAX_FEATHER = 8;
+
 /** Rasterize at pixel centers, then feather inward only. Scanline filling keeps
  * freehand contours cheap; outside pixels always come directly from source. */
 export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, output: Uint8Array | Uint8ClampedArray, width: number, height: number, region: ImageEditRegion): Uint8ClampedArray => {
@@ -8,10 +10,12 @@ export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, outp
   const result = new Uint8ClampedArray(source);
   const bw = bounds.width, bh = bounds.height;
   const distances = new Uint8Array(bw * bh);
-  const feather = Math.min(8, Math.floor(Math.min(bw, bh) / 12));
-  const cap = feather + 1;
+  // Each layer feathers by its own size: a small layer next to a large one
+  // must still reach full strength. Overlaps keep the larger feather.
+  const caps = new Uint8Array(bw * bh);
   for (const layer of getEditRegionLayers(region)) {
     const area = editRegionPixels(layer, width, height);
+    const cap = Math.min(MAX_FEATHER, Math.floor(Math.min(area.width, area.height) / 12)) + 1;
     const points = layer.points?.map(p => ({ x: p.x * width, y: p.y * height }));
     for (let y = area.top - bounds.top; y < area.top + area.height - bounds.top; y++) {
       const py = bounds.top + y + .5;
@@ -26,7 +30,9 @@ export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, outp
       for (let i = 0; i + 1 < intersections.length; i += 2) {
         const start = Math.max(0, Math.ceil(intersections[i] - bounds.left - .5));
         const end = Math.min(bw, Math.ceil(intersections[i + 1] - bounds.left - .5));
-        distances.fill(cap, y * bw + start, y * bw + end);
+        // Distances start at the largest feather so the union stays one selection;
+        // only the alpha divisor (caps) is per layer.
+        for (let i = y * bw + start; i < y * bw + end; i++) { distances[i] = MAX_FEATHER + 1; caps[i] = Math.max(caps[i], cap); }
       }
     }
   }
@@ -39,7 +45,7 @@ export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, outp
     const i = y * bw + x;
     if (!distances[i]) continue;
     distances[i] = Math.min(distances[i], x < bw - 1 ? distances[i + 1] + 1 : 1, y < bh - 1 ? distances[i + bw] + 1 : 1);
-    const alpha = feather ? Math.min(1, distances[i] / cap) : 1;
+    const alpha = Math.min(1, distances[i] / caps[i]);
     const index = ((bounds.top + y) * width + bounds.left + x) * 4;
     for (let channel = 0; channel < 4; channel++) result[index + channel] = Math.round(source[index + channel] * (1 - alpha) + output[index + channel] * alpha);
   }

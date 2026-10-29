@@ -2,7 +2,7 @@ import { PROVIDER_LABELS } from '../lib/providers';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
-import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, SUNBURST_MODEL } from '../lib/images/openaiImage';
+import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, RECOVERABLE_IMAGE_MODELS, SUNBURST_MODEL } from '../lib/images/openaiImage';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import JSZip from 'jszip';
 import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } from '../services/photoShareService';
@@ -686,7 +686,7 @@ const CustomVideoPlayer: React.FC<{
 
 const RecoverImageButton = ({ media, onRecover }: { media: GeneratedMedia; onRecover?: (image: GeneratedMedia) => Promise<void> }) => {
   const [checking, setChecking] = useState(false);
-  if (!onRecover || media.imageModel !== SUNBURST_MODEL) return null;
+  if (!onRecover || !media.imageModel || !RECOVERABLE_IMAGE_MODELS.includes(media.imageModel)) return null;
   return <button disabled={checking} onClick={async event => {
     event.stopPropagation();
     if (checking) return;
@@ -1091,8 +1091,19 @@ export const Gallery: React.FC<GalleryProps> = ({
     };
 
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [hasMoreImages, allVisibleImages.length]);
+    // A page that does not fill the view cannot scroll, so also check after
+    // each render of more items, a column change and a window resize.
+    handleScroll();
+    window.addEventListener('resize', handleScroll);
+    // Content that grows or shrinks later (another folder, loaded cards) changes whether it fills the view.
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(handleScroll);
+    for (const child of Array.from(container.children) as Element[]) resize?.observe(child);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+      resize?.disconnect();
+    };
+  }, [hasMoreImages, allVisibleImages, displayCount, gridCols]);
 
   useEffect(() => {
     setComparisonIds(null);
@@ -1642,8 +1653,11 @@ export const Gallery: React.FC<GalleryProps> = ({
         const img = images.find(i => i.id === id);
         if (!img) return;
         const response = await fetch(img.url);
+        // An error body must never be saved as the media file.
+        if (!response.ok) throw new Error(`Download failed (${response.status}).`);
         const blob = await response.blob();
-        zip.file(`banana-${id}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, blob);
+        const ext = img.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
+        zip.file(`banana-${id}.${ext}`, blob);
       });
 
       await Promise.all(promises);
@@ -1692,6 +1706,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleDownloadPNG = async (media: GeneratedMedia) => {
     try {
       const response = await fetch(media.url);
+      if (!response.ok) throw new Error(`Download failed (${response.status}).`);
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
 

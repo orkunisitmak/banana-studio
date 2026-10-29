@@ -1,7 +1,7 @@
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
 import { getCloudPublicConfig, getWorkspaceConfig } from '../lib/config/runtimeConfig';
 import { createLocalWorkspaceClient } from '../../desktop/shared/browserClient';
-import { createSessionReader, retryTransientRead } from '../lib/shared/transientRead';
+import { createSessionReader, isTransientReadError, retryTransientRead } from '../lib/shared/transientRead';
 import { buildAdminUsageSummary } from '../lib/admin/adminUsage';
 import { AdminUsageRange, validateAdminUsageRange } from '../lib/admin/adminUsageRange';
 import { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from '../lib/prompts/textModels';
@@ -79,8 +79,10 @@ export const getProfile = async (): Promise<UserProfile | null> => {
     .eq('id', user.id)
     .single();
 
-  if (error || !data) return null;
-  return data as UserProfile;
+  // No row is "no profile"; a failed read is not, and must not drop a role.
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw new Error('Your profile could not be loaded.');
+  return (data as UserProfile) || null;
 };
 
 export const onAuthStateChange = (callback: (session: Session | null, event?: string) => void) => {
@@ -89,36 +91,49 @@ export const onAuthStateChange = (callback: (session: Session | null, event?: st
   });
 };
 
+/**
+ * `unavailable` means the allowlist could not be read because of a transient
+ * network failure. It never grants entry; callers only use it to keep an
+ * already-verified session open instead of treating the blip as a denial.
+ */
+export type AuthorizationCheck = 'authorized' | 'unauthorized' | 'unavailable';
+
 /** Only a verified identity with an exact, active allowlist entry may enter. */
-export const isUserAuthorized = async (expectedUserId?: string): Promise<boolean> => {
+export const checkUserAuthorization = async (expectedUserId?: string): Promise<AuthorizationCheck> => {
   const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       if (!user?.email || !user.email_confirmed_at || (user as { is_anonymous?: boolean }).is_anonymous
-        || (expectedUserId && user.id !== expectedUserId)) return false;
+        || (expectedUserId && user.id !== expectedUserId)) return 'unauthorized';
 
       // LIKE treats '_' and '%' as wildcards, both valid email characters.
       const email = user.email.trim().toLowerCase();
       const literalEmail = email.replace(/[\\%_]/g, '\\$&');
-      const { data, error } = await supabase
+      const { data, error, status } = await supabase
         .from('authorized_emails')
         .select('email')
         .eq('is_active', true)
         .ilike('email', literalEmail)
         .maybeSingle();
-      if (error) throw error;
-      return !!data && String(data.email || '').trim().toLowerCase() === email;
-    } catch {
+      // PostgREST keeps the HTTP status beside the error; 502/503/504 are outages.
+      if (error) throw Object.assign(error, { status });
+      return !!data && String(data.email || '').trim().toLowerCase() === email ? 'authorized' : 'unauthorized';
+    } catch (error) {
+      lastError = error;
       if (attempt < MAX_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, 400 * attempt));
       }
     }
   }
-  // Network errors and expired/revoked identities never grant access.
-  return false;
+  // Expired/revoked identities and unexpected errors never grant access.
+  return isTransientReadError(lastError) ? 'unavailable' : 'unauthorized';
 };
+
+export const isUserAuthorized = async (expectedUserId?: string): Promise<boolean> =>
+  await checkUserAuthorization(expectedUserId) === 'authorized';
 
 // --- Usage Logging ---
 
@@ -491,12 +506,15 @@ export const addAuthorizedEmail = async (email: string): Promise<void> => {
 };
 
 export const removeAuthorizedEmail = async (id: string): Promise<void> => {
-  const { error } = await supabase
+  // RLS turns a disallowed delete into a successful delete of zero rows.
+  const { data, error } = await supabase
     .from('authorized_emails')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
 
   if (error) throw error;
+  if (!data?.length) throw new Error('This email still has access. Refresh the list; you may no longer be an admin.');
 };
 
 // Admin: Reset all usage logs (clears estimated costs and counts)

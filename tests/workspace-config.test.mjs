@@ -21,3 +21,13 @@ test('browser build refuses credential environment variables without echoing the
  assert.throws(()=>assertPublicEnvironment({VITE_PROVIDER_KEY:canary}),error=>!error.message.includes(canary));
  assert.doesNotThrow(()=>assertPublicEnvironment({OPENAI_API_KEY:canary,VITE_APP_TITLE:'Banana Studio'}));
 });
+
+test('the browser secret guard ignores kebab-case names that contain "sk-"', () => {
+  const name = ['task', 'list', 'item', 'checkbox', 'container', 'wrapper', 'large'].join('-');
+  assert.doesNotThrow(() => assertPublicEnvironment({ VITE_THEME: name }));
+  assert.doesNotThrow(() => assertPublicEnvironment({ VITE_THEME: 'dark-sk-' + 'A'.repeat(30) }));
+  assert.throws(() => assertPublicEnvironment({ VITE_THEME: ['sk', 'proj', 'A'.repeat(40)].join('-') }));
+  // Other key shapes keep matching even when glued to a word character.
+  assert.throws(() => assertPublicEnvironment({ VITE_THEME: 'x' + 'AIza' + 'A'.repeat(40) }));
+  assert.throws(() => assertPublicEnvironment({ VITE_THEME: 'x' + 'sb_secret_' + 'A'.repeat(24) }));
+});

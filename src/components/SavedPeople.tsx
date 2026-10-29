@@ -102,13 +102,14 @@ export const SavedPeople: React.FC<{
     if (addDisabled) throw new Error(addDisabled);
     const linked = !!(draft && getSavedPersonDraftGroup(draft, person));
     onAdd(person);
+    setRemoved(null); // Undo belongs only to the removal notice.
     setNotice(linked ? `${person.name} photos updated; scene prompt kept` : `${person.name} added to draft`);
   });
   const edit = (summary: SavedPersonSummary) => withFullPerson(summary, person => {
     if (person.canEdit === false) throw new Error('Only the owner can edit this saved person.');
     setExtraPhotos(person.photos);
     setEditor({ person: { ...person, photos: [...person.photos] }, isNew: false });
-    setNotice('');
+    setNotice(''); setRemoved(null);
   });
   const save = async () => {
     if (!editor || busy) return;
@@ -118,7 +119,7 @@ export const SavedPeople: React.FC<{
       if (!mounted.current) return;
       showSaved(saved);
       onSaved(saved, editor.groupId);
-      setNotice(`${saved.name} saved`); setEditor(null);
+      setRemoved(null); setNotice(`${saved.name} saved`); setEditor(null);
     } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : 'Could not save person. Please retry.'); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -196,7 +197,7 @@ export const SavedPeople: React.FC<{
           <button type="button" disabled={busy || !editor.person.name.trim() || !editor.person.photos.length} onClick={save} className={`${button} bg-violet-500 text-white hover:bg-violet-400`}>{busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Save person</button>
         </div>
       </div> : <>
-        {(people.length > 0 || !error) && <div className="mb-2 flex items-center justify-between"><p className="text-[11px] text-gray-500">{people.length} saved {people.length === 1 ? 'person' : 'people'}</p><button type="button" disabled={busy || !!error} onClick={() => { setExtraPhotos([]); setEditor({ person: emptyPerson(), isNew: true }); setError(''); setNotice(''); }} className={`${button} text-violet-300 hover:bg-violet-500/10`}><Plus className="h-3.5 w-3.5" />New person</button></div>}
+        {(people.length > 0 || !error) && <div className="mb-2 flex items-center justify-between"><p className="text-[11px] text-gray-500">{people.length} saved {people.length === 1 ? 'person' : 'people'}</p><button type="button" disabled={busy || !!error} onClick={() => { setExtraPhotos([]); setEditor({ person: emptyPerson(), isNew: true }); setError(''); setNotice(''); setRemoved(null); }} className={`${button} text-violet-300 hover:bg-violet-500/10`}><Plus className="h-3.5 w-3.5" />New person</button></div>}
         {!people.length && !error && <div className="py-6 text-center"><Users className="mx-auto mb-2 h-6 w-6 text-gray-600" /><p className="text-xs text-gray-300">Save a person once</p><p className="mt-1 text-[11px] leading-4 text-gray-500">Add all their reference photos to any generation with one click.</p></div>}
         <div className="grid max-h-64 grid-cols-4 gap-x-1.5 gap-y-3 overflow-y-auto p-0.5 custom-scrollbar" aria-label="Saved person cards" aria-busy={coverState === 'loading'}>
           {people.map(person => {
@@ -226,6 +227,6 @@ export const SavedPeople: React.FC<{
       </>}
     </>}
     {error && <div role="alert" className="mt-3 rounded-lg bg-red-500/10 p-2 text-[11px] leading-4 text-red-300">{error}{!editor && <button type="button" className="ml-2 underline" onClick={() => setReload(value => value + 1)}>Retry</button>}</div>}
-    {notice && !editor && <div role="status" className="mt-2 flex items-center gap-2 text-[10px] text-gray-400"><span className="flex-1">{notice}</span>{removed && <button type="button" disabled={busy} className="text-violet-300 underline" onClick={undo}>Undo</button>}<button type="button" aria-label="Dismiss saved people message" onClick={() => setNotice('')}><X className="h-3 w-3" /></button></div>}
+    {notice && !editor && <div role="status" className="mt-2 flex items-center gap-2 text-[10px] text-gray-400"><span className="flex-1">{notice}</span>{removed && <button type="button" disabled={busy} className="text-violet-300 underline" onClick={undo}>Undo</button>}<button type="button" aria-label="Dismiss saved people message" onClick={() => { setNotice(''); setRemoved(null); }}><X className="h-3 w-3" /></button></div>}
   </div>;
 };

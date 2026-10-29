@@ -34,7 +34,12 @@ export function SharedFolder() {
       setPage(result);
       setImages(previous => offset ? [...previous, ...result.images.filter(image => !previous.some(old => old.id === image.id))] : result.images);
     } catch (error) {
-      if (!operation.signal.aborted) { setError(error instanceof Error ? error.message : 'Unable to load images.'); setPage(null); setImages([]); setSelected(null); }
+      if (!operation.signal.aborted) {
+        setError(error instanceof Error ? error.message : 'Unable to load images.');
+        // A failed later page keeps the images already shown so Load more can be retried.
+        if (!offset) { setPage(null); setImages([]); }
+        setSelected(null);
+      }
     } finally { if (!operation.signal.aborted) setBusy(false); }
   }, [request]);
   useEffect(() => {

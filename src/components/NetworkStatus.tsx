@@ -26,9 +26,8 @@ export function NetworkStatus() {
         type="button"
         className="shrink-0 rounded-md border border-amber-300/30 px-2 py-1 font-medium hover:bg-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-300"
         onClick={() => {
-          window.dispatchEvent(new Event('online'));
           window.dispatchEvent(new Event('banana:retry-network'));
-          setOffline(false);
+          setOffline(browserIsOffline(navigator.onLine));
         }}
       >
         {t('app.retryConnection', 'Retry connection')}

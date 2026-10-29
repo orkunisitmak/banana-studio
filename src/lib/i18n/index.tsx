@@ -16,12 +16,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored === 'tr' || stored === 'en') return stored;
-      // Auto-detect browser language
-      if (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('tr')) {
-        return 'tr';
-      }
     } catch {
       // Ignore localStorage read errors in restricted contexts
+    }
+    // Detect from the browser even when localStorage is unavailable.
+    if (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('tr')) {
+      return 'tr';
     }
     return 'en';
   });

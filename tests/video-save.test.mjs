@@ -9,13 +9,16 @@ f.client = {
   auth: { getSession: async () => ({ data: { session: { user: { id: 'user-1' } } } }) },
   storage: { from: () => ({
     async upload(path) { f.uploads.push(path); return { error: f.uploadError || null }; },
-    async createSignedUrl(path) { return { data: { signedUrl: `https://storage.example/${path}?token=t` }, error: null }; },
+    async createSignedUrl(path) {
+      if (f.unsigned?.has(path)) return { data: null, error: { message: 'Object not found', statusCode: '404' } };
+      return { data: { signedUrl: `https://storage.example/${path}?token=t` }, error: null };
+    },
   }) },
   from(table) {
     assert.equal(table, 'generations');
     const query = {
       select: () => query, eq: () => query,
-      maybeSingle: async () => ({ data: null, error: null }),
+      maybeSingle: async () => f.readError ? { data: null, error: f.readError } : { data: f.savedRow || null, error: null },
       async upsert(row) { f.upserts.push(row); return { error: null }; },
     };
     return query;
@@ -33,7 +36,7 @@ const { saveVideo } = await import(`data:text/javascript;base64,${Buffer.from(bu
 const video = { id: 'video-1', url: PROVIDER_URL, prompt: 'A test video', mediaType: 'video', createdAt: 123 };
 
 function setup(t, download) {
-  Object.assign(f, { upserts: [], uploads: [], uploadError: null });
+  Object.assign(f, { upserts: [], uploads: [], uploadError: null, savedRow: null, readError: null, unsigned: new Set() });
   t.mock.method(globalThis, 'fetch', async () => download());
   t.mock.method(console, 'warn', () => {});
 }
@@ -74,4 +77,49 @@ test('a failed storage upload does not save the expiring provider URL', async t 
   assert.equal(f.upserts.length, 1);
   assert.equal(f.upserts[0].storage_path, 'user-1/video-1.mp4');
   assert.notEqual(f.upserts[0].url, PROVIDER_URL);
+});
+
+test('a resumed video whose provider URL expired completes with the copy an earlier save stored', async t => {
+  // The earlier save stored the file and recorded it on the row; only its status write was lost.
+  setup(t, () => new Response('Expired', { status: 403 }));
+  f.savedRow = { storage_path: 'user-1/video-1.mp4', thumbnail_path: 'user-1/video-1_thumb.png', metadata: {}, reference_images: [] };
+  const saved = await saveVideo(video, 'user-1');
+  assert.equal(saved?.storagePath, 'user-1/video-1.mp4');
+  assert.deepEqual(f.uploads, []);
+  assert.equal(f.upserts.length, 1);
+  assert.equal(f.upserts[0].storage_path, 'user-1/video-1.mp4');
+  assert.equal(f.upserts[0].thumbnail_path, 'user-1/video-1_thumb.png');
+  assert.notEqual(f.upserts[0].url, PROVIDER_URL);
+
+  // A row that never recorded a stored copy is still left untouched for a retry.
+  f.upserts = [];
+  f.savedRow = { storage_path: null, thumbnail_path: null, metadata: {}, reference_images: [] };
+  assert.equal(await saveVideo(video, 'user-1'), undefined);
+  assert.deepEqual(f.upserts, []);
+});
+
+test('a failed row read leaves the resumed video untouched, and the retry uses the stored copy once', async t => {
+  setup(t, () => new Response('Expired', { status: 403 }));
+  f.savedRow = { storage_path: 'user-1/video-1.mp4', thumbnail_path: 'user-1/video-1_thumb.png', metadata: {}, reference_images: [] };
+  f.readError = { message: 'timeout' };
+  assert.equal(await saveVideo(video, 'user-1'), undefined);
+  assert.deepEqual(f.upserts, []);
+
+  f.readError = null;
+  const saved = await saveVideo(video, 'user-1');
+  assert.equal(saved?.storagePath, 'user-1/video-1.mp4');
+  assert.deepEqual(f.uploads, []);
+  assert.equal(f.upserts.length, 1);
+  assert.equal(f.upserts[0].storage_path, 'user-1/video-1.mp4');
+});
+
+test('a stored poster that cannot be signed does not block the resumed video', async t => {
+  setup(t, () => new Response('Expired', { status: 403 }));
+  f.savedRow = { storage_path: 'user-1/video-1.mp4', thumbnail_path: 'user-1/video-1_thumb.png', metadata: {}, reference_images: [] };
+  f.unsigned = new Set(['user-1/video-1_thumb.png']);
+  const saved = await saveVideo(video, 'user-1');
+  assert.equal(saved?.storagePath, 'user-1/video-1.mp4');
+  assert.equal(f.upserts.length, 1);
+  assert.equal(f.upserts[0].storage_path, 'user-1/video-1.mp4');
+  assert.equal(f.upserts[0].thumbnail_path, 'user-1/video-1_thumb.png');
 });

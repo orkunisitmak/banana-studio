@@ -1328,9 +1328,26 @@ export const saveVideo = async (
           }
         }
       } catch (fetchErr: any) {
-        // Never persist the expiring provider URL; the caller retries the copy.
         console.warn("Failed to fetch video for storage upload:", fetchErr.message);
-        return undefined;
+        // An earlier save may have stored this video and recorded it on the row,
+        // with only its status write lost. The provider URL can expire before
+        // the task is resumed, so finish with that stored copy.
+        try {
+          const { data: saved, error: savedError } = await supabase.from('generations')
+            .select('storage_path, thumbnail_path').eq('id', media.id).eq('user_id', userId).maybeSingle();
+          const storedUrl = !savedError && saved?.storage_path === storagePath ? await createMediaAccessUrl(storagePath) : undefined;
+          // Never persist the expiring provider URL; the caller retries the copy.
+          if (!storedUrl) return undefined;
+          publicUrl = storedUrl;
+          uploadedStoragePath = storagePath;
+          if (saved.thumbnail_path) {
+            uploadedThumbnailPath = saved.thumbnail_path;
+            // The poster is optional: a failed signature must not block the video row.
+            try { thumbnailUrl = await createMediaAccessUrl(saved.thumbnail_path) || thumbnailUrl; } catch { /* Keep the stored path. */ }
+          }
+        } catch {
+          return undefined;
+        }
       } finally {
         activeTransfers.delete(transfer);
         if (!activeTransfers.size) activeVideoTransfers.delete(transferKey);

@@ -1,23 +1,24 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { OPENROUTER_MODELS } from '../src/lib/providers.js';
-import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser } from './_lib/auth.js';
 import { startOpenAIRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost, isOpenRouterReasoningEffort, openRouterErrorMessage } from '../src/lib/prompts/openrouterText.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
+import { enforceDailyGenerationQuota } from './_lib/generationQuota.js';
 
 export const config = { maxDuration: 300 };
 const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res); res.setHeader('Cache-Control', 'no-store');
+  if (!applyCors(req, res)) return; res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const auth = createTaskDeadline(15_000);
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
   const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) return res.status(503).json({ error: 'OPENROUTER_API_KEY sunucuda tanımlı değil. Yönetici OpenRouter anahtarını eklemeli.' });
+  if (!key) return res.status(503).json({ error: 'OPENROUTER_API_KEY sunucuda tanÄ±mlÄ± deÄŸil. YÃ¶netici OpenRouter anahtarÄ±nÄ± eklemeli.' });
   let body: any;
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
@@ -62,6 +63,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (streaming) { send({ type: 'error', error }); return res.end(); }
     return res.status(status).json({ error });
   };
+  if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'openrouter', createServiceRoleClient())) {
+    await guard.finish('failed', null, 429);
+    return;
+  }
   if (streaming) {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8'); res.setHeader('X-Accel-Buffering', 'no');
     res.on('close', close); send({ type: 'status', stage: 'generating' });
@@ -72,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const analysis = body.outputFormat === 'youtube_analysis';
   const format = analysis ? YOUTUBE_ANALYSIS_FORMAT : usageContext.action === 'brainstorm' ? buildBrainstormOutputFormat(wardrobe, body.brainstormCount) : undefined;
   try {
-    const response = await waitForTask(fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await waitForTask(fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST', redirect: 'error',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-OpenRouter-Title': 'Banana Studio' },
       body: JSON.stringify({ model: upstreamModel,
@@ -104,21 +109,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { usageLoggingPending = true; }
     finally { accounting.dispose(); }
     const choice = data?.choices?.[0];
-    if (choice?.finish_reason !== 'stop') return fail(502, 'Model yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
-    if (choice?.message?.refusal) return fail(422, 'Model bu isteği yanıtlayamadı.');
+    if (choice?.finish_reason !== 'stop') return fail(502, 'Model yanÄ±tÄ± tamamlanamadÄ±. Ä°steÄŸi kÄ±saltÄ±p yeniden dene.');
+    if (choice?.message?.refusal) return fail(422, 'Model bu isteÄŸi yanÄ±tlayamadÄ±.');
     let text = choice?.message?.role === 'assistant' && typeof choice.message.content === 'string' ? choice.message.content : '';
-    if (!text.trim()) return fail(502, 'Model boş yanıt döndürdü. Yeniden dene.');
+    if (!text.trim()) return fail(502, 'Model boÅŸ yanÄ±t dÃ¶ndÃ¼rdÃ¼. Yeniden dene.');
     if (usageContext.action === 'brainstorm') {
       const normalized = normalizeBrainstormOutput(text, wardrobe, body.brainstormCount);
       console.info(`[openrouter-brainstorm] id=${guard.id} expected=${body.brainstormCount ?? 'legacy'} accepted=${normalized ? JSON.parse(normalized).length : 0} thinking=${effort}`);
-      if (!normalized) return fail(502, 'Model fikirleri beklenen biçimde döndürmedi. Yeniden dene.');
+      if (!normalized) return fail(502, 'Model fikirleri beklenen biÃ§imde dÃ¶ndÃ¼rmedi. Yeniden dene.');
       text = normalized;
     }
     if (analysis) {
       let value: any;
       try { value = JSON.parse(text); } catch { /* checked below */ }
       if (typeof value?.videoAvailable !== 'boolean' || typeof value.brief !== 'string' || typeof value.premise !== 'string'
-        || typeof value.limitation !== 'string' || !Array.isArray(value.evidence)) return fail(502, 'Model video analizini beklenen biçimde döndürmedi.');
+        || typeof value.limitation !== 'string' || !Array.isArray(value.evidence)) return fail(502, 'Model video analizini beklenen biÃ§imde dÃ¶ndÃ¼rmedi.');
     }
     const result = { text, candidates: null, provider: 'openrouter', providerModel: upstreamModel, usageMetadata: { provider: 'openrouter', openrouterUsage: data.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
     outcome = 'completed'; await guard.finish('completed', requestId, providerStatus);
@@ -126,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(result);
   } catch (error: any) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
-    return fail(timeout ? 504 : 502, timeout ? 'Model yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.' : openRouterErrorMessage());
+    return fail(timeout ? 504 : 502, timeout ? 'Model yanÄ±t sÃ¼resi aÅŸÄ±ldÄ±. Ä°steÄŸi kÄ±saltÄ±p yeniden dene.' : openRouterErrorMessage());
   } finally {
     deadline.dispose(); clearInterval(heartbeat); res.off?.('close', close);
     await guard.finish(outcome, requestId, providerStatus);

@@ -24,7 +24,7 @@ const extractResultUrls = (data: any): string[] => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });

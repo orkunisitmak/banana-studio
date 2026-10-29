@@ -1,5 +1,6 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, requireUser } from './_lib/auth.js';
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { enforceDailyGenerationQuota } from './_lib/generationQuota.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import { buildH3MaxInput, H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
@@ -47,7 +48,7 @@ const extractFalErrorMessage = (raw: unknown): string => {
     const messages = raw
       .map((entry: any) => entry?.msg || entry?.message)
       .filter((message: unknown): message is string => typeof message === 'string' && message.length > 0);
-    if (messages.length > 0) return messages.join(' • ');
+    if (messages.length > 0) return messages.join(' â€¢ ');
   }
   if (typeof raw === 'object') {
     const value = raw as Record<string, any>;
@@ -116,7 +117,7 @@ export const config = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   // Queue state changes behind the same request URL. Without an explicit
   // no-store policy Vercel/browser revalidation can turn later polls into 304
   // responses and leave the client replaying the first RUNNING payload even
@@ -149,6 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: error?.message || 'Invalid MiniMax H3 Max request' });
       }
       const { endpoint, input, mode } = prepared;
+      let quotaChecked = false;
       const estimatedCostUsd = estimateH3MaxCost({
         h3MaxMode: mode, h3MaxOptions: body.options,
         videoQuality: String(input.resolution || body.resolution || '768P'),
@@ -176,13 +178,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (saved.status !== 'pending' || metadata.h3SubmissionStartedAt) return res.status(409).json({
           code: 'GENERATION_SUBMITTING', error: 'This saved video was already submitted or its acceptance is uncertain. Do not submit again; check its saved task history and usage.',
         });
-        const claimedMetadata = { ...metadata, h3SubmissionStartedAt: Date.now(), h3MaxMode: mode, falEndpoint: endpoint };
+        const claimedMetadata = {
+          ...metadata,
+          h3SubmissionStartedAt: Date.now(),
+          h3ClaimToken: crypto.randomUUID(),
+          h3MaxMode: mode,
+          falEndpoint: endpoint,
+        };
         const { data: claimed, error: claimError } = await registry.from('generations')
           .update({ status: 'processing', metadata: claimedMetadata }).eq('id', body.generationId).eq('user_id', user.id).eq('status', 'pending').select('id').maybeSingle();
         if (claimError) return res.status(503).json({ error: 'The saved video could not be claimed. No provider request was sent.' });
         if (!claimed) return res.status(409).json({ code: 'GENERATION_SUBMITTING', error: 'This saved video is already being submitted. Check the existing task instead of submitting again.' });
+        let quotaAllowed = false;
+        try {
+          quotaAllowed = await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'fal', createServiceRoleClient());
+        } catch (quotaError) {
+          console.error('H3 quota check failed', quotaError);
+          if (!res.writableEnded) res.status(503).json({ error: 'Usage quota could not be verified. Try again shortly.' });
+        }
+        if (!quotaAllowed) {
+          // Release the claim so a rejected quota cannot strand the generation.
+          try {
+            const { error: releaseError } = await registry.from('generations')
+              .update({ status: 'pending', metadata })
+              .eq('id', body.generationId).eq('user_id', user.id)
+              .eq('metadata->>h3ClaimToken', String(claimedMetadata.h3ClaimToken));
+            if (releaseError) {
+              console.error('H3 claim release failed; forcing the claim back to pending', releaseError);
+              const { error: forceError } = await registry.from('generations')
+                .update({ status: 'pending', metadata })
+                .eq('id', body.generationId).eq('user_id', user.id)
+                .eq('metadata->>h3ClaimToken', String(claimedMetadata.h3ClaimToken));
+              if (forceError) console.error('H3 claim force-release failed', forceError);
+            }
+          } catch (releaseError) {
+            console.error('H3 claim release failed', releaseError);
+          }
+          return;
+        }
+        quotaChecked = true;
         galleryClaim = { id: body.generationId, metadata: claimedMetadata };
       }
+      if (!quotaChecked && !await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'fal', createServiceRoleClient())) return;
       const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
         method: 'POST',
         headers: {
@@ -198,7 +235,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // marker: reusing this ID must never issue another billable submission.
         if (galleryClaim && response.status >= 400 && response.status < 500) {
           await registry.from('generations').update({ status: 'failed', metadata: { ...galleryClaim.metadata, error } })
-            .eq('id', galleryClaim.id).eq('user_id', user.id);
+            .eq('id', galleryClaim.id).eq('user_id', user.id)
+            .eq('metadata->>h3ClaimToken', String(galleryClaim.metadata.h3ClaimToken));
         }
         return res.status(response.status).json({ error });
       }

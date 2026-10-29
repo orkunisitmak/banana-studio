@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServiceRoleClient, requireUser } from './_lib/auth.js';
+import { recordAuditEvent } from './_lib/audit.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'private, no-store');
@@ -27,11 +28,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         share_token: token, legacy_token_hash: null, expires_at: expiresAt, created_at: new Date().toISOString(),
       }, { onConflict: 'folder_id' });
       if (error) throw error;
+      await recordAuditEvent(db, { userId: user.id, action: 'share.created', targetType: 'folder', targetId: folderId });
       return res.status(200).json({ active: true, token, expiresAt });
     }
     if (action === 'revoke') {
       const { error } = await db.from('folder_shares').delete().eq('folder_id', folderId).eq('user_id', user.id);
       if (error) throw error;
+      await recordAuditEvent(db, { userId: user.id, action: 'share.revoked', targetType: 'folder', targetId: folderId });
       return res.status(200).json({ active: false });
     }
     let share = await db.from('folder_shares').select('expires_at,share_token,token_hash').eq('folder_id', folderId).eq('user_id', user.id).maybeSingle();

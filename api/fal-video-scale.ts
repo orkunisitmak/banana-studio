@@ -1,5 +1,6 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, requireUser } from './_lib/auth.js';
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { enforceDailyGenerationQuota, recordAcceptedUsage } from './_lib/generationQuota.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
@@ -15,7 +16,7 @@ const extractFalErrorMessage = (raw: unknown): string => {
     const messages = raw
       .map((entry: any) => entry?.msg || entry?.message)
       .filter((message: unknown): message is string => typeof message === 'string' && message.length > 0);
-    if (messages.length > 0) return messages.join(' • ');
+    if (messages.length > 0) return messages.join(' â€¢ ');
   }
   if (typeof raw === 'object') {
     const value = raw as Record<string, any>;
@@ -41,7 +42,7 @@ export const config = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -71,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const registry = await prepareTaskRegistry(res);
       if (!registry) return;
+      if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'fal', createServiceRoleClient())) return;
       const response = await fetch(`${FAL_QUEUE_BASE}/${SCALE_ENDPOINT}`, {
         method: 'POST',
         headers: {
@@ -96,8 +98,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!data?.request_id) {
         return res.status(502).json({ error: 'fal.ai response missing request_id' });
       }
-      await registerProviderTask(registry, 'fal', data.request_id, user.id);
-      return res.status(200).json({ requestId: data.request_id });
+    await registerProviderTask(registry, 'fal', data.request_id, user.id);
+    await recordAcceptedUsage(registry, { userId: user.id, action: 'video_scale', model: SCALE_ENDPOINT, prompt: '' });
+    return res.status(200).json({ requestId: data.request_id });
     }
 
     const requestId = req.query.requestId as string;

@@ -1,5 +1,6 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, requireUser } from './_lib/auth.js';
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { enforceDailyGenerationQuota, recordAcceptedUsage } from './_lib/generationQuota.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
 import { getNanoBanana21InputError, NANO_BANANA_21_ENDPOINT } from '../src/lib/images/nanoBanana21.js';
 
@@ -60,7 +61,7 @@ export const config = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -121,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'fal', createServiceRoleClient())) return;
     const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
       method: 'POST',
       headers: {
@@ -158,6 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     await registerProviderTask(registry, 'fal', data.request_id, user.id);
+    await recordAcceptedUsage(registry, { userId: user.id, action: 'generate', model: body.endpoint || 'fal-image', prompt: typeof input.prompt === 'string' ? input.prompt : '', imageCount: 1 });
 
     console.log(
       `[fal-submit] endpoint=${endpoint} request_id=${data.request_id}`,

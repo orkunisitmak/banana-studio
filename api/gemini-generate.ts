@@ -1,6 +1,7 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+﻿import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
-import { applyCors, requireUser } from './_lib/auth.js';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser } from './_lib/auth.js';
+import { enforceDailyGenerationQuota, recordAcceptedUsage } from './_lib/generationQuota.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 
 interface GeminiGenerateRequest {
@@ -33,7 +34,7 @@ export const config = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -76,8 +77,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     safeConfig[key] = value;
   }
 
+  const writer = process.env.BANANA_RUNTIME === 'local' ? createUserScopedClient(req) : createServiceRoleClient();
+  if (!writer) return res.status(503).json({ error: 'Audit logging is not configured.' });
+  if (!await enforceDailyGenerationQuota(createUserScopedClient(req), user.id, res, 'gemini', writer)) return;
+
   const startedAt = Date.now();
-  const provider = createTaskDeadline(250_000, undefined, 'Gemini yanıt süresi aşıldı. İstek otomatik olarak tekrarlanmadı. Yeniden deneyebilirsin.');
+  const provider = createTaskDeadline(250_000, undefined, 'Gemini yanÄ±t sÃ¼resi aÅŸÄ±ldÄ±. Ä°stek otomatik olarak tekrarlanmadÄ±. Yeniden deneyebilirsin.');
   // Negotiate the same status/result protocol as the text proxy. Heartbeats
   // prevent a long video read from becoming a silent, idle HTTP connection.
   // Existing clients continue to receive the original JSON response.
@@ -110,9 +115,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model, contents,
       config: { ...safeConfig, abortSignal: provider.signal, httpOptions: { timeout: 250_000 } },
     } as any), provider.signal);
+    await recordAcceptedUsage(writer, {
+      userId: user.id,
+      action: kind === 'video' ? 'video_generate' : 'generate',
+      model,
+      imageCount: 1,
+    });
 
     // Surfaced in `vercel logs` so we can see how long each Gemini call took
-    // — handy when a brainstorm timeout strikes again.
+    // â€” handy when a brainstorm timeout strikes again.
     console.log(
       `[gemini-generate] model=${model} kind=${kind} thinking=${thinking} stage=completed ms=${Date.now() - startedAt} thoughts=${response.usageMetadata?.thoughtsTokenCount ?? 'unknown'} input=${response.usageMetadata?.promptTokenCount ?? 'unknown'}`,
     );

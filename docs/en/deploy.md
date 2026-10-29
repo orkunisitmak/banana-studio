@@ -37,8 +37,9 @@ Use an empty project reserved for this application. The baseline creates tables 
 1. Open [the baseline SQL file](../../supabase/migrations/20261019123903_banana_studio_baseline.sql). On GitHub, use **Raw** or the copy button to copy the **entire file**.
 2. In your new Supabase project, open **SQL Editor → New query**.
 3. Paste the SQL and select **Run**. Run the baseline once on the new project.
-4. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
-5. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migration.
+4. If `BANANA_DAILY_GENERATION_LIMIT` is positive, run the full `20261028120000_generation_quota.sql` migration in SQL Editor after the baseline. The quota fails closed if its RPC is missing. Run `20261028130000_audit_events.sql` as well to enable the administrator audit trail, `20261028140000_release_generation_quota.sql` so rejected queue jobs return their reserved slot, and `20261028150000_provider_generation_quota.sql` when `BANANA_DAILY_PROVIDER_LIMITS` is used. Apply `20261028160000_audit_generation_delete.sql` to record media deletions in the audit trail.
+5. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
+6. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migration.
 
 **Checkpoint:** SQL Editor reports success, the tables exist, and `media` is private. A CLI-based migration path is also possible for developers; do not apply both methods to the same schema without reconciling migration history.
 
@@ -67,6 +68,10 @@ An environment variable is a named setting supplied to the application by Vercel
 | `SUPABASE_PUBLISHABLE_KEY` | Your project's publishable key; a legacy `anon` key is also accepted | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase backend credential: a server secret key or legacy `service_role` key; this is the app's existing variable name | Yes, for server-owned jobs and tasks |
 | `CRON_SECRET` | A fresh random secret, preferably at least 32 characters, generated with your password manager | Yes |
+| `BANANA_CORS_ORIGIN` | Optional comma-separated cross-origin allowlist. Leave unset for same-origin only. | No |
+| `BANANA_DAILY_GENERATION_LIMIT` | Optional per-user daily generation cap. `0` or unset disables it. | No |
+| `BANANA_DAILY_PROVIDER_LIMITS` | Optional JSON map of per-provider daily caps, e.g. `{"openai":50,"fal":100}`. | No |
+| `BANANA_QUOTA_ALERT_WEBHOOK` | Optional HTTPS webhook that receives quota rejection alerts. | No |
 | `OPENAI_API_KEY` | OpenAI key | For GPT Image 2.5 and/or GPT-6.1 Sol |
 | `OPENROUTER_API_KEY` | OpenRouter key | For Opus 5.5, the initial creative default |
 | `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |

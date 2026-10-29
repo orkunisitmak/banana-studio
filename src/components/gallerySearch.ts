@@ -75,7 +75,7 @@ export const buildGallerySearchIndex = (folders: Folder[], media: GeneratedMedia
       key: `${type}:${item.id}`, type, id: item.id, title, ...location, createdAt: timestamp(item.createdAt), model, modelLabel,
       people: personNames, status: item.error || item.status === 'failed' ? 'failed' : item.isLoading || ['pending', 'processing'].includes(item.status || '') ? 'running' : 'completed',
       favorite: !!item.isFavorite, media: item, titleText: normalizeSearch(title),
-      text: normalizeSearch([title, item.prompt, item.imageGenerationPrompt, item.providerExpandedPrompt, model, modelLabel, location.path, ...personNames].filter(Boolean).join(' ')),
+      text: normalizeSearch([title, item.prompt, item.imageGenerationPrompt, item.providerExpandedPrompt, model, modelLabel, location.path, ...personNames, ...(item.tags || [])].filter(Boolean).join(' ')),
     };
   })];
 };

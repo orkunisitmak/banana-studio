@@ -6,7 +6,7 @@ import { getPersonId, cleanPersonName } from '../src/lib/references/personRefere
 import { normalizePromptPreparation } from '../src/lib/prompts/promptPreparation.js';
 import { normalizeYouTubeSource } from '../src/lib/youtube/youtubeSource.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, createUserScopedClient, requireUser, type AuthenticatedUser } from './_lib/auth.js';
+import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser, type AuthenticatedUser } from './_lib/auth.js';
 import { calculateOpenAIImageCost, getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../src/lib/images/openaiImage.js';
 import { prepareSunburstGeneration, getSunburstEditIntent } from '../src/lib/images/imagePrompting.js';
 import { EDIT_REGION_REQUIRED, isValidEditRegion, copyEditRegion, describeEditRegion } from '../src/lib/images/imageEditRegion.js';
@@ -14,6 +14,7 @@ import { readEditSource, compositeProtectedEdit } from './_lib/protectedImageEdi
 import { readImageDimensions } from './_lib/imageDimensions.js';
 import { saveGeneratedImage, readStoredImage, imageSha256, signedMediaUrl, canonicalMediaUrl } from './_lib/imageStorage.js';
 import { startOpenAIRequest } from './_lib/openaiGuard.js';
+import { enforceDailyGenerationQuota, releaseGenerationQuotas } from './_lib/generationQuota.js';
 import { openAIErrorMessage, safeOpenAIErrorCode, imageRateLimitDelay } from './_lib/openaiError.js';
 
 // Match the existing deployment's 300-second function budget. No automatic
@@ -23,7 +24,7 @@ const isImageUrl = isReferenceUrl;
 class SavedImageError extends Error {}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res);
+  if (!applyCors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -54,6 +55,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) return res.status(400).json({ error: 'Prompt must contain 1–32,000 characters.' });
   if (!['1:1', '4:3', '3:4', '16:9', '9:16'].includes(body.aspectRatio) || !['1K', '2K', '4K'].includes(body.resolution)) return res.status(400).json({ error: 'Invalid ratio or resolution.' });
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) return res.status(400).json({ error: 'Invalid image options.' });
+  if (body.seed != null && (!Number.isInteger(body.seed) || body.seed < 0 || body.seed > 2_147_483_647)) return res.status(400).json({ error: 'Invalid seed.' });
   let provider: AIProvider;
   try { provider = chooseProvider(body.model, body.provider ?? (context.guard && body.model === SUNBURST_MODEL ? 'openai' : 'auto')); } catch (error) { return res.status(503).json({ error: (error as Error).message }); }
   const key = process.env[PROVIDER_KEYS[provider]]!;
@@ -104,6 +106,10 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   if (generationPrompt.length > 32000) return res.status(400).json({ error: 'Shorten the prompt to leave room for reference and canvas instructions (32,000 characters total).' });
   const guard = context.guard || await startOpenAIRequest(req, res, user, 'image', body.id);
   if (!guard) return;
+  if (!context.guard && !await enforceDailyGenerationQuota(db, user.id, res, provider, createServiceRoleClient())) {
+    await guard.finish('rejected');
+    return;
+  }
   let providerStatus: number | undefined;
   let providerErrorCode: string | undefined;
   let outcome: 'completed' | 'failed' | 'rejected' = 'rejected';
@@ -115,7 +121,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     promptPreparation: normalizePromptPreparation(body.promptPreparation),
     openaiImageOptions: body.model !== SUNBURST_MODEL ? undefined : protectedSource ? { ...options, size: 'custom', width: protectedSource.info.width, height: protectedSource.info.height } : options,
     openaiStartedAt: startedAt, generationStartedAt: startedAt,
-    imagePromptCategory: body.imagePromptCategory, imageGenerationPrompt: generationPrompt,
+    imagePromptCategory: body.imagePromptCategory, imageGenerationPrompt: generationPrompt, seed: body.seed,
     imageGenerationReferenceIds: generationReferences.map(ref => ref.id), imageRequestedSize: body.model === SUNBURST_MODEL || protectedSource ? size : `${body.resolution} · ${body.aspectRatio}`, openaiAuditId: guard.id };
   if (editReference?.id.startsWith('gallery-')) metadata.imageEditSourceId = editReference.id.slice(8);
   try {
@@ -126,14 +132,16 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       reference_images: safeRefs.map(ref => ({ ...ref, data: canonicalMediaUrl(ref.data) })), status: 'processing', metadata,
     });
     if (insertError) {
+      if (!context.guard) await releaseGenerationQuotas(createServiceRoleClient(), user.id, provider);
       await guard.finish('rejected');
       return res.status(insertError.code === '23505' ? 409 : 500).json({ error: 'Could not create the saved generation. No OpenAI request was sent.',
         ...(insertError.code === '23505' ? { code: 'GENERATION_EXISTS' } : {}),
       });
     }
 
-    const input: Record<string, unknown> = { resolution: body.resolution, aspect_ratio: body.aspectRatio,
-      model: body.model, prompt: generationPrompt, n: 1, size, quality: options.quality,
+  const input: Record<string, unknown> = { resolution: body.resolution, aspect_ratio: body.aspectRatio,
+    model: body.model, prompt: generationPrompt, n: 1, size, quality: options.quality,
+    ...(body.seed != null ? { seed: body.seed } : {}),
       background: options.background, output_format: options.outputFormat, moderation: options.moderation,
       user: user.id,
     };

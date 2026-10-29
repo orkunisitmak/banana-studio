@@ -4,15 +4,15 @@
 
 ## Mac: download and open
 
-The current release is **v0.1.2** and requires **macOS 13.5 or later**. It includes its own runtime: you do not install Node.js, Supabase, Vercel or a database.
+The current release is **v0.1.3** and requires **macOS 13.5 or later**. It includes its own runtime: you do not install Node.js, Supabase, Vercel or a database.
 
 1. In the Apple menu, open **About This Mac**. If it says **Chip: Apple M…**, choose Apple Silicon; if it says **Intel**, choose Intel.
 2. Download the matching file:
 
    | Mac | Download |
    | --- | --- |
-   | Apple Silicon — M1 and newer | [Banana-Studio-0.1.2-macos-arm64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-arm64.zip) |
-   | Intel | [Banana-Studio-0.1.2-macos-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-x64.zip) |
+   | Apple Silicon — M1 and newer | [Banana-Studio-0.1.3-macos-arm64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-arm64.zip) |
+   | Intel | [Banana-Studio-0.1.3-macos-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-macos-x64.zip) |
 
 3. Double-click the zip, then drag **Banana Studio.app** into **Applications**. Open it from there.
 4. These community builds are not notarized by Apple. After trying to open the app, if macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway** for Banana Studio and complete the system confirmation. Follow [Apple's instructions](https://support.apple.com/102445); leave system-wide protections enabled.
@@ -48,7 +48,7 @@ The local database is not separately encrypted; macOS account protection, FileVa
 
 ## Windows: download and open
 
-1. Download [Banana-Studio-0.1.2-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) for Windows 10/11 on 64-bit Intel/AMD PCs.
+1. Download [Banana-Studio-0.1.3-windows-x64.zip](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.3/Banana-Studio-0.1.3-windows-x64.zip) for Windows 10/11 on 64-bit Intel/AMD PCs.
 2. Choose **Extract all**. Keep the entire extracted **Banana Studio** folder together; do not run the executable inside the zip or move only the `.exe`.
 3. Open **BananaStudio.exe**. Node.js, .NET and the local database are bundled. The app requires Microsoft's **Edge WebView2 Runtime**, normally present on Windows 10/11; if the app reports it missing, install it from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/).
 4. Use **Provider keys** (or **File → Provider API Keys…**) and add only the keys you need. They stay in **Windows Credential Manager**. No Supabase, Google login or cloud setup is needed.

@@ -86,13 +86,13 @@ export const SavedPeople: React.FC<{
     if (cover) setCovers(current => ({ ...current, [person.id]: cover }));
   };
   // Messages stay until the photos arrive: clearing them earlier shifts the cards under the pointer.
-  const withFullPerson = async (summary: SavedPersonSummary, use: (person: SavedPerson) => void) => {
+  const withFullPerson = async (summary: SavedPersonSummary, applyPerson: (person: SavedPerson) => void) => {
     if (busy) return;
     setBusy(true); setOpening(summary.id);
     try {
       const person = await getSavedPerson(summary.id, lifetime.current);
       if (!mounted.current) return;
-      use(person);
+      applyPerson(person);
       setError('');
     } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : 'Could not load this person. Please retry.'); }
     finally { if (mounted.current) { setBusy(false); setOpening(null); } }

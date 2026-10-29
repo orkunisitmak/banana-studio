@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { KeyRound, Settings, X } from 'lucide-react';
+import { FlaskConical, KeyRound, Palette, Settings, X } from 'lucide-react';
 import { TextModelSettings } from './TextModelSettings';
 import { ProviderRoutingSettings } from './ProviderRoutingSettings';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import type { UserProfile } from '../types';
 import { postNativeAction } from '../../desktop/shared/nativeBridge';
 
-export function WorkspaceBar({ profile, onOpenAdmin, onSignOut }: { profile: UserProfile | null; onOpenAdmin: () => void; onSignOut: () => Promise<void> }) {
+export function WorkspaceBar({ profile, onOpenAdmin, onOpenPlayground, onOpenBrandKit, onSignOut }: { profile: UserProfile | null; onOpenAdmin: () => void; onOpenPlayground: () => void; onOpenBrandKit: () => void; onSignOut: () => Promise<void> }) {
   const local = isLocalWorkspace();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -19,6 +19,8 @@ export function WorkspaceBar({ profile, onOpenAdmin, onSignOut }: { profile: Use
     <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/[0.07] bg-[#0d1117] px-5 py-2.5 text-xs">
       <div><span className="font-semibold text-white">Banana Studio</span><span className="ml-3 text-gray-500">{local ? 'Local workspace · This computer' : profile?.display_name || 'Your workspace'}</span></div>
       <div className="flex items-center gap-2">
+        <button type="button" onClick={onOpenPlayground} className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-white/5"><FlaskConical size={14} />Model playground</button>
+        <button type="button" onClick={onOpenBrandKit} className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-white/5"><Palette size={14} />Brand kit</button>
         <button type="button" onClick={() => setSettingsOpen(true)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-white/5"><Settings size={14} />AI settings</button>
         {!local && profile?.role === 'admin' && <button type="button" onClick={onOpenAdmin} className="rounded-lg px-3 py-2 text-violet-300 hover:bg-white/5">Workspace admin</button>}
         {!local && <button type="button" onClick={() => void onSignOut()} className="rounded-lg px-3 py-2 text-gray-400 hover:bg-white/5">Sign out</button>}

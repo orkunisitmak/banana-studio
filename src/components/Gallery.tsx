@@ -9,9 +9,6 @@ import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } fro
 import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
-import { ImageCompareDialog } from './ImageCompareDialog';
-import { GallerySearchDialog } from './GallerySearchDialog';
-import { GalleryImageEditor } from './GalleryImageEditor';
 import { ImageEditComparison } from './ImageEditComparison';
 import { useSavedImageEditSource } from './useSavedImageEditSource';
 import { ImageEditDetails, PromptPreparationDetails } from './GenerationDetails';
@@ -21,36 +18,28 @@ import { DetailImage } from './GalleryDetailImage';
 import { buildGalleryFolderStats } from './galleryFolderStats';
 import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
-import { YouTubePreviewDialog } from './YouTubePreviewDialog';
 import { Toast } from './Toast';
-import { HelpCenter } from './HelpCenter';
 import { FolderPreview } from './FolderPreview';
-import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
 import { groupBrainstormImages } from './galleryOrdering';
+import { buildExportMetadata } from '../lib/gallery/exportMetadata';
+import { GalleryIntelligenceDialog } from './GalleryIntelligenceDialog';
+import { ExportPresetMenu } from './ExportPresetMenu';
+import { DEFAULT_BRAND_KIT, type BrandKit } from '../lib/brand/kit';
+import { LazyBoundary } from './LazyBoundary';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
+
+const ImageCompareDialog = React.lazy(() => import('./ImageCompareDialog').then(module => ({ default: module.ImageCompareDialog })));
+const GallerySearchDialog = React.lazy(() => import('./GallerySearchDialog').then(module => ({ default: module.GallerySearchDialog })));
+const GalleryImageEditor = React.lazy(() => import('./GalleryImageEditor').then(module => ({ default: module.GalleryImageEditor })));
+const YouTubePreviewDialog = React.lazy(() => import('./YouTubePreviewDialog').then(module => ({ default: module.YouTubePreviewDialog })));
+const HelpCenter = React.lazy(() => import('./HelpCenter').then(module => ({ default: module.HelpCenter })));
+const FolderShareDialog = React.lazy(() => import('./FolderShareDialog').then(module => ({ default: module.FolderShareDialog })));
 
 // --- Constants ---
 const ITEMS_PER_PAGE = 48;
 const LOAD_MORE_THRESHOLD = 800; // pixels from bottom to trigger load more
-
-const getVideoPreviewSrc = (src: string): string => {
-  if (!src || /#t=/i.test(src)) return src;
-  const hashIndex = src.indexOf('#');
-  const base = hashIndex >= 0 ? src.slice(0, hashIndex) : src;
-  // iOS Safari often leaves a controls-free video black until playback. A
-  // media fragment makes it decode and paint an actual frame while paused.
-  return `${base}#t=0.1`;
-};
-
-const formatPlaybackTime = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
-  const wholeSeconds = Math.floor(seconds);
-  const minutes = Math.floor(wholeSeconds / 60);
-  const remainder = wholeSeconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
-};
 
 interface GalleryProps {
   images: GeneratedMedia[];
@@ -74,6 +63,7 @@ interface GalleryProps {
   onMoveFolder?: (folderId: string, targetParentId: string | null) => Promise<void> | void;
   onDeleteFolder: (folderId: string) => Promise<DeleteFolderResult>;
   onToggleFavorite?: (image: GeneratedMedia) => void;
+  onUpdateTags?: (id: string, tags: string[]) => Promise<void>;
   isHistoryOpen: boolean;
   // Toast/Notification props
   toasts?: Toast[];
@@ -81,6 +71,7 @@ interface GalleryProps {
   onDismissAllToasts?: () => void;
   // User props
   userProfile?: UserProfile | null;
+  brandKit?: BrandKit;
   onSignOut?: () => void;
   onOpenAdmin?: () => void;
   galleryOwner?: AdminUserSummary | null;
@@ -91,612 +82,12 @@ interface GalleryProps {
   onExitAdminGallery?: () => void;
 }
 
-// --- Lazy Image Component ---
-interface LazyImageProps {
-  src: string;
-  thumbSrc?: string;
-  alt: string;
-  className?: string;
-  onError?: () => void;
-  onLoadedDimensions?: (width: number, height: number) => void;
-}
 
-const LazyImage: React.FC<LazyImageProps> = ({ src, thumbSrc, alt, className, onError, onLoadedDimensions }) => {
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState(thumbSrc || src);
-  const imgRef = useRef<HTMLDivElement>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    setCurrentSrc(thumbSrc || src);
-    setIsLoaded(false);
-    setHasError(false);
-  }, [src, thumbSrc]);
-
-  useEffect(() => {
-    if (!imgRef.current) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          setIsVisible(entry.isIntersecting);
-          // If it goes out of view, we don't necessarily need to reset isLoaded
-          // because when it comes back into view, it will load instantly from cache
-          // and we want it to show up without a fade delay if possible.
-        });
-      },
-      { rootMargin: '600px' } // Keep images loaded within 600px of viewport
-    );
-
-    observerRef.current.observe(imgRef.current);
-
-    return () => {
-      observerRef.current?.disconnect();
-    };
-  }, []);
-
-  const handleError = () => {
-    if (currentSrc !== src && thumbSrc) {
-      // If thumbnail failed, try original
-      setCurrentSrc(src);
-    } else {
-      setHasError(true);
-      onError?.();
-    }
-  };
-
-  if (hasError) {
-    return (
-      <div ref={imgRef} className={`${className} flex items-center justify-center bg-gray-800`}>
-        <AlertCircle className="w-8 h-8 text-gray-600" />
-      </div>
-    );
-  }
-
-  return (
-    <div ref={imgRef} className={`relative ${className}`}>
-      {!isLoaded && isVisible && (
-        <div className="absolute inset-0 bg-gray-800 animate-pulse" />
-      )}
-      {isVisible && (
-        <img
-          src={currentSrc}
-          alt={alt}
-          draggable={false}
-          className={`w-full h-full object-contain transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'
-            }`}
-          onLoad={(event) => {
-            setIsLoaded(true);
-            onLoadedDimensions?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
-          }}
-          onError={handleError}
-          loading="lazy"
-          decoding="async"
-        />
-      )}
-    </div>
-  );
-};
-
-const LazyVideoPreview: React.FC<{
-  src: string;
-  poster?: string;
-  onLoadedMetadata?: (video: HTMLVideoElement) => void;
-  onError?: () => void;
-}> = ({ src, poster, onLoadedMetadata, onError }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [shouldLoad, setShouldLoad] = useState(false);
-  const [posterState, setPosterState] = useState<'missing' | 'loading' | 'ready' | 'failed'>(
-    poster ? 'loading' : 'missing'
-  );
-  const [videoFrameReady, setVideoFrameReady] = useState(false);
-
-  useEffect(() => {
-    setPosterState(poster ? 'loading' : 'missing');
-    setVideoFrameReady(false);
-  }, [poster, src]);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element || shouldLoad) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) {
-        setShouldLoad(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: '350px' });
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [shouldLoad]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!shouldLoad || !video) return;
-
-    let cancelled = false;
-    let seekHandler: (() => void) | undefined;
-
-    const revealCurrentFrame = () => {
-      if (cancelled || !video.videoWidth || !video.videoHeight) return;
-      setVideoFrameReady(true);
-    };
-
-    const prepareFirstFrame = () => {
-      if (cancelled) return;
-      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-      const targetTime = duration > 0.2
-        ? Math.min(1, Math.max(0.1, duration * 0.1))
-        : 0;
-
-      if (targetTime > 0 && Math.abs(video.currentTime - targetTime) > 0.02) {
-        seekHandler = revealCurrentFrame;
-        video.addEventListener('seeked', seekHandler, { once: true });
-        try {
-          video.currentTime = targetTime;
-        } catch {
-          video.removeEventListener('seeked', seekHandler);
-          seekHandler = undefined;
-          revealCurrentFrame();
-        }
-      } else {
-        revealCurrentFrame();
-      }
-    };
-
-    video.muted = true;
-    video.preload = 'auto';
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) prepareFirstFrame();
-    else {
-      video.addEventListener('loadeddata', prepareFirstFrame, { once: true });
-      // Changing preload after a poster failure is not enough in every mobile
-      // browser; explicitly restart loading so loadeddata/seeked can fire.
-      video.load();
-    }
-
-    return () => {
-      cancelled = true;
-      video.removeEventListener('loadeddata', prepareFirstFrame);
-      if (seekHandler) video.removeEventListener('seeked', seekHandler);
-    };
-  }, [shouldLoad, src]);
-
-  return (
-    <div ref={containerRef} className="relative h-full w-full bg-gray-900">
-      {shouldLoad ? (
-        <>
-          <video
-            ref={videoRef}
-            src={getVideoPreviewSrc(src)}
-            draggable={false}
-            muted
-            preload="auto"
-            playsInline
-            className="h-full w-full object-contain"
-            onLoadedMetadata={(event) => onLoadedMetadata?.(event.currentTarget)}
-            onError={onError}
-          />
-          {poster && posterState !== 'failed' && (
-            <img
-              src={poster}
-              alt=""
-              draggable={false}
-              className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
-                posterState === 'ready' && !videoFrameReady ? 'opacity-100' : 'opacity-0'
-              }`}
-              loading="lazy"
-              decoding="async"
-              onLoad={() => setPosterState('ready')}
-              onError={() => setPosterState('failed')}
-            />
-          )}
-          {!videoFrameReady && posterState !== 'ready' && (
-            <div className="pointer-events-none absolute inset-0 animate-pulse bg-gray-800/70" />
-          )}
-        </>
-      ) : poster && posterState !== 'failed' ? (
-        <img
-          src={poster}
-          alt=""
-          draggable={false}
-          className="h-full w-full object-contain"
-          loading="lazy"
-          decoding="async"
-          onLoad={() => setPosterState('ready')}
-          onError={() => setPosterState('failed')}
-        />
-      ) : (
-        <div className="h-full w-full animate-pulse bg-gray-800/70" />
-      )}
-    </div>
-  );
-};
-
-const CustomVideoPlayer: React.FC<{
-  src: string;
-  onError?: () => void;
-}> = ({ src, onError }) => {
-  const stageRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [useNativeControls, setUseNativeControls] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9);
-  const [playerSize, setPlayerSize] = useState<{ width: number; height: number } | null>(null);
-  const controlsHideTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-    setDuration(0);
-    setUseNativeControls(false);
-    setControlsVisible(true);
-    setVideoAspectRatio(16 / 9);
-    setPlayerSize(null);
-  }, [src]);
-
-  const clearControlsHideTimer = () => {
-    if (controlsHideTimerRef.current !== null) {
-      window.clearTimeout(controlsHideTimerRef.current);
-      controlsHideTimerRef.current = null;
-    }
-  };
-
-  const revealControls = () => {
-    clearControlsHideTimer();
-    setControlsVisible(true);
-
-    if (videoRef.current && !videoRef.current.paused) {
-      controlsHideTimerRef.current = window.setTimeout(() => {
-        setControlsVisible(false);
-        controlsHideTimerRef.current = null;
-      }, 1200);
-    }
-  };
-
-  useEffect(() => {
-    clearControlsHideTimer();
-    if (isPlaying) {
-      controlsHideTimerRef.current = window.setTimeout(() => {
-        setControlsVisible(false);
-        controlsHideTimerRef.current = null;
-      }, 700);
-    } else {
-      setControlsVisible(true);
-    }
-
-    return clearControlsHideTimer;
-  }, [isPlaying]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    const updatePlayerSize = () => {
-      const parent = stage.parentElement;
-      const availableWidth = stage.clientWidth;
-      if (!parent || !availableWidth || !Number.isFinite(videoAspectRatio) || videoAspectRatio <= 0) return;
-
-      const parentStyle = window.getComputedStyle(parent);
-      const verticalPadding =
-        (Number.parseFloat(parentStyle.paddingTop) || 0)
-        + (Number.parseFloat(parentStyle.paddingBottom) || 0);
-      const fallbackHeight = (window.visualViewport?.height || window.innerHeight) * 0.55;
-      const availableHeight = Math.max(180, parent.clientHeight - verticalPadding || fallbackHeight);
-
-      let width = availableWidth;
-      let height = width / videoAspectRatio;
-      if (height > availableHeight) {
-        height = availableHeight;
-        width = height * videoAspectRatio;
-      }
-
-      const nextSize = {
-        width: Math.max(1, Math.round(width)),
-        height: Math.max(1, Math.round(height)),
-      };
-      setPlayerSize(current =>
-        current && current.width === nextSize.width && current.height === nextSize.height
-          ? current
-          : nextSize
-      );
-    };
-
-    updatePlayerSize();
-    const resizeObserver = new ResizeObserver(updatePlayerSize);
-    resizeObserver.observe(stage);
-    if (stage.parentElement) resizeObserver.observe(stage.parentElement);
-    window.visualViewport?.addEventListener('resize', updatePlayerSize);
-    return () => {
-      resizeObserver.disconnect();
-      window.visualViewport?.removeEventListener('resize', updatePlayerSize);
-    };
-  }, [videoAspectRatio]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleNativeFullscreenStart = () => {
-      video.controls = true;
-      setUseNativeControls(true);
-    };
-    const handleNativeFullscreenEnd = () => {
-      video.controls = false;
-      setUseNativeControls(false);
-    };
-    const handleFullscreenChange = () => {
-      if (document.fullscreenElement === video) {
-        handleNativeFullscreenStart();
-      } else if (!document.fullscreenElement) {
-        handleNativeFullscreenEnd();
-      }
-    };
-
-    video.addEventListener('webkitbeginfullscreen', handleNativeFullscreenStart);
-    video.addEventListener('webkitendfullscreen', handleNativeFullscreenEnd);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => {
-      video.removeEventListener('webkitbeginfullscreen', handleNativeFullscreenStart);
-      video.removeEventListener('webkitendfullscreen', handleNativeFullscreenEnd);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, [src]);
-
-  const togglePlayback = async () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      try {
-        await video.play();
-      } catch {
-        // Browsers can reject autoplay-style play attempts. The paused state
-        // remains visible so the user can tap again.
-      }
-    } else {
-      video.pause();
-    }
-  };
-
-  const seekBy = (seconds: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    const end = Number.isFinite(video.duration) ? video.duration : duration;
-    video.currentTime = Math.max(0, Math.min(end || 0, video.currentTime + seconds));
-  };
-
-  const handleSeek = (value: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = value;
-    setCurrentTime(value);
-  };
-
-  const toggleMute = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.muted && video.volume === 0) video.volume = 0.5;
-    video.muted = !video.muted;
-    setIsMuted(video.muted || video.volume === 0);
-  };
-
-  const changeVolume = (amount: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    const nextVolume = Math.max(0, Math.min(1, Number((video.volume + amount).toFixed(1))));
-    video.volume = nextVolume;
-    video.muted = nextVolume === 0;
-    setIsMuted(video.muted);
-  };
-
-  const openNativeFullscreen = async () => {
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitEnterFullscreen?: () => void;
-    }) | null;
-    if (!video) return;
-
-    setUseNativeControls(true);
-    video.controls = true;
-    try {
-      if (typeof video.webkitEnterFullscreen === 'function') {
-        video.webkitEnterFullscreen();
-      } else if (typeof video.requestFullscreen === 'function') {
-        await video.requestFullscreen();
-      } else if (containerRef.current && typeof containerRef.current.requestFullscreen === 'function') {
-        await containerRef.current.requestFullscreen();
-      } else {
-        throw new Error('Fullscreen is not supported');
-      }
-    } catch {
-      video.controls = false;
-      setUseNativeControls(false);
-    }
-  };
-
-  useEffect(() => {
-    const handlePlayerKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
-
-      const key = event.key.toLowerCase();
-      const isShiftSeek = event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight');
-      const isPlayerShortcut = isShiftSeek
-        || !event.shiftKey && [' ', 'spacebar', 'arrowup', 'arrowdown', 'j', 'k', 'l', 'm', 'f'].includes(key);
-      if (!isPlayerShortcut) return;
-
-      event.preventDefault();
-      if (event.repeat && [' ', 'spacebar', 'k', 'm', 'f'].includes(key)) return;
-
-      revealControls();
-      if (isShiftSeek) {
-        seekBy(event.key === 'ArrowRight' ? 1 : -1);
-        return;
-      }
-
-      switch (key) {
-        case ' ':
-        case 'spacebar':
-        case 'k':
-          void togglePlayback();
-          break;
-        case 'j':
-          seekBy(-5);
-          break;
-        case 'l':
-          seekBy(5);
-          break;
-        case 'm':
-          toggleMute();
-          break;
-        case 'arrowup':
-          changeVolume(0.1);
-          break;
-        case 'arrowdown':
-          changeVolume(-0.1);
-          break;
-        case 'f':
-          void openNativeFullscreen();
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handlePlayerKeyDown);
-    return () => window.removeEventListener('keydown', handlePlayerKeyDown);
-  }, [duration]);
-
-  return (
-    <div
-      ref={stageRef}
-      className="flex w-full items-center justify-center md:h-full"
-      onClick={(event) => event.stopPropagation()}
-    >
-    <div
-      ref={containerRef}
-      style={playerSize ? { width: `${playerSize.width}px`, height: `${playerSize.height}px` } : undefined}
-      className="relative max-h-full max-w-full overflow-hidden rounded-xl bg-black shadow-2xl"
-      onPointerMove={revealControls}
-      onPointerDown={revealControls}
-    >
-      <video
-        ref={videoRef}
-        src={getVideoPreviewSrc(src)}
-        controls={useNativeControls}
-        playsInline
-        preload="auto"
-        className="h-full w-full object-contain"
-        onClick={() => {
-          if (!useNativeControls) void togglePlayback();
-        }}
-        onLoadedMetadata={(event) => {
-          if (event.currentTarget.videoWidth > 0 && event.currentTarget.videoHeight > 0) {
-            setVideoAspectRatio(event.currentTarget.videoWidth / event.currentTarget.videoHeight);
-          }
-          setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
-          setCurrentTime(event.currentTarget.currentTime);
-        }}
-        onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
-        onVolumeChange={(event) => setIsMuted(event.currentTarget.muted || event.currentTarget.volume === 0)}
-        onError={onError}
-      />
-
-      {!useNativeControls && controlsVisible && (
-        <>
-          <div className="absolute right-3 top-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleMute}
-              className="grid h-11 w-11 place-items-center rounded-full border border-white/15 bg-black/60 text-white shadow-lg backdrop-blur-md active:scale-95"
-              aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-            >
-              {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => void openNativeFullscreen()}
-              className="grid h-11 w-11 place-items-center rounded-full border border-white/15 bg-black/60 text-white shadow-lg backdrop-blur-md active:scale-95"
-              aria-label="Open native fullscreen player"
-            >
-              <Maximize2 className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => seekBy(-10)}
-              className="relative grid h-12 w-12 place-items-center rounded-full border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md active:scale-95"
-              aria-label="Go back 10 seconds"
-            >
-              <Rewind className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void togglePlayback()}
-              className="grid h-16 w-16 place-items-center rounded-full border border-white/25 bg-black/65 text-white shadow-2xl backdrop-blur-md active:scale-95"
-              aria-label={isPlaying ? 'Pause video' : 'Play video'}
-            >
-              {isPlaying ? <Pause className="h-7 w-7 fill-current" /> : <Play className="ml-1 h-7 w-7 fill-current" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => seekBy(10)}
-              className="relative grid h-12 w-12 place-items-center rounded-full border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md active:scale-95"
-              aria-label="Go forward 10 seconds"
-            >
-              <FastForward className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-3 pb-3 pt-10 sm:px-4">
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.01}
-              value={Math.min(currentTime, duration || 0)}
-              onChange={(event) => handleSeek(Number(event.target.value))}
-              className="h-5 w-full cursor-pointer"
-              aria-label="Video progress"
-            />
-            <div className="mt-0.5 flex items-center justify-between text-[11px] font-medium tabular-nums text-white/75">
-              <span>{formatPlaybackTime(currentTime)}</span>
-              <span>-{formatPlaybackTime(Math.max(0, duration - currentTime))}</span>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-    </div>
-  );
-};
-
-
-const RecoverImageButton = ({ media, onRecover }: { media: GeneratedMedia; onRecover?: (image: GeneratedMedia) => Promise<void> }) => {
-  const [checking, setChecking] = useState(false);
-  if (!onRecover || media.imageModel !== SUNBURST_MODEL) return null;
-  return <button disabled={checking} onClick={async event => {
-    event.stopPropagation();
-    if (checking) return;
-    setChecking(true);
-    try { await onRecover(media); } finally { setChecking(false); }
-  }} className="flex items-center gap-1.5 px-2 py-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 rounded text-white text-[10px] font-medium"
-    title="Check the saved file and restore it. Does not generate an image or charge for generation.">
-    <RefreshCw className={`w-3 h-3 ${checking ? 'animate-spin' : ''}`} />{checking ? 'Checking saved image…' : 'Recover saved image'}
-  </button>;
-};
+import { LazyImage } from './gallery/LazyImage';
+import { LazyVideoPreview } from './gallery/LazyVideoPreview';
+import { CustomVideoPlayer } from './gallery/CustomVideoPlayer';
+import { RecoverImageButton } from './gallery/RecoverImageButton';
+import { TagsEditor } from './gallery/TagsEditor';
 
 export const Gallery: React.FC<GalleryProps> = ({
   images,
@@ -719,10 +110,12 @@ export const Gallery: React.FC<GalleryProps> = ({
   onMoveFolder,
   onDeleteFolder,
   onToggleFavorite,
+  onUpdateTags,
   toasts = [],
   onDismissToast,
   onDismissAllToasts,
   userProfile,
+  brandKit = DEFAULT_BRAND_KIT,
   onSignOut,
   onOpenAdmin,
   galleryOwner = null,
@@ -836,6 +229,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isGridMenuOpen, setIsGridMenuOpen] = useState(false);
   const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
+  const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -915,14 +309,14 @@ export const Gallery: React.FC<GalleryProps> = ({
       const commandK = (event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'k';
       const slash = event.key === '/' && !event.metaKey && !event.ctrlKey
         && !(event.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
-      if ((!commandK && !slash) || isSearchOpen || comparisonIds || isYouTubePreviewOpen || isCreatingFolder || isHelpCenterOpen || previewRefImage) return;
+      if ((!commandK && !slash) || isSearchOpen || comparisonIds || isYouTubePreviewOpen || isCreatingFolder || isHelpCenterOpen || isIntelligenceOpen || previewRefImage) return;
       if ((event.target as HTMLElement)?.closest('[role="dialog"]')) return;
       event.preventDefault();
       openSearch();
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [openSearch, isSearchOpen, comparisonIds, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage]);
+  }, [openSearch, isSearchOpen, comparisonIds, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, isIntelligenceOpen, previewRefImage]);
 
   // Close header menus when clicking outside
   useEffect(() => {
@@ -1312,7 +706,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   };
 
   useEffect(() => {
-    if (!selectedMedia || selectedMedia.isLoading || isSelectionMode || comparisonIds || isSearchOpen || isYouTubePreviewOpen || isHelpCenterOpen || previewRefImage || (!isReadOnly && (isCreatingFolder || sharingFolder))) return;
+    if (!selectedMedia || selectedMedia.isLoading || isSelectionMode || comparisonIds || isSearchOpen || isYouTubePreviewOpen || isHelpCenterOpen || isIntelligenceOpen || previewRefImage || (!isReadOnly && (isCreatingFolder || sharingFolder))) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -1338,7 +732,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
+  }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, isIntelligenceOpen, previewRefImage, sharingFolder, isReadOnly]);
 
   // --- Actions ---
 
@@ -1661,6 +1055,10 @@ export const Gallery: React.FC<GalleryProps> = ({
       });
 
       await Promise.all(promises);
+      zip.file('metadata.json', JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        items: images.filter(img => selectedIds.has(img.id)).map(buildExportMetadata),
+      }, null, 2));
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
@@ -1839,7 +1237,13 @@ export const Gallery: React.FC<GalleryProps> = ({
     </div>
   ) : null;
 
-  const searchDialog = isSearchOpen && <GallerySearchDialog images={images} folders={folders} ownerId={galleryOwner?.user_id} isLoading={isGalleryIndexLoading || isFoldersLoading} loadError={galleryLoadError || folderLoadError} onClose={closeSearch} onSelect={selectSearchResult} />;
+  const searchDialog = isSearchOpen && (
+    <LazyBoundary label="Gallery search" onDismiss={closeSearch}>
+      <React.Suspense fallback={null}>
+        <GallerySearchDialog images={images} folders={folders} ownerId={galleryOwner?.user_id} isLoading={isGalleryIndexLoading || isFoldersLoading} loadError={galleryLoadError || folderLoadError} onClose={closeSearch} onSelect={selectSearchResult} />
+      </React.Suspense>
+    </LazyBoundary>
+  );
   if (isEmpty && !currentFolderId && !showFavoritesOnly) {
     return (
       <div className="relative flex-1 flex min-h-screen flex-col bg-[#0d1117] text-gray-600">
@@ -1939,8 +1343,39 @@ export const Gallery: React.FC<GalleryProps> = ({
       onDragEnd={clearDragState}
     >
 
-      <HelpCenter open={isHelpCenterOpen} onClose={() => setIsHelpCenterOpen(false)} />
-      {sharingFolder && !isReadOnly && <FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} />}
+      {isIntelligenceOpen && (
+        <GalleryIntelligenceDialog
+          open
+          images={images}
+          brandKit={brandKit}
+          onClose={() => setIsIntelligenceOpen(false)}
+          onSelect={id => {
+            const media = images.find(item => item.id === id);
+            setIsIntelligenceOpen(false);
+            setShowFavoritesOnly(false);
+            setMediaFilter('all');
+            setIsSelectionMode(false);
+            onFolderSelect(media?.folderId || null);
+            onImageSelect(media && (!media.status || media.status === 'completed') && media.url ? id : null);
+            setSearchRevealId(id);
+          }}
+        />
+      )}
+
+      {isHelpCenterOpen && (
+        <LazyBoundary label="Help Center" onDismiss={() => setIsHelpCenterOpen(false)}>
+          <React.Suspense fallback={null}>
+            <HelpCenter open onClose={() => setIsHelpCenterOpen(false)} />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
+      {sharingFolder && !isReadOnly && (
+        <LazyBoundary label="Folder sharing" onDismiss={() => setSharingFolder(null)}>
+          <React.Suspense fallback={null}>
+            <FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
 
       {isCreatingFolder && !isReadOnly && (
         <div
@@ -2187,6 +1622,16 @@ export const Gallery: React.FC<GalleryProps> = ({
           </div>
 
           <div className="order-2 ml-auto flex shrink-0 items-center gap-1.5 md:order-3 sm:gap-2">
+            <button
+              onClick={() => setIsIntelligenceOpen(true)}
+              aria-label="Open gallery intelligence"
+              aria-haspopup="dialog"
+              aria-expanded={isIntelligenceOpen}
+              title="Gallery intelligence"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-[#161b22] text-gray-400 transition-colors hover:border-violet-400/40 hover:text-white"
+            >
+              <ShieldCheck className="h-4 w-4" />
+            </button>
             <button ref={searchButtonRef} onClick={openSearch} aria-label="Search gallery" aria-haspopup="dialog" aria-expanded={isSearchOpen} aria-keyshortcuts="Meta+K Control+K /" title="Search gallery (⌘K / Ctrl+K or /)"
               className="flex h-10 min-w-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-gray-400 transition-colors hover:border-violet-400/40 hover:text-white">
               <Search className="h-4 w-4" /><span className="hidden xl:inline text-sm">Search</span><kbd className="hidden 2xl:inline text-[10px] text-gray-500">⌘ / Ctrl K</kbd>
@@ -2446,15 +1891,21 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </button>
               )}
               {!isPhotoDevice && (
-                <button
-                  onClick={handleBatchDownload}
-                  disabled={isDownloadingBatch || isMoving}
-                  aria-label="Download selected media as ZIP"
-                  className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
-                >
-                  {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  <span className="hidden md:inline">Download ZIP</span>
-                </button>
+                <>
+                  <button
+                    onClick={handleBatchDownload}
+                    disabled={isDownloadingBatch || isMoving}
+                    aria-label="Download selected media as ZIP"
+                    className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    <span className="hidden md:inline">Download ZIP</span>
+                  </button>
+                  <ExportPresetMenu
+                    images={images.filter(media => selectedIds.has(media.id))}
+                    brandKit={brandKit}
+                  />
+                </>
               )}
               </>}
               </div>
@@ -2992,16 +2443,28 @@ export const Gallery: React.FC<GalleryProps> = ({
         </div>
       )}
 
-      {comparisonIds && <ImageCompareDialog images={comparisonImages} onClose={closeComparison}
-        onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} />}
+      {comparisonIds && (
+        <LazyBoundary label="Image comparison" onDismiss={closeComparison}>
+          <React.Suspense fallback={null}>
+            <ImageCompareDialog images={comparisonImages} onClose={closeComparison}
+              onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
 
-      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && <YouTubePreviewDialog
-        media={selectedMedia}
-        currentIndex={previewIndex} totalImages={previewImages.length} favoritesOnly={showFavoritesOnly}
-        onNavigate={direction => handleNavigate(direction, true)}
-        initialTitle={folders.find(folder => folder.id === selectedMedia.folderId)?.name || selectedMedia.referenceImages?.find(ref => ref.youtubeSource?.title)?.youtubeSource?.title || 'Your next video'}
-        channelName={galleryOwner?.display_name || userProfile?.display_name}
-        onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} />}
+      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && (
+        <LazyBoundary label="YouTube preview" onDismiss={() => setIsYouTubePreviewOpen(false)}>
+          <React.Suspense fallback={null}>
+            <YouTubePreviewDialog
+            media={selectedMedia}
+            currentIndex={previewIndex} totalImages={previewImages.length} favoritesOnly={showFavoritesOnly}
+            onNavigate={direction => handleNavigate(direction, true)}
+            initialTitle={folders.find(folder => folder.id === selectedMedia.folderId)?.name || selectedMedia.referenceImages?.find(ref => ref.youtubeSource?.title)?.youtubeSource?.title || 'Your next video'}
+            channelName={galleryOwner?.display_name || userProfile?.display_name}
+              onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} />
+          </React.Suspense>
+        </LazyBoundary>
+      )}
 
       {/* Detail Modal */}
       {searchDialog}
@@ -3100,7 +2563,11 @@ export const Gallery: React.FC<GalleryProps> = ({
               </div>}
             </> : null}
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
-              <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+              <LazyBoundary label="Image editor" onDismiss={() => setEditingMediaId(null)}>
+                <React.Suspense fallback={null}>
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                </React.Suspense>
+              </LazyBoundary>
             </div>}
           </div>
 
@@ -3134,6 +2601,15 @@ export const Gallery: React.FC<GalleryProps> = ({
                   </div>
                 </div>
               </div>
+
+              {onUpdateTags && (
+                <TagsEditor
+                  key={selectedMedia.id}
+                  media={selectedMedia}
+                  readOnly={isReadOnly}
+                  onUpdate={tags => onUpdateTags(selectedMedia.id, tags)}
+                />
+              )}
 
               <PromptPreparationDetails media={selectedMedia} />
 

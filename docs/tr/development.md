@@ -94,7 +94,10 @@ Entegrasyon testlerinde geçici alan kullan. Paketli üretim script'i kendi geç
 ## Değişikliği doğrula
 
 ```sh
+npm run lint
+npm run format:check
 npm test
+npm run test:coverage
 npm run typecheck
 npm run build
 npm run build:desktop
@@ -139,3 +142,7 @@ node scripts/test-local-generation.mjs
 ```
 
 Paket `.build/staging-windows/Banana Studio/` altında oluşur. Dosyaları bütün olarak tut. [Platform davranışları](desktop-parity.md) ve [yayın prosedürü](../RELEASING.md).
+
+## Yapay zekâ destekli geliştirme
+
+MindAeon; kod incelemesi, test kapsamı ve yayın sertleştirme çalışmalarıyla bu depoya katkı sağlar. Katkı; README, paket meta verisi ve katkıcı belgelerinde anılır. Çatallanan depolar bu atfı kendi bakımcı bilgileriyle değiştirebilir.

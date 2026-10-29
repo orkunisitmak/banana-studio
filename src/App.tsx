@@ -34,6 +34,7 @@ import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
 import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
+import { hasUnresumableVideoSubmission, useUnloadWarning } from './lib/shared/unloadWarning';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
@@ -187,6 +188,7 @@ const AuthorizedWorkspace: React.FC<{
   const lastStaleVideoCheckRef = useRef(new Map<string, number>());
   const checkingStaleVideosRef = useRef(new Set<string>());
   useEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
+  useUnloadWarning(hasUnresumableVideoSubmission(generatedMedia));
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);

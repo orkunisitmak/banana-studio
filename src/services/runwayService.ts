@@ -650,7 +650,7 @@ export const prepareSeedanceReferenceGenerationPrompt = (
   const rephrased = protectedPrompt
     .replace(/\[(?:EDIT|EXTEND)(?:\s+DIRECTION)?\]/gi, '[NEW SHOT DIRECTION]')
     .replace(
-      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n]*[:.]\s*/gi,
+      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n\uE000]*[:.]\s*/gi,
       (_match, tag: string) => `Use ${tag} as visual reference material. `,
     )
     .replace(
@@ -735,7 +735,12 @@ const cleanPromptForVideoModel = (
   refs: ReferenceImage[],
   videoOperation: VideoOperation,
 ): string => {
-  let cleaned = prompt;
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  let cleaned = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const restoreLiterals = (value: string): string => value
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
   if (videoModel === 'minimax-h3') {
     const frameLabel = (rawIndex: string): string => {
       const index = Number(rawIndex);
@@ -757,7 +762,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/\[EDIT DIRECTION\]/gi, '[VIDEO DIRECTION]');
     cleaned = cleaned.replace(/[@#]VIDEO(?:[_ ]?\d+)?\b/gi, 'the described motion');
     cleaned = cleaned.replace(/[@#]AUDIO(?:[_ ]?\d+)?\b/gi, 'the requested sound');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   const personBinding = (personId: number, fallback: string): string => {
@@ -791,7 +796,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/@VIDEO_(\d+)/gi, (_m, n) => Number(n) === 1 ? '@VIDEO' : `reference video ${n}`);
     cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
     cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   // Seedance 2.5 is stricter than 2.0 here: a bare @VIDEO can be interpreted
@@ -808,7 +813,7 @@ const cleanPromptForVideoModel = (
   cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
   cleaned = cleaned.replace(/@VIDEO\b/gi, '@video1');
   cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-  return normalizeVideoPromptWhitespace(cleaned);
+  return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
 };
 
 /** Every Max route uses its own media contract; no Seedance extraction or

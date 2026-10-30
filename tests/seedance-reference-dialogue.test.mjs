@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
 // No configured workspace or media upload is needed to exercise prompt preparation.
 const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/services/runwayService.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'workspace-boundaries', setup(b) {
+  b.onLoad({ filter: /[\\/]runwayService\.ts$/ }, args => ({ loader: 'ts', contents: fs.readFileSync(args.path, 'utf8') + '\nexport { cleanPromptForVideoModel };' }));
   b.onResolve({ filter: /^\.\/(authService|storageService|providerRouting)$/ }, args => ({ path: args.path, namespace: 'fixture' }));
   b.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: ({
     './authService': 'export const supabase = null; export const logUsage = () => {};',
@@ -12,7 +14,7 @@ const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/servi
     './providerRouting': 'export const selectProvider = () => {};',
   })[args.path] }));
 } }] });
-const { prepareSeedanceReferenceGenerationPrompt } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { prepareSeedanceReferenceGenerationPrompt, cleanPromptForVideoModel } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 test('reference-video generation does not rewrite spoken command words', () => {
   const prompt = 'The actor says "Never change, continue or remove anything".';
@@ -52,4 +54,27 @@ test('literal whitespace and placeholder-like user text survive rephrasing uncha
   const prompt = 'A sign reads "DELETE  NOW" beside \uE0000\uE001 and \uE000\uE0001\uE001.';
   const result = prepareSeedanceReferenceGenerationPrompt(prompt, '16:9', 1);
   assert.equal(result.slice(result.indexOf('A sign')), prompt);
+});
+
+const prepareThroughCleanup = prompt => prepareSeedanceReferenceGenerationPrompt(
+  cleanPromptForVideoModel(prompt, 'seedance-2.5', [], 'generate'), '16:9', 1,
+);
+
+test('multiline dialogue survives cleanup before reference-shot preparation', () => {
+  for (const [open, close] of [['"', '"'], ['“', '”'], ["'", "'"]]) {
+    for (const newline of ['\n', '\r\n']) {
+      const prompt = `He says ${open}Never change${newline}anything${close}.`;
+      assert.ok(prepareThroughCleanup(prompt).endsWith(prompt));
+    }
+  }
+});
+
+test('literal spacing survives cleanup before reference-shot preparation', () => {
+  const prompt = 'He says "Wait  for me".';
+  assert.ok(prepareThroughCleanup(prompt).endsWith(prompt));
+});
+
+test('edit preambles cannot consume quoted multi-sentence copy', () => {
+  assert.ok(prepareThroughCleanup('Edit @video1 to show "Hello. Goodbye".')
+    .endsWith('Compose @video1 to show "Hello. Goodbye".'));
 });

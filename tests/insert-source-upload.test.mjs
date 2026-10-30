@@ -13,7 +13,9 @@ const initStart = counterStart >= 0 ? counterStart : source.indexOf('  const ins
 const initialize = source.slice(initStart, source.indexOf('\n  useLayoutEffect(() => {\n    const element = generationBarRef.current;', initStart));
 const clearStart = source.indexOf('  const handleClearAll =');
 const clearHandler = source.slice(clearStart, source.indexOf('  const handleRemoveImage', clearStart));
-const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError } = env; ${initialize} ${handlers} ${clearHandler}; return { handleVideoFileUpload, handleClearAll, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
+const dropStart = source.indexOf('  const handleDrop = async');
+const dropHandler = source.slice(dropStart, source.indexOf('  // --- Prompt Resize Handlers ---', dropStart));
+const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError, draggedRefId, draggedGalleryItem, setIsDragging, setIsDraggingSavedRef, setDraggedGalleryItem, handleAddFromGallery, processImageFiles, processAudioFiles, maxReferenceAudios } = env; ${initialize} ${handlers} ${clearHandler} ${dropHandler}; return { handleVideoFileUpload, handleClearAll, handleDrop, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
 const h3 = await build({ entryPoints: [fileURLToPath(new URL('../src/components/H3MaxSettings.tsx', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic' });
 const { getH3MaxUIState } = await import('data:text/javascript;base64,' + Buffer.from(h3.outputFiles[0].text).toString('base64'));
@@ -34,12 +36,14 @@ function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = tru
   const api = (commit = true) => { cursor = 0; effects = []; const handlers = mod.exports({ config: state, onChange: update => { if (deferred) updates.push(update); else state = typeof update === 'function' ? update(state) : update; }, setAttachmentError: value => errors.push(typeof value === 'function' ? value(errors.at(-1)) : value),
     isH3VideoConfig: h3, h3State: { mode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: 4,
     useLayoutEffect: effect => effects.push(effect), useRef: value => { const index = cursor++; return slots[index] ||= { current: value }; }, useState: initial => [uploadState ?? initial, update => { uploadState = update(uploadState ?? initial); }], promptLoadVersion: version,
+    draggedRefId: null, draggedGalleryItem: null, setIsDragging() {}, setIsDraggingSavedRef() {}, setDraggedGalleryItem() {}, handleAddFromGallery() {}, processImageFiles: files => new Promise(resolve => gates.set(files[0].name, { resolve })), processAudioFiles() { throw new Error('Unexpected audio read'); }, maxReferenceAudios: 3,
     setUndoStack() {}, getPersonDefinitions: () => [], refInputRef: { current: null }, setEnhanceError() {},
     uploadReferenceVideo: file => {
       requests.push(file.name); return new Promise((resolve, reject) => gates.set(file.name, { resolve: () => resolve({ id: file.name }), reject: () => reject(new Error(file.name + ' upload failed')) }));
     }, videoInputRef: { current: null }, attachLimitsRef: { get current() { return { videos: 4, config: state }; } }, flushSync: run => { run(); while (updates.length) { const update = updates.shift(); state = typeof update === 'function' ? update(state) : update; } },
   }); if (commit) effects.forEach(effect => effect()); return handlers; };
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
+    drop: names => api().handleDrop({ preventDefault() {}, dataTransfer: { getData: () => '', files: names.map(name => ({ name, size: 1, type: name.endsWith('.png') ? 'image/png' : 'video/mp4' })) } }),
     discardRender: () => { const previous = state; state = { ...state, videoModel: 'uncommitted-model' }; api(false); state = previous; },
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
     loadTemplate: () => { templateMod.exports({ getH3MaxUIState, getReferenceImageLimit, config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
@@ -195,3 +199,32 @@ for (const outcome of ['resolve', 'reject']) {
     assert.equal(f.uploading(), 0);
   });
 }
+
+for (const action of ['pick', 'drop']) {
+  test(`obsolete ${action} cannot append its capacity warning to the new draft error`, async () => {
+    const f = scenario(['source.mp4']);
+    const old = f[action](['g1.mp4', 'g2.mp4', 'g3.mp4', 'extra.mp4']); await tick();
+    f.clear(); const current = f.pick(['new.mp4']); await tick();
+    f.gates.get('new.mp4').reject(); await current;
+    for (const name of ['g1.mp4', 'g2.mp4', 'g3.mp4']) f.gates.get(name).resolve();
+    await old;
+    assert.deepEqual(f.state().referenceVideos, []);
+    assert.equal(f.errors.at(-1), 'new.mp4 upload failed');
+    assert.equal(f.uploading(), 0);
+  });
+}
+test('a current over-capacity selection still reports its limit', async () => {
+  const f = scenario(['source.mp4']); const pending = f.pick(['g1.mp4', 'g2.mp4', 'g3.mp4', 'extra.mp4']); await tick();
+  for (const name of ['g1.mp4', 'g2.mp4', 'g3.mp4']) f.gates.get(name).resolve(); await pending;
+  assert.match(f.errors.at(-1), /Limit reached: 4 videos max/);
+  assert.equal(f.state().referenceVideos.length, 4);
+});
+
+test('an obsolete mixed drop cannot start its video phase or clear the new draft error', async () => {
+  const f = scenario(['source.mp4']); const old = f.drop(['image.png', 'late.mp4']); await tick();
+  f.clear(); const current = f.pick(['new.mp4']); await tick(); f.gates.get('new.mp4').reject(); await current;
+  f.gates.get('image.png').resolve(); await tick(); f.gates.get('late.mp4')?.resolve(); await old;
+  assert.deepEqual(f.requests, ['new.mp4']);
+  assert.equal(f.errors.at(-1), 'new.mp4 upload failed');
+  assert.deepEqual(f.state().referenceVideos, []);
+});

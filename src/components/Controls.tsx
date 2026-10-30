@@ -760,7 +760,7 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || videoUploadDraft !== insertUploadDraftRef.current.token) return;
     setAttachmentError(null);
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
     const draft = videoUploadDraft;
@@ -854,6 +854,7 @@ export const Controls: React.FC<ControlsProps> = ({
     const room = Math.max(0, MAX_VIDEOS - current);
     const picked = Array.from(e.target.files) as File[];
     await processVideoFiles(picked.slice(0, room));
+    if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
     // After processing (which clears earlier errors), keeping any upload error it reported.
     if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
     if (videoInputRef.current) videoInputRef.current.value = '';
@@ -1522,6 +1523,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 if (toAdd.length > 0) {
                     await processVideoFiles(toAdd, true);
                 }
+                if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
                 if (videoFiles.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
             }
         }

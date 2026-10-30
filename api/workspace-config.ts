@@ -5,5 +5,5 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   try { return res.status(200).json(getCloudWorkspaceConfig()); }
-  catch { return res.status(503).json({ error: 'Configure your workspace Supabase URL and publishable key on the server.' }); }
+  catch { return res.status(503).json({ code: 'WORKSPACE_NOT_CONFIGURED', error: 'Configure your workspace Supabase URL and publishable key on the server.' }); }
 }

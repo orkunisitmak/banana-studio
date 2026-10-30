@@ -6,6 +6,7 @@ import path from 'node:path';
 import { WorkspaceQuery } from '../shared/query.mjs';
 
 const TABLES = new Set(['generations','folders','templates','reference_images','saved_people','usage_logs','provider_tasks','profiles','authorized_emails']);
+const LOOKUP_FIELDS = ['id','user_id','status','folder_id'];
 const INTERNAL = new Set(['provider_tasks','profiles','authorized_emails']);
 const fail = (message, code = 'LOCAL_VALIDATION') => ({ data: null, error: { message, code } });
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -58,6 +59,7 @@ export class LocalWorkspace {
     this.mediaRoot=path.join(this.directory,'media'); fs.mkdirSync(this.mediaRoot,{recursive:true,mode:0o700}); fs.chmodSync(this.mediaRoot,0o700);
     this.db=new DatabaseSync(path.join(directory,'workspace.sqlite'));
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF; CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(collection,id)); CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS ledger (id TEXT PRIMARY KEY,payload TEXT NOT NULL);');
+    for(const field of LOOKUP_FIELDS)this.db.exec(`CREATE INDEX IF NOT EXISTS records_${field} ON records(collection,json_extract(payload,'$.${field}'));`);
     const identity=this.setting('identity') || { userId:randomUUID(), sessionId:randomUUID() };this.setting('identity',identity);this.identity=identity;
     this.user={id:identity.userId,email:'local@example.invalid',email_confirmed_at:'2026-01-01T00:00:00Z'};
     this.put('profiles',this.user.id,{...this.user,display_name:'My workspace',role:'admin'});
@@ -66,7 +68,39 @@ export class LocalWorkspace {
     this.origin='http://127.0.0.1';
   }
   setting(key,value) { if(value!==undefined)this.db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key,JSON.stringify(value));const row=this.db.prepare('SELECT value FROM settings WHERE key=?').get(key);return row?JSON.parse(row.value):null; }
-  all(table) { return this.db.prepare('SELECT payload FROM records WHERE collection=?').all(table).map(r=>JSON.parse(r.payload)); }
+  transaction(write) { this.db.exec('BEGIN IMMEDIATE');try { const result=write();this.db.exec('COMMIT');return result; }catch(error) { this.db.exec('ROLLBACK');throw error; } }
+  all(table) { return this.db.prepare('SELECT payload FROM records WHERE collection=? ORDER BY id').all(table).map(r=>JSON.parse(r.payload)); }
+  // Only exact scalar filters and unsorted reads are paginated in SQL. Rich JSON,
+  // OR expressions and JavaScript ordering keep the established evaluator.
+  selectRows(plan, table, filters, order) {
+    if(order.length || plan.or)return null;
+    const clauses=['collection=?'],values=[table];
+    for(const item of filters) {
+      const {column,operator,value}=item||{};
+      if(!LOOKUP_FIELDS.includes(column))return null;
+      const field=`json_extract(payload,'$.${column}')`,type=`json_type(payload,'$.${column}')`;
+      if((operator==='is'||operator==='eq')&&value===null)clauses.push(`${field} IS NULL`);
+      else if(operator==='eq'&&typeof value==='string') {
+        // eq also compares JSON objects to JSON text by value; keep those reads
+        // on the reference evaluator rather than narrowing them incorrectly.
+        try { const parsed=JSON.parse(value);if(parsed&&typeof parsed==='object')return null; }catch {}
+        clauses.push(`(${field}=? AND ${type}='text')`);values.push(value);
+      } else if(operator==='in'&&Array.isArray(value)&&value.every(v=>typeof v==='string')) {
+        if(value.length>1000)return null;
+        clauses.push(value.length?`(${field} IN (${value.map(()=>'?').join(',')}) AND ${type}='text')`:'0');values.push(...value);
+      } else return null;
+    }
+    const from=plan.range?.[0]??0,to=plan.range?.[1];
+    if(!Number.isSafeInteger(from)||from<0||(to!=null&&(!Number.isSafeInteger(to)||to<from)))throw new Error('Invalid range.');
+    const limit=plan.limit??(to!=null?to-from+1:10000);
+    if(!Number.isSafeInteger(limit)||limit<0||limit>10000)throw new Error('Invalid limit.');
+    const where=clauses.join(' AND ');
+    const count=plan.count?this.db.prepare(`SELECT count(*) AS total FROM records WHERE ${where}`).get(...values).total:undefined;
+    // all() uses the collection/id primary-key index; keep its row order even
+    // when SQLite chooses a more selective lookup index for this query.
+    const rows=this.db.prepare(`SELECT payload FROM records WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`).all(...values,limit,from).map(r=>JSON.parse(r.payload));
+    return {rows,count};
+  }
   get(table,id) { const row=this.db.prepare('SELECT payload FROM records WHERE collection=? AND id=?').get(table,id); return row?JSON.parse(row.payload):null; }
   put(table,id,value) { this.db.prepare('INSERT OR REPLACE INTO records VALUES (?,?,?)').run(table,String(id),JSON.stringify(value)); }
   mediaPath(key) {
@@ -84,7 +118,9 @@ export class LocalWorkspace {
   async upload(key,bytes,options={}) {
     const target=this.mediaPath(key);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
     if(fs.existsSync(target)&&!options.upsert)return fail('Media already exists.','23505');
-    const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});fs.renameSync(temp,target);
+    const temp=target+'.'+randomUUID()+'.tmp';
+    try { fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});fs.renameSync(temp,target); }
+    catch(error) { try { fs.rmSync(temp,{force:true}); } catch {} throw error; }
     return {data:{path:key},error:null};
   }
   storage() { return { upload:async(key,data,options)=>this.upload(key,Buffer.isBuffer(data)?data:Buffer.from(await data.arrayBuffer()),options),
@@ -101,18 +137,19 @@ export class LocalWorkspace {
       const { table, operation='select', filters=[], order=[] }=plan;
       if(!TABLES.has(table)||!['select','insert','upsert','update','delete'].includes(operation)||(!trusted&&INTERNAL.has(table)&&operation!=='select'))throw new Error('Unsupported workspace operation.');
       if(!Array.isArray(filters)||filters.length>30||!Array.isArray(order)||order.length>10)throw new Error('Invalid filters.');
-      let rows=this.all(table).filter(row=>filters.every(f=>filter(row,f)));
+      const selected=operation==='select'?this.selectRows(plan,table,filters,order):null;
+      let rows=selected?selected.rows:this.all(table).filter(row=>filters.every(f=>filter(row,f)));
       if(plan.or) { if(typeof plan.or!=='string'||plan.or.length>2000)throw new Error('Invalid filter.');const ors=plan.or.split(',').map(v=>{const [column,operator,...value]=v.split('.');const raw=value.join('.');return {column,operator,value:raw==='true'?true:raw==='false'?false:raw};});rows=rows.filter(row=>ors.some(f=>filter(row,f))); }
       if(operation==='insert'||operation==='upsert') {
         const values=Array.isArray(plan.value)?plan.value:[plan.value];if(values.length>1000)throw new Error('Too many rows.');
         rows=values.map(value=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid row.');const row={created_at:Date.now(),user_id:this.user.id,...clone(value)};row.id??=table==='provider_tasks'?`${row.provider}:${row.task_id}`:randomUUID();if(String(row.id).length>200)throw new Error('Invalid row ID.');const old=this.get(table,row.id);if(old&&operation==='insert')throw Object.assign(new Error('Row already exists.'),{code:'23505'});return {...old,...row};});
         this.db.exec('BEGIN IMMEDIATE');try{for(const row of rows)this.put(table,row.id,row);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
-      } else if(operation==='update') { if(!filters.length)throw new Error('An update needs an explicit filter.');rows=rows.map(row=>({...row,...clone(plan.value)}));for(const row of rows)this.put(table,row.id,row);
-      } else if(operation==='delete') { if(!filters.length)throw new Error('A deletion needs an explicit filter.');for(const row of rows)this.db.prepare('DELETE FROM records WHERE collection=? AND id=?').run(table,String(row.id)); }
-      const count=rows.length;
+      } else if(operation==='update') { if(!filters.length)throw new Error('An update needs an explicit filter.');rows=rows.map(row=>({...row,...clone(plan.value)}));this.transaction(()=>{for(const row of rows)this.put(table,row.id,row);});
+      } else if(operation==='delete') { if(!filters.length)throw new Error('A deletion needs an explicit filter.');this.transaction(()=>{for(const row of rows)this.db.prepare('DELETE FROM records WHERE collection=? AND id=?').run(table,String(row.id));}); }
+      const count=selected?.count??rows.length;
       if(order.length)rows.sort((a,b)=>{for(const item of order){const x=ownField(a,item.column),y=ownField(b,item.column);if(x!==y)return (x<y?-1:1)*(item.ascending===false?-1:1);}return 0;});
       const from=plan.range?.[0]??0,to=plan.range?.[1];if(!Number.isSafeInteger(from)||from<0||(to!=null&&(!Number.isSafeInteger(to)||to<from)))throw new Error('Invalid range.');
-      const limit=plan.limit??(to!=null?to-from+1:10000);if(!Number.isSafeInteger(limit)||limit<0||limit>10000)throw new Error('Invalid limit.');rows=rows.slice(from,from+limit).map(row=>project(row,plan.columns));
+      const limit=plan.limit??(to!=null?to-from+1:10000);if(!Number.isSafeInteger(limit)||limit<0||limit>10000)throw new Error('Invalid limit.');rows=(selected?rows:rows.slice(from,from+limit)).map(row=>project(row,plan.columns));
       if(plan.single&&(rows.length>1||(plan.single===true&&!rows.length)))return fail('The requested row was not found or is ambiguous.','PGRST116');
       return { data:plan.head?null:plan.single?(rows[0]??null):rows, error:null, ...(plan.count?{count}:{}) };
     } catch(error) { return fail(error.code==='23505'?'Row already exists.':'Local workspace operation could not be completed.',error.code||'LOCAL_VALIDATION'); }

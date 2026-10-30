@@ -1,13 +1,13 @@
 import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy } from 'react';
 import { flushSync } from 'react-dom';
 import { Controls } from './components/Controls';
 import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AuthBoundary } from './components/AuthBoundary';
 import { startTextPreferencesSync } from './services/textPreferencesService';
-import { AdminPanel } from './components/AdminPanel';
+import { LazyFeature } from './components/LazyFeature';
 import { useToast } from './components/Toast';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
 import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
@@ -31,11 +31,13 @@ import { prepareProtectedImageSource, finishProtectedImageEdit } from './service
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
 import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
-import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
+import { useGalleryHistory } from './components/useGalleryHistory';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
+
+const AdminPanel = lazy(() => import('./components/AdminPanel').then(module => ({ default: module.AdminPanel })));
 
 class DeletedVideoError extends Error { constructor() { super('The video was deleted.'); } }
 
@@ -43,7 +45,7 @@ const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => ge
 
 const mergeSavedMedia = (
   media: GeneratedMedia,
-  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string }
+  savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | null
 ): GeneratedMedia => {
   if (!savedResult) return media;
 
@@ -165,7 +167,7 @@ const AuthorizedWorkspace: React.FC<{
     };
   }, []);
 
-  const [generatedMedia, setGeneratedMedia] = useState<GeneratedMedia[]>([]);
+  const { media: generatedMedia, setMedia: setGeneratedMedia, mergeHistory, discardPendingHistory, endHistoryLoad } = useGalleryHistory();
   const generatedMediaRef = useRef<GeneratedMedia[]>([]);
   const lastStaleVideoCheckRef = useRef(new Map<string, number>());
   const checkingStaleVideosRef = useRef(new Set<string>());
@@ -262,7 +264,6 @@ const AuthorizedWorkspace: React.FC<{
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
-    const historyLoadStartedAt = Date.now();
     setIsInitialGalleryLoading(true);
     setIsGalleryIndexLoading(true);
     setGalleryHistoryError(null);
@@ -274,7 +275,7 @@ const AuthorizedWorkspace: React.FC<{
             if (cancelled) return;
             // First callback contains exactly the newest 48 rows. Render it
             // immediately while storageService continues hydrating older pages.
-            setGeneratedMedia(current => mergeLoadedGalleryHistory(current, partialHistory.map(normalizeStoredMedia), historyLoadStartedAt));
+            mergeHistory(partialHistory.map(normalizeStoredMedia), deletedMediaIdsRef.current);
             setIsInitialGalleryLoading(false);
           }, (error) => {
             if (!cancelled) setGalleryHistoryError(error.message);
@@ -301,7 +302,7 @@ const AuthorizedWorkspace: React.FC<{
         // Migrate legacy data
         const migratedHistory = history.map(normalizeStoredMedia);
 
-        setGeneratedMedia(current => mergeLoadedGalleryHistory(current, migratedHistory, historyLoadStartedAt));
+        mergeHistory(migratedHistory, deletedMediaIdsRef.current);
         if (savedTemplates) setTemplates(normalizedTemplates);
         
         // Resume pending/processing videos and recover rows that were marked
@@ -352,13 +353,16 @@ const AuthorizedWorkspace: React.FC<{
         syncLocalImages().then(() => {
           // You could optionally refresh getImages here, but the local blob URLs
           // will continue to work for this session even if it uploaded to the cloud.
-        });
+        }).catch(error => { console.warn('Background gallery sync could not complete.', error); });
       } catch (e) {
         if (cancelled) return;
         console.error("Failed to load data", e);
         toast.error('Data Load Error', 'Could not load your saved images and templates.');
       } finally {
-        if (!cancelled) setIsInitialGalleryLoading(false);
+        if (!cancelled) {
+          endHistoryLoad();
+          setIsInitialGalleryLoading(false);
+        }
       }
     };
     loadData();
@@ -540,7 +544,7 @@ const AuthorizedWorkspace: React.FC<{
       // No fal handle in metadata -> the submit call never returned. Fail it
       // so the user can see what happened and remove it.
       const errMsg = 'Generation interrupted before the task was created';
-      await updateImageStatus(pending.id, 'failed', { metadata: { error: errMsg } });
+      await updateImageStatus(pending.id, 'failed', { metadata: { error: errMsg } }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
       setGeneratedMedia(prev => prev.map(item =>
         item.id === pending.id ? { ...item, isLoading: false, status: 'failed', error: errMsg } : item
       ));
@@ -590,11 +594,11 @@ const AuthorizedWorkspace: React.FC<{
       await updateImageStatus(pending.id, 'completed', {
         url: remoteMedia.url,
         storagePath: remoteMedia.storagePath,
-      });
+      }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
       toast.success('Image Ready', 'A queued image generation completed.');
     } catch (e: any) {
       const message = e?.message || 'Image generation failed';
-      await updateImageStatus(pending.id, 'failed', { metadata: { error: message } });
+      await updateImageStatus(pending.id, 'failed', { metadata: { error: message } }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
       setGeneratedMedia(prev => prev.map(item =>
         item.id === pending.id
           ? { ...item, isLoading: false, status: 'failed', error: message, imageProgress: undefined }
@@ -712,7 +716,7 @@ const AuthorizedWorkspace: React.FC<{
         await updateVideoStatus(videoId, 'completed', {
           url: finalUrl,
           metadata: { generationTime, generationStartedAt, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, storagePath: savedResult.storagePath },
-        });
+        }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
 
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId ? {
@@ -742,7 +746,7 @@ const AuthorizedWorkspace: React.FC<{
       if (deletedMediaIdsRef.current.has(videoId)) return;
       const message = error?.message || 'Video generation failed';
       if (isRecoverableVideoTaskError(error)) {
-        await updateVideoStatus(videoId, 'processing', { metadata: { pollingWarning: message } });
+        await updateVideoStatus(videoId, 'processing', { metadata: { pollingWarning: message } }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId
             ? { ...item, isLoading: false, status: 'processing', error: message, videoProgress: undefined, videoStage: undefined }
@@ -751,7 +755,7 @@ const AuthorizedWorkspace: React.FC<{
         toast.warning('Video Task Saved', message);
         return;
       }
-      await updateVideoStatus(videoId, 'failed', { metadata: { error: message } });
+      await updateVideoStatus(videoId, 'failed', { metadata: { error: message } }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
       setGeneratedMedia(prev => prev.map(item =>
         item.id === videoId ? { ...item, isLoading: false, status: 'failed', error: message, videoProgress: undefined, videoStage: undefined } : item
       ));
@@ -832,7 +836,7 @@ const AuthorizedWorkspace: React.FC<{
         url: remoteMedia.url,
         storagePath: remoteMedia.storagePath,
         metadata: { imagePromptCategory: batchConfig.imagePromptCategory, ...(batchConfig.originalPrompt != null ? { originalPrompt: batchConfig.originalPrompt } : {}) },
-      });
+      }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
       return { ok: true };
     } catch (error: any) {
       const message = (error as any)?.message || 'Generation failed';
@@ -973,6 +977,12 @@ const AuthorizedWorkspace: React.FC<{
       try {
         const { taskId, endpoint, queueEndpoint, cost, mode, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config,{id:videoId});
 
+        // Retain the paid task before optional gallery acknowledgements.
+        setGeneratedMedia(prev => prev.map(item =>
+          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+        ));
+        let taskPersistenceFailed = false;
+
         // Update DB row with the real task_id now that we have it
         await updateVideoStatus(videoId, 'processing', {
           referenceImages,
@@ -986,11 +996,19 @@ const AuthorizedWorkspace: React.FC<{
             videoPromptExpansionMode: effectiveVideoPromptExpansionMode,
         h3MaxMode, h3MaxOptions: config.h3MaxOptions,
           },
-        });
+        }).catch(error => { taskPersistenceFailed = true; console.warn('Accepted video metadata could not be saved.', error); });
         // Also store task_id
         if (supabase) {
-          await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
+          try {
+            const { error } = await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId).eq('user_id', userId);
+            if (error) throw error;
+          } catch (error) {
+            taskPersistenceFailed = true;
+            console.warn('Accepted video task acknowledgement could not be saved.', error);
+          }
         }
+        if (taskPersistenceFailed) toast.warning('Video task is still running',
+          'Keep this tab open. The gallery update could not be confirmed; recovery after a reload may need another attempt.');
         clearInterval(submissionHeartbeat);
 
         // Log as soon as EvoLink accepts/reserves credits for the task. The
@@ -1002,9 +1020,7 @@ const AuthorizedWorkspace: React.FC<{
         await assertWorkspaceSession();
         if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
-        setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
-        ));
+
 
         const videoResult = await pollVideoTask(taskId, (progress) => {
           setGeneratedMedia(prev => prev.map(item =>
@@ -1075,7 +1091,7 @@ const AuthorizedWorkspace: React.FC<{
           await updateVideoStatus(videoId, 'completed', {
             url: finalUrl,
             metadata: { generationTime, generationStartedAt: genStart, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, storagePath: savedResult.storagePath },
-          });
+          }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
 
           setGeneratedMedia(prev => prev.map(item =>
             item.id === videoId ? {
@@ -1107,7 +1123,7 @@ const AuthorizedWorkspace: React.FC<{
         const { title, message } = parseErrorMessage(error);
 
         if (isRecoverableVideoTaskError(error)) {
-          await updateVideoStatus(videoId, 'processing', { metadata: { pollingWarning: message } });
+          await updateVideoStatus(videoId, 'processing', { metadata: { pollingWarning: message } }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
           setGeneratedMedia(prev => prev.map(item =>
             item.id === videoId ? {
               ...item,
@@ -1125,7 +1141,7 @@ const AuthorizedWorkspace: React.FC<{
 
         await updateVideoStatus(videoId, 'failed', {
           metadata: { error: message },
-        });
+        }).catch(error => { console.warn('Gallery status update could not be saved; the existing job is retained.', error); });
 
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId ? {
@@ -1276,6 +1292,7 @@ const AuthorizedWorkspace: React.FC<{
   const handleClearHistory = async () => {
     try {
       await clearImages();
+      discardPendingHistory();
       setGeneratedMedia(prev => prev.filter(img => img.isLoading));
       toast.success('History Cleared', 'All saved images have been removed.');
     } catch (e) {
@@ -1797,12 +1814,12 @@ const AuthorizedWorkspace: React.FC<{
 
       <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onSignOut={handleSignOut} />
       {/* Admin Panel */}
-      {!isLocalWorkspace() && userProfile?.role === 'admin' && <AdminPanel
+      {!isLocalWorkspace() && userProfile?.role === 'admin' && isAdminPanelOpen && <LazyFeature label="Admin dashboard" onClose={() => setIsAdminPanelOpen(false)}><AdminPanel
         isOpen={isAdminPanelOpen}
         onClose={() => setIsAdminPanelOpen(false)}
         onViewUserGallery={handleViewUserGallery}
         onBillingReconciled={refreshReconciledGalleryBilling}
-      />}
+      /></LazyFeature>}
 
       <Gallery
         key={adminGalleryUser?.user_id || 'own-gallery'}

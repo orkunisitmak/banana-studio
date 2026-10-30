@@ -3,14 +3,13 @@ import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
 import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, RECOVERABLE_IMAGE_MODELS, SUNBURST_MODEL } from '../lib/images/openaiImage';
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import JSZip from 'jszip';
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy } from 'react';
+import { LazyFeature } from './LazyFeature';
 import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } from '../services/photoShareService';
 import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
 import { GallerySearchDialog } from './GallerySearchDialog';
-import { ImageEditComparison } from './ImageEditComparison';
 import { useSavedImageEditSource } from './useSavedImageEditSource';
 import { ImageEditDetails, PromptPreparationDetails } from './GenerationDetails';
 import { getRecordedEditSourceReference, getRecordedGenerationTime } from './recordedGenerationDetails';
@@ -20,8 +19,7 @@ import { buildGalleryFolderStats } from './galleryFolderStats';
 import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { Toast } from './Toast';
-import { HelpCenter } from './HelpCenter';
-import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
+import { BatchDownloadLimitError, collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { FolderPreview } from './FolderPreview';
 import { buildFolderPreviewIndex } from './folderPreviews';
 import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
@@ -34,6 +32,8 @@ import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedM
 const GalleryImageEditor = React.lazy(() => import('./GalleryImageEditor').then(module => ({ default: module.GalleryImageEditor })));
 const ImageCompareDialog = React.lazy(() => import('./ImageCompareDialog').then(module => ({ default: module.ImageCompareDialog })));
 const YouTubePreviewDialog = React.lazy(() => import('./YouTubePreviewDialog').then(module => ({ default: module.YouTubePreviewDialog })));
+const ImageEditComparison = lazy(() => import('./ImageEditComparison').then(module => ({ default: module.ImageEditComparison })));
+const HelpCenter = lazy(() => import('./HelpCenter').then(module => ({ default: module.HelpCenter })));
 const FolderShareDialog = React.lazy(() => import('./FolderShareDialog').then(module => ({ default: module.FolderShareDialog })));
 const dialogLoading = <div role="status" className="fixed inset-0 z-[350] grid place-items-center bg-black/70 text-sm text-gray-200 backdrop-blur-sm"><span className="flex items-center gap-2"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading dialog…</span></div>;
 
@@ -813,6 +813,10 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  const [batchDownloadProgress, setBatchDownloadProgress] = useState('');
+  const batchDownloadRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { batchDownloadRef.current?.abort(); }, [galleryOwner?.user_id, userProfile?.id]);
+  useEffect(() => { if (!isSelectionMode) batchDownloadRef.current?.abort(); }, [isSelectionMode]);
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
@@ -1653,30 +1657,53 @@ export const Gallery: React.FC<GalleryProps> = ({
   };
 
   const handleBatchDownload = async () => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || batchDownloadRef.current) return;
+    const controller = new AbortController();
+    batchDownloadRef.current = controller;
+    const ids = Array.from(selectedIds);
     setIsDownloadingBatch(true);
     setBatchDownloadError(null);
+    setBatchDownloadProgress(`Downloading 0/${ids.length}…`);
     try {
-      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
-      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
+      const { files, failed } = await collectBatchDownload(ids, images, fetch, {
+        signal: controller.signal,
+        refreshUrl: url => refreshMediaAccessUrl(url, false),
+        onProgress: ({ completed, total, bytes }) => setBatchDownloadProgress(`Downloading ${completed}/${total} · ${(bytes / 1024 / 1024).toFixed(1)} / 128 MiB…`),
+      });
+      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, ids.length));
       if (!files.length) return;
+      setBatchDownloadProgress('Preparing ZIP…');
+      const { default: JSZip } = await import('jszip');
+      controller.signal.throwIfAborted();
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
-      const content = await zip.generateAsync({ type: "blob" });
+      const content = await zip.generateAsync({ type: 'blob', streamFiles: true }, ({ percent }) => {
+        controller.signal.throwIfAborted();
+        setBatchDownloadProgress(`Creating ZIP ${Math.round(percent)}%…`);
+      });
+      controller.signal.throwIfAborted();
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
       link.download = `banana-batch-${Date.now()}.zip`;
       link.click();
-      window.URL.revokeObjectURL(url);
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
       if (failed) return;
       setIsSelectionMode(false);
       setSelectedIds(new Set());
-    } catch (e) {
-      console.error("Batch download failed", e);
-      setBatchDownloadError('The ZIP could not be created. Try again.');
+    } catch (error) {
+      if (controller.signal.aborted) setBatchDownloadError('Download cancelled. Your selection is kept.');
+      else if (error instanceof BatchDownloadLimitError) setBatchDownloadError(error.message);
+      else {
+        console.error('Batch download failed', error);
+        setBatchDownloadError('The ZIP could not be created. Try again.');
+      }
     } finally {
-      setIsDownloadingBatch(false);
+      if (batchDownloadRef.current === controller) {
+        batchDownloadRef.current = null;
+        setIsDownloadingBatch(false);
+        setBatchDownloadProgress('');
+      }
     }
   };
 
@@ -1945,7 +1972,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       onDragEnd={clearDragState}
     >
 
-      <HelpCenter open={isHelpCenterOpen} onClose={() => setIsHelpCenterOpen(false)} />
+      {isHelpCenterOpen && <LazyFeature label="Help center" onClose={() => setIsHelpCenterOpen(false)}><HelpCenter open onClose={() => setIsHelpCenterOpen(false)} /></LazyFeature>}
       {sharingFolder && !isReadOnly && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} /></React.Suspense></LazyDialogErrorBoundary>}
 
       {isCreatingFolder && !isReadOnly && (
@@ -2574,6 +2601,10 @@ export const Gallery: React.FC<GalleryProps> = ({
               </div>
             </div>
             {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {isDownloadingBatch && <div className="mt-2 flex items-center gap-3 text-xs text-gray-300">
+              <p role="status" aria-live="polite">{batchDownloadProgress}</p>
+              <button type="button" onClick={() => batchDownloadRef.current?.abort()} className="rounded border border-white/20 px-2 py-1">Cancel download</button>
+            </div>}
             {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
@@ -3105,7 +3136,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 />
               )
             ) : !isEditingSelectedMedia ? savedEditSource.source ? (
-              <ImageEditComparison key={`${selectedMedia.id}:${savedEditSource.source.id}`} source={savedEditSource.source} result={selectedMedia} refreshSource={refreshComparisonSource} expanded={!isDetailsVisible} fill normalResult={normalDetailImage} />
+              <LazyFeature inline label="Edit comparison" onClose={() => setIsDetailsVisible(true)}><ImageEditComparison key={`${selectedMedia.id}:${savedEditSource.source.id}`} source={savedEditSource.source} result={selectedMedia} refreshSource={refreshComparisonSource} expanded={!isDetailsVisible} fill normalResult={normalDetailImage} /></LazyFeature>
             ) : <>
               {normalDetailImage}
               {savedEditSource.isEditedImage && <div className="flex shrink-0 items-center gap-2 py-2 text-xs text-gray-500" role="status" onClick={event => event.stopPropagation()}>

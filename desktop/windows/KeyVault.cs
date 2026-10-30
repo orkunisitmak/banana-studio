@@ -73,9 +73,30 @@ internal static class KeyVault
         }
         finally { Array.Clear(bytes); }
     }
+    internal sealed record Snapshot(Dictionary<string, string> Values, string[] Unavailable);
+    internal static Snapshot ReadSnapshot(Dictionary<string, string>? previous = null, Func<string, string?>? read = null)
+    {
+        var values = previous == null ? new Dictionary<string, string>() : new Dictionary<string, string>(previous);
+        var unavailable = new List<string>();
+        read ??= name => Read(name);
+        foreach (var provider in Providers)
+        {
+            try { var value = read(provider.Name); if (value == null) values.Remove(provider.Name); else values[provider.Name] = value; }
+            catch { unavailable.Add(provider.Name); }
+        }
+        return new Snapshot(values, unavailable.ToArray());
+    }
     internal static Dictionary<string, string> All() => Providers.Select(p => (p.Name, Value: Read(p.Name))).Where(p => p.Value != null).ToDictionary(p => p.Name, p => p.Value!);
     internal static void Test()
     {
+        var snapshot = ReadSnapshot(new Dictionary<string, string> { ["OPENAI_API_KEY"] = "synthetic-openai", ["FAL_KEY"] = "synthetic-fal" }, name =>
+        {
+            if (name == "OPENAI_API_KEY") throw new IOException("synthetic vault locked");
+            return name == "GEMINI_API_KEY" ? "synthetic-gemini" : null;
+        });
+        if (snapshot.Values.Count != 2 || snapshot.Values["OPENAI_API_KEY"] != "synthetic-openai" || snapshot.Values["GEMINI_API_KEY"] != "synthetic-gemini" || !snapshot.Unavailable.SequenceEqual(new[] { "OPENAI_API_KEY" })) throw new InvalidOperationException();
+        var startup = ReadSnapshot(read: name => { if (name == "OPENAI_API_KEY") throw new IOException(); return null; });
+        if (startup.Values.Count != 0 || !startup.Unavailable.SequenceEqual(new[] { "OPENAI_API_KEY" })) throw new InvalidOperationException();
         var prefix = "com.bananastudio.test/" + Guid.NewGuid() + "/";
         try
         {

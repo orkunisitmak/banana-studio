@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
-import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
+import { prepareTaskRegistry, registerProviderTask, persistAcceptedVideo, recoverRegisteredVideoTask, requireProviderTask } from './_lib/providerTasks.js';
 import { buildH3MaxInput, H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
 import { recordH3Usage } from './_lib/h3Usage.js';
@@ -167,6 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (readError) return res.status(503).json({ error: 'Saved generation access could not be verified. No provider request was sent.' });
         if (!saved || saved.user_id !== user.id || saved.type !== 'video') return res.status(404).json({ error: 'Saved video generation not found' });
         const metadata = saved.metadata && typeof saved.metadata === 'object' && !Array.isArray(saved.metadata) ? saved.metadata : {};
+        if (await recoverRegisteredVideoTask(registry,res,body.generationId,user.id)) return;
         if (saved.task_id) {
           if (!await requireProviderTask(req, res, 'fal', saved.task_id)) return;
           const savedEndpoint = typeof metadata.falEndpoint === 'string' && ALLOWED_QUEUE_ENDPOINTS.has(metadata.falEndpoint) ? metadata.falEndpoint : H3_MAX_QUEUE_APP;
@@ -203,32 +204,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(response.status).json({ error });
       }
       if (!data?.request_id) return res.status(502).json({ error: 'fal.ai response missing request_id' });
-      await registerProviderTask(registry, 'fal', data.request_id, user.id);
       // The REST submit response is authoritative for lifecycle routing. Some
       // model IDs submit at a sub-route while fal serves status/result from the
       // parent queue app, so do not reconstruct this path from the model ID.
       const queueEndpoint = queueEndpointFromFalUrl(data.status_url, data.request_id, 'status')
         || queueEndpointFromFalUrl(data.response_url, data.request_id, 'response')
         || endpoint;
-      if (galleryClaim) {
-        const { data: saved, error: saveError } = await registry.from('generations')
-          .update({ task_id: data.request_id, status: 'processing', metadata: { ...galleryClaim.metadata, falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, h3MaxMode: mode } })
-          .eq('id', galleryClaim.id).eq('user_id', user.id).select('id').maybeSingle();
-        if (saveError || !saved) {
-          await recordH3Usage(registry, { taskId: data.request_id, userId: user.id, mode,
-            prompt: typeof body.prompt === 'string' ? body.prompt : '', generationId: galleryClaim.id, estimatedCostUsd });
-          return res.status(503).json({
-            error: `fal.ai accepted this video, but its saved task could not be updated (Task: ${data.request_id}). Do not submit again; check task history or contact an administrator.`,
-            taskId: data.request_id, endpoint, queueEndpoint,
-          });
-        }
-      }
+      const taskMetadata = {generationProvider:'fal',providerModel:endpoint,falEndpoint:endpoint,falQueueEndpoint:queueEndpoint,h3MaxMode:mode};
+      await registerProviderTask(registry,'fal',data.request_id,user.id,{generationId:galleryClaim?.id,metadata:taskMetadata});
+      const persistenceWarning = galleryClaim ? await persistAcceptedVideo(registry,user.id,data.request_id,galleryClaim,taskMetadata) : undefined;
       // Accepted provider requests are logged on the server, independently of
       // the browser receiving this acknowledgement or remaining open.
       await recordH3Usage(registry, { taskId: data.request_id, userId: user.id, mode,
         prompt: typeof body.prompt === 'string' ? body.prompt : '', generationId: galleryClaim?.id, estimatedCostUsd });
       return res.status(200).json({
         taskId: data.request_id,
+        persistenceWarning,
         endpoint,
         queueEndpoint,
       });

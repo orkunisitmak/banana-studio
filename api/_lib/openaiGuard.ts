@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createServiceRoleClient, type AuthenticatedUser } from './auth.js';
 
+export type OpenAIRefusalRetry = { seconds: number; reason: 'rate' | 'quota' };
+
 // JWT identity has already been verified by requireUser. The database checks
 // that its session still exists and belongs to that same user before spending.
 export const getOpenAISessionId = (req: VercelRequest): string | null => {
@@ -64,7 +66,7 @@ export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse
   let finished = false;
   return {
     id,
-    async finish(outcome: 'completed' | 'failed' | 'rejected', providerRequestId?: string | null, providerStatus?: number) {
+    async finish(outcome: 'completed' | 'failed' | 'rejected', providerRequestId?: string | null, providerStatus?: number, retry?: OpenAIRefusalRetry) {
       if (finished) return;
       finished = true;
       // Only operational identifiers go in this server-owned ledger. Never
@@ -73,6 +75,7 @@ export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse
       try {
         const { error } = await db.rpc('finish_openai_request', {
           p_id: id, p_outcome: outcome, p_provider_request_id: safeRequestId,
+          ...(retry ? { p_retry_after: retry.seconds, p_wait_reason: retry.reason } : {}),
           p_provider_status: Number.isInteger(providerStatus) && providerStatus! >= 100 && providerStatus! <= 599 ? providerStatus : null,
         }).abortSignal(AbortSignal.timeout(5_000));
         if (error) console.warn(`[${prefix}] id=${id} stage=ledger_unconfirmed`);

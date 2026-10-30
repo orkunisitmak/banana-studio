@@ -55,3 +55,7 @@ supabase/.temp/
 *.cer
 *.crt
 *.provisionprofile
+
+# Synthetic browser regression artifacts
+/test-results/
+/playwright-report/

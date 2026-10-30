@@ -24,8 +24,20 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "strictNullChecks": true
   },
-  "include": ["src", "desktop/shared/**/*.ts", "vite.config.ts", "scripts/buildSecurity.ts"],
-  "exclude": ["api", "node_modules", "dist", ".build", "desktop/macos/.build"]
+  "include": [
+    "src",
+    "desktop/shared/**/*.ts",
+    "vite.config.ts",
+    "scripts/buildSecurity.ts"
+  ],
+  "exclude": [
+    "api",
+    "node_modules",
+    "dist",
+    ".build",
+    "desktop/macos/.build"
+  ]
 }

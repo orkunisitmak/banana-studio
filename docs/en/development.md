@@ -94,11 +94,21 @@ Use a disposable workspace for integration tests. The packaged-generation script
 ## Verify a change
 
 ```sh
+npm run audit:dependencies
 npm test
 npm run typecheck
 npm run build
 npm run build:desktop
 node scripts/audit-public-release.mjs --history
+```
+
+The dependency audit is separate from the public-release secret/data audit. Security patches for pinned Vercel toolchain dependencies are scoped in `package.json` overrides; reevaluate those overrides when updating the parent packages.
+
+Browser regressions run real React components and IndexedDB against synthetic service boundaries. They never use a configured workspace or paid provider:
+
+```sh
+npx playwright install chromium
+npm run test:browser
 ```
 
 For database changes, with PostgreSQL 15+ binaries available:

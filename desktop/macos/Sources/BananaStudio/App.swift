@@ -38,6 +38,7 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard let self else { return }; self.origin = url
             var request = URLRequest(url: url.appendingPathComponent("local/bootstrap")); request.setValue(token, forHTTPHeaderField: "X-Banana-Bootstrap")
             self.webView.load(request); self.launchMessage.isHidden = true
+            self.showKeyWarning()
         }
         workspace.failed = { [weak self] in self?.showFailure() }
         do { try workspace.start() } catch { workspace.stop(); showFailure() }
@@ -72,11 +73,12 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         var rows: [(ProviderKey, NSSecureTextField, NSButton)] = []
+        let snapshot = KeyVault.snapshot()
         for key in ProviderKey.allCases {
             let row = NSStackView(); row.orientation = .horizontal; row.spacing = 10
             let label = NSTextField(labelWithString: key.label); label.widthAnchor.constraint(equalToConstant: 124).isActive = true
             let field = NSSecureTextField(); field.widthAnchor.constraint(equalToConstant: 290).isActive = true
-            field.placeholderString = ((try? KeyVault.read(key)) ?? nil) != nil ? "Saved in Keychain" : "Paste your API key"
+            field.placeholderString = snapshot.unavailable.contains(key) ? "Keychain unavailable; saved key kept" : snapshot.values[key.rawValue] != nil ? "Saved in Keychain" : "Paste your API key"
             let remove = NSButton(checkboxWithTitle: "Remove", target: nil, action: nil)
             row.addArrangedSubview(label); row.addArrangedSubview(field); row.addArrangedSubview(remove); stack.addArrangedSubview(row); rows.append((key, field, remove))
         }
@@ -86,12 +88,21 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             for (key, field, remove) in rows {
-                if remove.state == .on { try KeyVault.save(key, value: nil) }
-                else if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try KeyVault.save(key, value: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                if remove.state == .on { try KeyVault.save(key, value: nil); workspace.recordKeyChange(key, value: nil) }
+                else if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    try KeyVault.save(key, value: value); workspace.recordKeyChange(key, value: value)
+                }
                 field.stringValue = ""
             }
-            try workspace.refreshKeys()
+            try workspace.refreshKeys(); showKeyWarning()
         } catch { let failure = NSAlert(); failure.messageText = "The keys could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
+    }
+    private func showKeyWarning() {
+        guard !workspace.unavailableKeys.isEmpty else { return }
+        let alert = NSAlert(); alert.messageText = "Some provider keys are unavailable"
+        alert.informativeText = "macOS Keychain could not read: " + workspace.unavailableKeys.map(\.label).joined(separator: ", ") + ". Your gallery is available and saved keys are kept. Unlock your login Keychain, then open Provider API Keys and Save to retry."
+        alert.beginSheetModal(for: window)
     }
     func showFailure() { launchMessage.isHidden = false; launchMessage.stringValue = "The local workspace could not start. Reopen Banana Studio. Your data is kept on this Mac." }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

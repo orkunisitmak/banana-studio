@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import { timingSafeEqual } from 'node:crypto';
 import { LOCAL_AUTH } from './context.mjs';
 
@@ -18,7 +19,7 @@ const serveFile=(req,res,file,media=false)=>{
   const range=req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);let start=0,end=stat.size-1;
   if(req.headers.range&&!range){res.setHeader('Content-Range',`bytes */${stat.size}`);res.statusCode=416;return res.end();}
   if(range){if(!range[1]){start=Math.max(0,stat.size-Number(range[2]));}else{start=Number(range[1]);end=range[2]?Math.min(Number(range[2]),end):end;}if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>end){res.statusCode=416;res.setHeader('Content-Range',`bytes */${stat.size}`);return res.end();}res.statusCode=206;res.setHeader('Content-Range',`bytes ${start}-${end}/${stat.size}`);}
-  res.setHeader('Content-Length',Math.max(0,end-start+1));if(req.method==='HEAD')return res.end();if(!stat.size)return res.end();fs.createReadStream(file,{start,end}).on('error',()=>res.destroy()).pipe(res);
+  res.setHeader('Content-Length',Math.max(0,end-start+1));if(req.method==='HEAD')return res.end();if(!stat.size)return res.end();pipeline(fs.createReadStream(file,{start,end}),res,()=>{});
 };
 
 export async function startLocalServer({ workspace, root, bootstrap, routes={}, onWake=()=>{} }) {

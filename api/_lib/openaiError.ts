@@ -19,9 +19,20 @@ export function imageRateLimitDelay(response: Response, data: any, now = Date.no
     || data?.usage != null || (data?.data != null && (!Array.isArray(data.data) || data.data.length))) return;
   const category = `${error?.code || ''} ${error?.type || ''} ${error?.message || ''} ${typeof error==='string'?error:''}`;
   if (/quota|billing|balance|credit|hard.?limit|spend.?limit|usage.limit/i.test(category)) return;
+  return providerRetryDelay(response,60,now);
+}
+
+/** Quota refusals wait at least an hour and respect a longer provider delay. */
+export function imageQuotaDelay(response: Response, data: any, now = Date.now()): number | undefined {
+  if (response.status !== 429 || safeOpenAIErrorCode(data) !== 'insufficient_quota' || data?.usage != null
+    || (data?.data != null && (!Array.isArray(data.data) || data.data.length))) return;
+  return providerRetryDelay(response,3600,now);
+}
+
+function providerRetryDelay(response: Response, minimum: number, now: number): number | undefined {
   // Some refusals omit `error.code` or return an opaque error body. The HTTP
   // status is authoritative; timeouts/5xx never enter this path.
-  const delays = [60];
+  const delays = [minimum];
   const retry = response.headers.get('retry-after');
   if (retry) {
     const seconds = /^\d+(?:\.\d+)?$/.test(retry.trim()) ? Number(retry) : (Date.parse(retry) - now) / 1000;

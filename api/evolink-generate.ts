@@ -1,12 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
-import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
+import { prepareTaskRegistry, registerProviderTask, claimVideoGeneration, persistAcceptedVideo } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 
 interface GenerateRequest {
+  generationId?: string;
   videoModel?: 'seedance-2.0' | 'seedance-2.5';
   mode: 'text_only' | 'image_to_video' | 'reference_to_video' | 'video_edit' | 'video_extend';
   prompt?: string;
@@ -190,6 +191,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    const taskMetadata = {generationProvider:'evolink',providerModel:model,falEndpoint:model};
+    const claim = await claimVideoGeneration(registry,res,body.generationId,user.id,taskMetadata); if (!claim) return;
 
     const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',
@@ -216,10 +219,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
     }
 
-    await registerProviderTask(registry, 'evolink', data.id, user.id);
+    await registerProviderTask(registry, 'evolink', data.id, user.id, {generationId:claim.id,metadata:taskMetadata});
+    const persistenceWarning = await persistAcceptedVideo(registry,user.id,data.id,claim,taskMetadata);
 
     return res.status(200).json({
       taskId: data.id,
+      endpoint:model, persistenceWarning,
       // credits_reserved is provider-calculated for the exact route, duration,
       // resolution, and reference inputs. Forward billing metadata so the app
       // does not have to guess from a rate card that may change over time.

@@ -26,7 +26,7 @@ const run = async deleteWhen => {
     pollVideoTask: () => new Promise(r => { release = () => r({ urls: ['https://provider/v.mp4'] }); }),
     saveVideo: async () => { calls.saveCalls++; if (deleteWhen === 'retry' && calls.saveCalls === 1) return null; if (deleteWhen === 'saving') await new Promise(r => { releaseSave = r; }); calls.saved++; return { publicUrl: 'https://store/v.mp4', storagePath: 'u/v1.mp4', thumbnailPath: 'u/v1.png' }; },
     deleteImage: async m => { calls.deleted.push(m.storagePath || 'default'); },
-    updateVideoStatus: async (id, status) => { if (status === 'completed') calls.completed++; },
+    updateVideoStatus: async (id, status) => { if (status === 'completed') calls.completed++; if (deleteWhen === 'status-failed') throw new Error('Synthetic status write failure'); },
     getImageById: async () => null, assertWorkspaceSession: async () => {},
     toast: { success: t => calls.toasts.push(t), warning: t => calls.toasts.push(t), error: t => calls.toasts.push(t), dismissToast() {} },
     deletedMediaIdsRef: { current: new Set() },
@@ -55,7 +55,7 @@ const run = async deleteWhen => {
   if (deleteWhen === 'saving') { await handleDelete({ id: 'v1', mediaType: 'video' }); releaseSave(); }
   if (deleteWhen === 'retry') { await handleDelete({ id: 'v1', mediaType: 'video' }); retryWait(); }
   await done;
-  return { cardPresent: items.length === 1, ...calls };
+  return { cardPresent: items.length === 1, card: items[0], ...calls };
 };
 
 test('a video cancelled while polling is never saved again', async () => {
@@ -132,4 +132,13 @@ const createRow = async deleteDuringCreate => {
 test('a video deleted while its first row is created removes that row and is never submitted', async () => {
   assert.deepEqual(await createRow(true), { outcome: 'stopped', removed: ['vid1'], active: 0, heartbeats: 0 });
   assert.deepEqual(await createRow(false), { outcome: 'submitted', removed: [], active: 1, heartbeats: 1 });
+});
+
+
+test('an optional status write cannot fail a video already saved to durable storage', async () => {
+  const result = await run('status-failed');
+  assert.equal(result.saved, 1);
+  assert.equal(result.card.status, 'completed');
+  assert.equal(result.card.url, 'https://store/v.mp4');
+  assert.ok(result.toasts.includes('Video Ready'));
 });

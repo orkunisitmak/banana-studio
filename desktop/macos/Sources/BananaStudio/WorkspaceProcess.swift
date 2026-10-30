@@ -9,6 +9,8 @@ final class WorkspaceProcess {
     private var started = false
     private var shuttingDown = false
     private var startup: WorkspaceStartup?
+    private var activeKeys: [String: String] = [:]
+    private(set) var unavailableKeys: [ProviderKey] = []
     private(set) var origin: URL?
     private(set) var bootstrap = ""
     var ready: ((URL, String) -> Void)?
@@ -41,7 +43,7 @@ final class WorkspaceProcess {
         process = task; input = stdin; output = stdout
         try task.run()
         startup = WorkspaceStartup { [weak self] in self?.finishFailure() }
-        try send(["dataDirectory": Self.dataDirectory.path, "webRoot": resources.appendingPathComponent("workspace/web").path, "bootstrap": bootstrap, "keys": try KeyVault.all()])
+        try send(["dataDirectory": Self.dataDirectory.path, "webRoot": resources.appendingPathComponent("workspace/web").path, "bootstrap": bootstrap, "keys": loadKeys()])
     }
     private func receive(_ data: Data) {
         guard !data.isEmpty else { return }; buffer.append(data)
@@ -58,7 +60,13 @@ final class WorkspaceProcess {
         guard let handle = input?.fileHandleForWriting else { throw LaunchError.missingRuntime }
         try handle.write(contentsOf: data)
     }
-    func refreshKeys() throws { try send(["action": "keys", "keys": try KeyVault.all()]) }
+    private func loadKeys() -> [String: String] {
+        let snapshot = KeyVault.snapshot(previous: activeKeys)
+        activeKeys = snapshot.values; unavailableKeys = snapshot.unavailable
+        return activeKeys
+    }
+    func recordKeyChange(_ key: ProviderKey, value: String?) { activeKeys[key.rawValue] = value }
+    func refreshKeys() throws { try send(["action": "keys", "keys": loadKeys()]) }
     private func failOnce() {
         guard !shuttingDown, startup?.fail() == true else { return }
         finishFailure()

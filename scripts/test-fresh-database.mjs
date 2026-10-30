@@ -15,6 +15,18 @@ try {
  const migrations=fs.readdirSync(new URL('../supabase/migrations',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
  for(const migration of migrations)await sql.unsafe(fs.readFileSync(new URL('../supabase/migrations/'+migration,import.meta.url),'utf8'));
  await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/fresh-install.sql',import.meta.url),'utf8'));
- console.log('Fresh schema installed and ownership, access-list, private-storage and preference assertions passed.');
+ // Verify the same forward migrations against synthetic legacy corruption.
+ // This second database is inside the temporary server, never a workspace DB.
+ await sql.unsafe('CREATE DATABASE upgrade_test');
+ await sql.end();
+ sql=postgres({host:directory,username:'postgres',database:'upgrade_test',max:1,onnotice:()=>{}});
+ // Roles belong to the server; the first database already created them.
+ await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/platform-shim.sql',import.meta.url),'utf8').replace(/^CREATE ROLE .+;$/gm,''));
+ for(const migration of migrations){
+  if(migration==='20261030120000_folder_ownership.sql')await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/folder-upgrade-before.sql',import.meta.url),'utf8'));
+  await sql.unsafe(fs.readFileSync(new URL('../supabase/migrations/'+migration,import.meta.url),'utf8'));
+ }
+ await sql.unsafe(fs.readFileSync(new URL('../supabase/tests/folder-upgrade-after.sql',import.meta.url),'utf8'));
+ console.log('Fresh schema and legacy upgrade passed ownership, hierarchy, private-storage, preference and queue recovery assertions.');
 } catch(error) {console.error('Isolated database verification failed:',error.message);process.exitCode=1;}
 finally {if(sql)await sql.end();if(started)execFileSync(path.join(bin,'pg_ctl'),['-D',path.join(directory,'data'),'-m','fast','-w','stop'],{stdio:'pipe'});fs.rmSync(directory,{recursive:true,force:true});}

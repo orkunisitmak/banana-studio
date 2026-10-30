@@ -11,6 +11,8 @@ internal sealed class WorkspaceProcess : IDisposable
     private Process? process;
     private readonly SemaphoreSlim writer = new(1, 1);
     private bool closing;
+    private Dictionary<string, string> activeKeys = new();
+    internal string[] UnavailableKeys { get; private set; } = [];
     internal event Action? Failed;
     internal async Task<(Uri Origin, string Bootstrap)> Start()
     {
@@ -33,7 +35,7 @@ internal sealed class WorkspaceProcess : IDisposable
         if (!process.Start()) throw new IOException("The local workspace could not start.");
         // Discard diagnostics; provider errors must not persist prompts, media or keys.
         _ = Drain(process.StandardError);
-        await Send(new { dataDirectory = DataDirectory, webRoot = Path.Combine(root, "workspace", "web"), bootstrap = token, keys = KeyVault.All() });
+        await Send(new { dataDirectory = DataDirectory, webRoot = Path.Combine(root, "workspace", "web"), bootstrap = token, keys = LoadKeys() });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         while (await process.StandardOutput.ReadLineAsync(timeout.Token) is { } line)
         {
@@ -54,7 +56,14 @@ internal sealed class WorkspaceProcess : IDisposable
         try { if (process == null) throw new IOException(); await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(value)); await process.StandardInput.FlushAsync(); }
         finally { writer.Release(); }
     }
-    internal Task RefreshKeys() => Send(new { action = "keys", keys = KeyVault.All() });
+    private Dictionary<string, string> LoadKeys()
+    {
+        var snapshot = KeyVault.ReadSnapshot(activeKeys);
+        activeKeys = snapshot.Values; UnavailableKeys = snapshot.Unavailable;
+        return activeKeys;
+    }
+    internal void RecordKeyChange(string name, string? value) { if (value == null) activeKeys.Remove(name); else activeKeys[name] = value; }
+    internal Task RefreshKeys() => Send(new { action = "keys", keys = LoadKeys() });
     public void Dispose()
     {
         closing = true;

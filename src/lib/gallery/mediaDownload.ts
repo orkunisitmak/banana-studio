@@ -14,14 +14,17 @@ const sniffMediaType = async (blob: Blob): Promise<string | undefined> => {
 };
 
 /** Reject error pages, but retain valid media whose Content-Type is wrong. */
-export const readMediaDownloadBlob = async (response: Response): Promise<Blob> => {
-  if (!response.ok) throw new DownloadHttpError(`Download failed (${response.status}). Reload the gallery and try again.`);
-  const mime = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() || '';
-  const blob = await response.blob();
+export const validateMediaDownloadBlob = async (blob: Blob, contentType: string): Promise<Blob> => {
+  const mime = contentType.split(';', 1)[0].trim().toLowerCase();
   if (!mime.startsWith('text/') && !/^application\/(?:(?:x-)?(?:json|xml)|[^/]+\+(?:json|xml))$/.test(mime)) return blob;
   const detected = await sniffMediaType(blob);
   if (detected) return blob.slice(0, blob.size, detected);
   throw new DownloadHttpError('The download link returned a page instead of media. Reload the gallery and try again.');
+};
+
+export const readMediaDownloadBlob = async (response: Response): Promise<Blob> => {
+  if (!response.ok) throw new DownloadHttpError(`Download failed (${response.status}). Reload the gallery and try again.`);
+  return validateMediaDownloadBlob(await response.blob(), response.headers.get('content-type') || '');
 };
 
 /** Read a media file for download. Error bodies are never saved as files. */

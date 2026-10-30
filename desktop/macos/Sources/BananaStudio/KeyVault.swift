@@ -37,6 +37,18 @@ enum KeyVault {
             guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw VaultError.unavailable }
         } else if result != errSecSuccess { throw VaultError.unavailable }
     }
+    struct Snapshot {
+        let values: [String: String]
+        let unavailable: [ProviderKey]
+    }
+    static func snapshot(previous: [String: String] = [:], read: (ProviderKey) throws -> String? = { try KeyVault.read($0) }) -> Snapshot {
+        var values = previous, unavailable: [ProviderKey] = []
+        for key in ProviderKey.allCases {
+            do { values[key.rawValue] = try read(key) }
+            catch { unavailable.append(key) }
+        }
+        return Snapshot(values: values, unavailable: unavailable)
+    }
     static func all() throws -> [String: String] {
         var values: [String: String] = [:]
         for key in ProviderKey.allCases { if let value = try read(key) { values[key.rawValue] = value } }

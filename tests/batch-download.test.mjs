@@ -51,3 +51,56 @@ test('the notice says how many items are missing', () => {
   assert.equal(describeBatchDownloadFailure(3, 3), 'None of the 3 selected items could be downloaded. Try again.');
   assert.equal(describeBatchDownloadFailure(1, 1), 'The selected item could not be downloaded. Try again.');
 });
+
+test('batch downloads use bounded workers and report completed progress', async () => {
+  let active = 0, peak = 0;
+  const progress = [];
+  const items = Array.from({ length: 8 }, (_, i) => ({ id: String(i), url: `https://cdn/${i}`, mediaType: 'image' }));
+  const result = await collectBatchDownload(items.map(item => item.id), items, async () => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active--;
+    return new Response(new Blob(['x'], { type: 'image/png' }));
+  }, { concurrency: 2, onProgress: value => progress.push(value) });
+  assert.equal(peak, 2);
+  assert.equal(result.files.length, 8);
+  assert.equal(progress.at(-1).completed, 8);
+});
+
+test('cancellation aborts the in-flight request and stops queueing new items', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const work = collectBatchDownload(['a', 'b', 'v'], media, async (_url, init) => {
+    requests++;
+    await new Promise((resolve, reject) => { setTimeout(resolve, 20); init?.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }); });
+    return new Response();
+  }, { concurrency: 1, signal: controller.signal });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  controller.abort();
+  await assert.rejects(work, { name: 'AbortError' });
+  assert.equal(requests, 1);
+});
+
+test('streaming input budget rejects oversized content without consuming its whole body', async () => {
+  let reads = 0, cancelled = false;
+  await assert.rejects(collectBatchDownload(['a'], media, async () => new Response(new ReadableStream({
+    pull(controller) { reads++; controller.enqueue(new Uint8Array(4)); if (reads === 20) controller.close(); },
+    cancel() { cancelled = true; },
+  }), { headers: { 'content-type': 'image/png' } }), { maxBytes: 6, concurrency: 1 }), /limit.*6|6.*limit/i);
+  assert.ok(reads <= 3);
+  assert.equal(cancelled, true);
+});
+
+test('the size budget applies to the whole ZIP input', async () => {
+  await assert.rejects(collectBatchDownload(['a', 'b'], media,
+    async () => new Response(new Blob(['xxxx'], { type: 'image/png' })), { maxBytes: 6, concurrency: 1 }), /limit/i);
+});
+
+test('private media URLs refresh immediately before fetching', async () => {
+  const requested = [];
+  const result = await collectBatchDownload(['b'], media, async url => {
+    requested.push(url); return new Response(new Blob(['x'], { type: 'image/png' }));
+  }, { refreshUrl: async url => `${url}?fresh` });
+  assert.deepEqual(requested, ['https://cdn/expired?fresh']);
+  assert.equal(result.failed, 0);
+});

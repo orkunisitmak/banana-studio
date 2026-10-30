@@ -40,6 +40,15 @@ Use an empty project reserved for this application. The baseline creates tables 
 4. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
 5. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migration.
 
+After the baseline, run each later SQL file below once, **in this order**, before deploying the application. Each file uses a separate SQL Editor query. On an existing installation, back up your database first and apply only files you have not already applied; do not rerun the baseline. The task-recovery API requires the newest schema.
+
+1. [20261020170000_openrouter_video_tasks.sql](../../supabase/migrations/20261020170000_openrouter_video_tasks.sql)
+2. [20261028120000_image_job_unbilled_retries.sql](../../supabase/migrations/20261028120000_image_job_unbilled_retries.sql)
+3. [20261030120000_folder_ownership.sql](../../supabase/migrations/20261030120000_folder_ownership.sql)
+4. [20261030121000_durable_refusal_retry.sql](../../supabase/migrations/20261030121000_durable_refusal_retry.sql)
+5. [20261030122000_provider_video_storage.sql](../../supabase/migrations/20261030122000_provider_video_storage.sql)
+6. [20261030123000_video_task_recovery.sql](../../supabase/migrations/20261030123000_video_task_recovery.sql)
+
 **Checkpoint:** SQL Editor reports success, the tables exist, and `media` is private. A CLI-based migration path is also possible for developers; do not apply both methods to the same schema without reconciling migration history.
 
 ## 4. Import your fork into Vercel

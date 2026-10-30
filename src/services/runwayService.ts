@@ -75,6 +75,10 @@ const determineMode = (
   return 'text_only';
 };
 
+// Keep persisted task details in the app's vocabulary; the provider boundary
+// uses Seedance's canonical text-to-video mode.
+const seedanceRequestMode = (mode: EvoMode): string => mode === 'text_only' ? 'text_to_video' : mode;
+
 const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
   if (img.data.startsWith('http')) return refreshMediaAccessUrl(img.data);
   return uploadBase64ToPublicUrl(img.data, img.mimeType || 'image/jpeg', 'vref');
@@ -528,7 +532,6 @@ const prepareReferenceVideos = async (
     }
     const detectedDuration = inspectedVideo?.duration
       ?? (ref.duration != null && ref.duration > 0 ? ref.duration : null)
-        ?? await getMediaDuration(ref.url, 'video')
         ?? await getMediaDuration(publicUrl, 'video');
     const persistedRef = {
       ...ref,
@@ -538,12 +541,12 @@ const prepareReferenceVideos = async (
     persistedVideos.push(persistedRef);
 
     if (videoModel !== 'minimax-h3' && operation === 'generate' && ref.isContinuation && targetAspectRatio !== 'adaptive') {
-      const matchesTarget = await videoAspectMatchesTarget(ref.url, targetAspectRatio);
+      const matchesTarget = await videoAspectMatchesTarget(publicUrl, targetAspectRatio);
       if (!matchesTarget) {
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
-        generatedFirstFrames.push(await extractContinuationFirstFrame(ref.url, targetAspectRatio, quality, label));
+        generatedFirstFrames.push(await extractContinuationFirstFrame(publicUrl, targetAspectRatio, quality, label));
         extractedVideoIndices.push(i);
         continue;
       }
@@ -891,7 +894,7 @@ export const createVideoTask = async (
   // Re-create can bypass the composer. Reject incompatible routes before
   // reference preparation, which may itself invoke paid fal.ai resizing.
   const routeError = seedanceProviderError(selectedProvider, {
-    videoModel, mode: determineMode(referenceImages, refVids, refAudios, videoOperation),
+    videoModel, mode: seedanceRequestMode(determineMode(referenceImages, refVids, refAudios, videoOperation)),
     duration: videoOperation === 'edit' ? -1 : videoDuration, quality: videoQuality, aspectRatio: videoAspectRatio,
     imageUrls: referenceImages.map(() => ''), videoUrls: refVids.map(() => ''), audioUrls: refAudios.map(() => ''),
     referenceEditMode: videoOperation === 'reference_edit',
@@ -994,8 +997,8 @@ export const createVideoTask = async (
     ? prepareSeedanceReferenceGenerationPrompt(cleanedPrompt, videoAspectRatio, videoUrls.length, continuationSource)
     : cleanedPrompt;
   const body: Record<string, unknown> = {
-        provider: selectedProvider, videoModel,
-        mode,
+        provider: selectedProvider, videoModel, generationId: context?.id,
+        mode: seedanceRequestMode(mode),
         prompt: finalPrompt || undefined,
         duration: requestDuration,
         quality: videoQuality,

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider, type AIProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
-import { getProviderAvailability, getProviderPreferences, saveProviderPreference } from '../services/providerRouting';
+import { getProviderPreferences, saveProviderPreference } from '../services/providerRouting';
+import { getProviderStatus, type LocalProviderSettings } from '../services/geminiClient';
 import { Dropdown } from './ControlDropdown';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
+import { TEXT_MODEL_OPTIONS } from '../types';
 
 const EVENT = 'banana-provider-routes-changed';
 const MODELS: Record<string,string> = {
@@ -11,17 +13,18 @@ const MODELS: Record<string,string> = {
   'seedance-2.0':'Seedance 2.0', 'seedance-2.5':'Seedance 2.5', 'minimax-h3':'MiniMax H3 Max',
 };
 export function useProviderRoute(model: string) {
-  const [state,setState] = useState<{ model:string; provider?:AIProvider; choice:ProviderChoice; available:ProviderAvailability; error?:string }>({ model:'',choice:'auto',available:{} });
+  const [state,setState] = useState<{ model:string; provider?:AIProvider; choice:ProviderChoice; available:ProviderAvailability; local?:LocalProviderSettings; error?:string }>({ model:'',choice:'auto',available:{} });
   useEffect(() => {
     let active = true, revision = 0;
     const refresh = async () => {
       const version = ++revision;
       try {
-        const [available, preferences] = await Promise.all([getProviderAvailability(),getProviderPreferences()]);
+        const [status, preferences] = await Promise.all([getProviderStatus(undefined,model),getProviderPreferences()]);
         if (!active || version !== revision) return;
+        const { providers: available, local } = status;
         const choice = preferences[model] || 'auto';
-        try { setState({ model,choice,available,provider:resolveProvider(model,choice,available) }); }
-        catch (error) { setState({ model,choice,available, ...(choice !== 'auto' && MODEL_ROUTES[model]?.includes(choice) ? {provider:choice} : {}), error:(error as Error).message }); }
+        try { setState({ model,choice,available,local,provider:resolveProvider(model,choice,available) }); }
+        catch (error) { setState({ model,choice,available,local, ...(choice !== 'auto' && MODEL_ROUTES[model]?.includes(choice) ? {provider:choice} : {}), error:(error as Error).message }); }
       } catch (error) { if (active && version === revision) setState({ model,choice:'auto',available:{},error:(error as Error).message }); }
     };
     void refresh(); window.addEventListener(EVENT,refresh); window.addEventListener('focus',refresh);
@@ -40,7 +43,8 @@ export function ProviderRouteControl({ model, compact = false, showError = true 
   };
   const options = [{value:'auto',label:`Auto${route.provider && route.choice === 'auto' ? ` · ${PROVIDER_LABELS[route.provider]}` : ''}`},
     // Codex runs the desktop user's own CLI; hosted workspaces never offer it.
-    ...(MODEL_ROUTES[model] || []).filter(provider => provider !== 'codex' || isLocalWorkspace()).map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : provider === 'codex' ? ' · sign-in needed' : ' · key needed'}`}))];
+    ...(MODEL_ROUTES[model] || []).filter(provider => provider !== 'codex' || isLocalWorkspace()).map(provider => ({value:provider,label:`${PROVIDER_LABELS[provider]}${route.available[provider] ? '' : provider === 'codex' ? ' · sign-in needed' : provider === 'local' ? ' · setup needed' : ' · key needed'}`}))];
+  const upstreamModel = TEXT_MODEL_OPTIONS.some(option => option.value === model) ? route.local?.textModel : route.local?.imageModel;
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
     {compact ? <><span className="text-gray-500">Provider</span><Dropdown label="Provider" value={route.choice} options={options} onSelect={value => void save(value)} disabled={saving} compact /></> : <label className="flex items-center gap-2 text-gray-400">Provider
       <select aria-label={`${MODELS[model] || model} provider`} value={route.choice} disabled={saving}
@@ -49,14 +53,18 @@ export function ProviderRouteControl({ model, compact = false, showError = true 
         {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>}
+    {route.provider === 'local' && <span className="basis-full min-w-0 break-words text-gray-400">
+      Local API upstream: <code>{upstreamModel || 'model not configured'}</code>{route.local?.baseUrl && <> · <span>{route.local.baseUrl}</span></>}
+    </span>}
     {(error || showError && route.error) && <span role="status" className="text-amber-300">{error || route.error}</span>}
   </div>;
 }
 export function ProviderRoutingSettings() {
   return <section className="space-y-4 border-t border-white/10 pt-5" aria-labelledby="provider-routing-title">
     <div><h3 id="provider-routing-title" className="font-semibold">Provider routing</h3>
-      <p className="mt-2 text-xs leading-relaxed text-gray-400">Add only the keys you need. Auto uses the first configured provider shown for each model. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p></div>
+      <p className="mt-2 text-xs leading-relaxed text-gray-400">Configure only the providers you need. Auto uses the first configured provider shown for each model. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p>
+      <p className="mt-2 text-xs leading-relaxed text-gray-400">Local API uses an OpenAI-compatible server. The image and text choices below act as presets; the server-configured upstream model is used for each kind of request. {isLocalWorkspace() ? 'Set its address, text model, image model and optional key in Provider keys.' : <>The workspace owner configures <code>LOCAL_API_BASE_URL</code>, <code>LOCAL_TEXT_MODEL</code>, <code>LOCAL_IMAGE_MODEL</code> and, when authentication is required, <code>LOCAL_API_KEY</code> in the server environment.</>} Providers without authentication do not need a key.</p></div>
     {Object.keys(MODELS).map(model => <div key={model}><p className="mb-1.5 text-sm text-gray-200">{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} /></div>)}
-    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5. In the desktop app, GPT Image 2.5 can also use your ChatGPT plan through the Codex CLI after <code>codex login</code>, with no API key.</p>
+    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm use OpenRouter, OpenAI, Gemini or Local API. YouTube lookup uses a separate YouTube Data API key, and reading YouTube footage still requires Gemini, directly or through OpenRouter. Local API can prepare the final brief from verified observations. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5. In the desktop app, GPT Image 2.5 can also use your ChatGPT plan through the Codex CLI after <code>codex login</code>, with no API key.</p>
   </section>;
 }

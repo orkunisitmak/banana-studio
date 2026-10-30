@@ -192,28 +192,71 @@ internal sealed class StudioWindow : Form
         keysOpen = true;
         try
         {
-            using var dialog = new Form { Text = "Provider API Keys", Width = 670, Height = 480, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 3, RowCount = 8, AutoSize = true };
-            var info = new Label { Text = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank fields keep saved keys. Remove clears a key.", AutoSize = true, MaximumSize = new Size(600, 0) };
+            using var dialog = new Form { Text = "Provider API Keys", Width = 740, Height = Math.Min(650, Screen.FromControl(this).WorkingArea.Height - 80), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
+            var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Top, Padding = new Padding(20), ColumnCount = 3, AutoSize = true };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var info = new Label { Text = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank key fields keep saved keys; Remove clears a key. The Local API key is optional for servers without authentication. Blank local configuration fields restore defaults. Model IDs can be any IDs supported by your backend.", AutoSize = true, MaximumSize = new Size(650, 0), Margin = new Padding(3, 0, 3, 12) };
             grid.Controls.Add(info, 0, 0); grid.SetColumnSpan(info, 3);
             var rows = new List<(string Name, TextBox Field, CheckBox Remove)>();
             var row = 1;
             foreach (var provider in KeyVault.Providers)
             {
-                var field = new TextBox { Width = 300, UseSystemPasswordChar = true, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = KeyVault.Read(provider.Name) != null ? "Saved in Credential Manager" : "Paste your API key" };
+                if (provider.Name == "LOCAL_API_KEY")
+                {
+                    var heading = new Label { Text = "Local provider (OpenAI-compatible)", AutoSize = true, Margin = new Padding(3, 12, 3, 8) };
+                    grid.Controls.Add(heading, 0, row++); grid.SetColumnSpan(heading, 3);
+                }
+                var field = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true, AccessibleName = provider.Label, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = KeyVault.Read(provider.Name) != null ? "Saved in Credential Manager" : provider.Name == "LOCAL_API_KEY" ? "Optional API key; blank if not required" : "Paste your API key" };
                 var remove = new CheckBox { Text = "Remove", AutoSize = true };
                 grid.Controls.Add(new Label { Text = provider.Label, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
                 grid.Controls.Add(field, 1, row); grid.Controls.Add(remove, 2, row++); rows.Add((provider.Name, field, remove));
             }
-            var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill };
+            var settings = new List<(string Name, TextBox Field)>();
+            foreach (var setting in KeyVault.LocalSettings)
+            {
+                var field = new TextBox { Dock = DockStyle.Fill, AccessibleName = setting.Label, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle,
+                    Text = KeyVault.Read(setting.Name) ?? setting.DefaultValue, PlaceholderText = setting.DefaultValue };
+                grid.Controls.Add(new Label { Text = setting.Label, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
+                grid.Controls.Add(field, 1, row++); settings.Add((setting.Name, field));
+            }
+            var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Bottom, Padding = new Padding(20, 8, 20, 12) };
             var save = new Button { Text = "Save", DialogResult = DialogResult.OK }; var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel };
-            buttons.Controls.Add(save); buttons.Controls.Add(cancel); grid.Controls.Add(buttons, 0, row); grid.SetColumnSpan(buttons, 3);
-            dialog.Controls.Add(grid); dialog.AcceptButton = save; dialog.CancelButton = cancel;
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            foreach (var item in rows) { if (item.Remove.Checked) KeyVault.Save(item.Name, null); else if (!string.IsNullOrWhiteSpace(item.Field.Text)) KeyVault.Save(item.Name, item.Field.Text.Trim()); item.Field.Clear(); }
-            await workspace.RefreshKeys();
+            buttons.Controls.Add(save); buttons.Controls.Add(cancel);
+            scroll.Controls.Add(grid); dialog.Controls.Add(scroll); dialog.Controls.Add(buttons); dialog.AcceptButton = save; dialog.CancelButton = cancel;
+            try
+            {
+                while (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    try
+                    {
+                        // Validate the entire form before changing any saved credential or setting.
+                        var configuration = settings.Select(item => (item.Name, Value: KeyVault.ValidateSetting(item.Name, item.Field.Text) ?? KeyVault.LocalSettings.Single(setting => setting.Name == item.Name).DefaultValue)).ToArray();
+                        var changes = new List<(string Name, string? Value)>();
+                        foreach (var item in rows)
+                        {
+                            var value = item.Field.Text.Trim();
+                            if (item.Remove.Checked) changes.Add((item.Name, null));
+                            else if (value.Length > 0) { KeyVault.Validate(value); changes.Add((item.Name, value)); }
+                        }
+                        foreach (var item in changes) KeyVault.Save(item.Name, item.Value);
+                        foreach (var item in configuration) KeyVault.Save(item.Name, item.Value);
+                        await workspace.RefreshKeys(); return;
+                    }
+                    catch (ArgumentException error)
+                    {
+                        var message = error switch {
+                            KeyVault.InvalidLocalBaseUrlException => "Local base URL must be an absolute http:// or https:// URL with a host and no credentials, query or fragment.",
+                            KeyVault.InvalidLocalModelException => "Local text and image model IDs must be at most 200 characters and contain no whitespace or control characters.",
+                            _ => "A key or configuration value is too long or contains a line break. Correct the value and try again."
+                        };
+                        MessageBox.Show(this, message, "Provider API Keys", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            finally { foreach (var item in rows) item.Field.Clear(); }
         }
-        catch { MessageBox.Show(this, "The keys could not be saved or activated. Check Windows Credential Manager and try again.", "Provider API Keys", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch { MessageBox.Show(this, "The keys or local settings could not be saved or activated. Check Windows Credential Manager and try again.", "Provider API Keys", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { keysOpen = false; }
     }
 }

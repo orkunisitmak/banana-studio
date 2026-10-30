@@ -1,18 +1,21 @@
 import { GoogleGenAI } from '@google/genai';
 import { OPENROUTER_MODELS, type AIProvider } from '../../src/lib/providers.js';
 import { providerImageData } from './providerMedia.js';
+import { getLocalProviderConfig, type LocalProviderConfig } from './localProvider.js';
+import { requestLocalImage } from './localImage.js';
 import { requestCodexImage } from './codexImage.js';
 
-export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'codex' ? 'codex/image_gen' : provider === 'openrouter'
+export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'local' ? getLocalProviderConfig()?.imageModel || '' : provider === 'codex' ? 'codex/image_gen' : provider === 'openrouter'
   ? OPENROUTER_MODELS[model] : provider === 'fal'
     ? model === 'gpt-image-2.5-sunburst' ? `openai/gpt-image-2.5/sunburst/${references ? 'edit' : 'text-to-image'}`
       : `${model === 'gemini-nano-banana-2.1' ? 'google/nano-banana-2.1' : 'fal-ai/nano-banana-pro'}${references ? '/edit' : ''}`
     : model;
 
 /** All destinations and fields are server-owned. One paid request, no provider retry. */
-export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string): Promise<Response> {
+export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string, localConfig?: LocalProviderConfig): Promise<Response> {
   const signal = AbortSignal.timeout(250_000);
   const { resolution, aspect_ratio, ...openaiInput } = input;
+  if (provider === 'local') return requestLocalImage(input, db, signal, auditId, localConfig);
   if (provider === 'codex' && model === 'gpt-image-2.5-sunburst') return requestCodexImage(input, url => providerImageData(db, url), signal);
   if (provider === 'openai') return fetch(`https://api.openai.com/v1/images/${input.images?.length ? 'edits' : 'generations'}`, {
     method: 'POST', redirect: 'error', signal,

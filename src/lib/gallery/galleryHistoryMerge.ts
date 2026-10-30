@@ -36,10 +36,12 @@ export const recordGalleryHistoryMutation = (
   return { ...mutations, patches, additions, deletedIds };
 };
 
+/** Merge a loaded history page into the current list, keeping local additions, deletions and edits. */
 export const mergeLoadedGalleryHistory = (
   current: GeneratedMedia[], loaded: GeneratedMedia[], mutations: GalleryHistoryMutations,
   externalDeletedIds: ReadonlySet<string> = new Set(),
 ): GeneratedMedia[] => {
+  /** True when the item was deleted locally or elsewhere. */
   const deleted = (id: string) => mutations.deletedIds.has(id) || externalDeletedIds.has(id);
   if (mutations.discardLoaded) return current.filter(item => !deleted(item.id));
   const additions = current.filter(item => mutations.additions.has(item.id) && !deleted(item.id));

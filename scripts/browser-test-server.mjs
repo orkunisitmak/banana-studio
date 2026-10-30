@@ -8,6 +8,7 @@ const emptyEnv = path.join(root, '.build/browser-tests/empty-env');
 fs.mkdirSync(emptyEnv, { recursive: true });
 const server = await createServer({ root, configFile: false, envDir: emptyEnv, server: { host: '127.0.0.1', port: 4179, strictPort: true }, plugins: [{
   name: 'synthetic-auth-boundary', enforce: 'pre',
+  /** Swap the auth service for the synthetic browser-test session. */
   resolveId(source, importer) {
     if (/\/authService$/.test(source) && importer && /\/(AuthBoundary\.tsx|storageService\.ts)$/.test(importer)) return path.join(root, 'tests/ui/browser-auth.ts');
   },

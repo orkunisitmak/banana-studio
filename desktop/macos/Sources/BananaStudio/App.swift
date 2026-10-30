@@ -98,6 +98,7 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             try workspace.refreshKeys(); showKeyWarning()
         } catch { let failure = NSAlert(); failure.messageText = "The keys could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
     }
+    /// Tells the person which saved provider keys could not be read; the gallery still opens.
     private func showKeyWarning() {
         guard !workspace.unavailableKeys.isEmpty else { return }
         let alert = NSAlert(); alert.messageText = "Some provider keys are unavailable"

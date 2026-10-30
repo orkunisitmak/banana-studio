@@ -32,6 +32,7 @@ interface GalleryImageEditorProps {
   refreshSource?: (media: GeneratedMedia) => Promise<string>;
 }
 
+/** Selected-area editor for a gallery image: mask, references, prompt and queued results. */
 export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, images = [], isEditing, onStart, onGenerate, onClose, onEditResult, initialTextModel, refreshSource }) => {
   const [region, setRegion] = useState<ImageEditRegion>();
   const [canvas, setCanvas] = useState<{ width: number; height: number }>();

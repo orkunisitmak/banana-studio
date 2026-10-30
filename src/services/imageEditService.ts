@@ -5,6 +5,7 @@ import { compositeEditPixels } from '../lib/images/imageEditPixels';
 import { refreshMediaAccessUrl } from './storageService';
 
 const imageUrl = (ref: ReferenceImage) => /^(?:data:|blob:|https?:|\/)/.test(ref.data) ? ref.data : `data:${ref.mimeType};base64,${ref.data}`;
+/** Decode an image (renewing private URLs) into a canvas, optionally at a required size. */
 const loadPixels = async (url: string, size?: { width: number; height: number }) => {
   const image = new Image();
   image.crossOrigin = 'anonymous';

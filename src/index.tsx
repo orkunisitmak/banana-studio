@@ -9,6 +9,7 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+/** Load the workspace configuration, then render the app or a retryable startup error. */
 const start = async () => {
   root.render(<div role="status" style={{ color: '#d1d5db', padding: 48 }}>Opening Banana Studio…</div>);
   try {

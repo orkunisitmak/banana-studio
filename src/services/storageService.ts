@@ -288,6 +288,7 @@ export const refreshMediaAccessUrl = async (url: string, forProvider = true): Pr
   return signedUrl;
 };
 
+/** Recover accepted video task handles and sign storage URLs for loaded rows. */
 const hydrateMediaRows = async (rows: any[]): Promise<void> => {
   if (rows.some(row => row.type === 'video' && !row.task_id && ['pending', 'processing'].includes(row.status)) && !isLocalWorkspace()) {
     try { await recoverVideoRows(rows, ids => supabase.rpc('recover_video_tasks', { p_generation_ids: ids })); }
@@ -380,6 +381,7 @@ const isLocalOnlyMedia = (media: GeneratedMedia): boolean => {
 // --- Pending Deletions Queue ---
 // When a DB delete fails, we queue the ID so it's hidden from view and retried later.
 
+/** IDs whose deletion has not reached the server yet for this account. */
 const getPendingDeletions = (userId = mediaSessionUserId): Set<string> => {
   try {
     if (!userId) return new Set();
@@ -390,6 +392,7 @@ const getPendingDeletions = (userId = mediaSessionUserId): Set<string> => {
   }
 };
 
+/** Remember a deletion intent for this account until it reaches the server. */
 const addPendingDeletion = (id: string, userId = mediaSessionUserId): void => {
   if (!userId) return;
   const pending = getPendingDeletions(userId);
@@ -397,6 +400,7 @@ const addPendingDeletion = (id: string, userId = mediaSessionUserId): void => {
   localStorage.setItem(`${PENDING_DELETIONS_KEY}:${userId}`, JSON.stringify([...pending]));
 };
 
+/** Forget a deletion intent once the server confirms it. */
 const removePendingDeletion = (id: string, userId = mediaSessionUserId): void => {
   if (!userId) return;
   const pending = getPendingDeletions(userId);
@@ -405,6 +409,7 @@ const removePendingDeletion = (id: string, userId = mediaSessionUserId): void =>
   else localStorage.setItem(`${PENDING_DELETIONS_KEY}:${userId}`, JSON.stringify([...pending]));
 };
 
+/** Retry this account's queued deletions; confirmed ones leave the queue. */
 const retryPendingDeletions = async (): Promise<void> => {
   if (!supabase) return;
   const userId = await bindMediaSession();
@@ -623,6 +628,7 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
   });
 };
 
+/** Map a database row and its metadata to gallery media. */
 const mapRowToMedia = (row: any): GeneratedMedia => {
   const isVideo = row.type === 'video';
   const meta = row.metadata || {};
@@ -739,6 +745,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
   };
 };
 
+/** Read this account's offline gallery cache. */
 const readImagesFromIndexedDb = async (): Promise<GeneratedMedia[]> => {
   try {
     const db = await openDB();
@@ -824,6 +831,7 @@ const putImageInIndexedDb = async (media: GeneratedMedia, expectedUserId?: strin
   });
 };
 
+/** Delete items from one account's offline cache; failures reject. */
 const deleteImagesFromIndexedDb = async (ids: string[], expectedUserId?: string | null): Promise<void> => {
   if (!ids.length) return;
   const db = await openDB(expectedUserId);
@@ -956,6 +964,7 @@ const selectGenerationRowsForUser = async (
 
 // --- Image Methods ---
 
+/** Upload an image, its thumbnail and references and upsert its row; returns undefined without a matching session. */
 export const saveImage = async (media: GeneratedMedia, expectedUserId?: string): Promise<{
   publicUrl: string;
   thumbnailUrl?: string;
@@ -1177,6 +1186,7 @@ const completedVideoTransfers = new Map<string, { source: string; storagePath: s
 // Overlapping transfers of one generation can leave either source in the stored file, so none of them records it.
 const activeVideoTransfers = new Map<string, Set<{ overlapped: boolean }>>();
 
+/** Upload a completed video and its thumbnail and save its row. */
 export const saveVideo = async (
   media: GeneratedMedia,
   expectedUserId?: string,
@@ -1693,6 +1703,7 @@ export const updateImageStatus = async (
   if (error) throw new Error(`Image status could not be saved: ${error.message}`);
 };
 
+/** Update a video row status, merging metadata only after a successful read. */
 export const updateVideoStatus = async (
   id: string,
   status: 'processing' | 'completed' | 'failed',
@@ -1720,6 +1731,7 @@ export const updateVideoStatus = async (
   if (error) throw new Error(`Video status could not be saved: ${error.message}`);
 };
 
+/** Delete one item from the server, storage and cache; a failed server delete stays queued. */
 export const deleteImage = async (media: GeneratedMedia, expectedUserId?: string | null): Promise<void> => {
   const userId = await bindMediaSession();
   if (expectedUserId !== undefined && expectedUserId !== userId) throw new Error('Media session changed');
@@ -1760,10 +1772,12 @@ export const deleteImage = async (media: GeneratedMedia, expectedUserId?: string
   if (deletedRemote) removePendingDeletion(media.id, userId);
 };
 
+/** Delete items with bounded concurrency; rejects if any deletion failed. */
 export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
   if (medias.length === 0) return;
   const userId = await bindMediaSession();
   let cursor = 0, failed = 0;
+  /** Take the next item until none remain. */
   const worker = async () => {
     while (cursor < medias.length) {
       const media = medias[cursor++];
@@ -1775,6 +1789,7 @@ export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
   if (failed) throw new Error(`${failed} items could not be fully deleted. Their saved deletion intents will be retried.`);
 };
 
+/** Save the favorite flag on the server, then in the offline cache. */
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {
   const operationUserId = await bindMediaSession();
   if (supabase) {
@@ -1796,6 +1811,7 @@ export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<v
   } catch (e) { }
 };
 
+/** One item owned by the account; `requireRemote` skips the offline cache. */
 export const getImageById = async (id: string, userId?: string | null, options?: { requireRemote?: boolean }): Promise<GeneratedMedia | null> => {
   const operationUserId = await bindMediaSession();
   if (supabase && !operationUserId) return null;
@@ -1840,6 +1856,7 @@ export const getImageById = async (id: string, userId?: string | null, options?:
   }
 };
 
+/** Load the full history, merging unsynced offline items and hiding pending deletions. */
 export const getImages = async (
   onProgress?: (media: GeneratedMedia[]) => void,
   onLoadError?: (error: Error) => void,
@@ -1902,6 +1919,7 @@ export const getImagesForUser = async (userId: string): Promise<GeneratedMedia[]
     .filter(img => (img.url && img.url.trim() !== '') || img.status === 'pending' || img.status === 'processing' || img.status === 'failed');
 };
 
+/** Delete all of this account's media; local copies are kept as deletion intents if cleanup fails. */
 export const clearImages = async (): Promise<void> => {
   const userId = await bindMediaSession();
   if (supabase) {
@@ -1934,6 +1952,7 @@ export const clearImages = async (): Promise<void> => {
   if (userId) localStorage.removeItem(`${PENDING_DELETIONS_KEY}:${userId}`);
 };
 
+/** Upload offline-only items to the server. */
 export const syncLocalImages = async (): Promise<void> => {
   if (!supabase) return;
   try {
@@ -2001,6 +2020,7 @@ export const saveFolder = async (folder: Folder): Promise<void> => {
   }
 };
 
+/** Every folder of the account, reading past the server row cap. */
 export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
   if (!supabase) return [];
   const sessionUser = await getCurrentUserId();
@@ -2024,6 +2044,7 @@ export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
   return folders.sort((a, b) => b.createdAt - a.createdAt);
 };
 
+/** Rename a folder on the server and in the offline cache. */
 export const renameFolder = async (folderId: string, newName: string): Promise<void> => {
   const operationUserId = await bindMediaSession();
   if (supabase) {
@@ -2055,6 +2076,7 @@ export class FolderDeleteError extends Error {
   constructor(message: string, readonly keptMediaIds: string[]) { super(message); }
 }
 
+/** Delete a folder tree after reading every page of its media and subfolders. */
 export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[], folderIds: string[]) => void): Promise<DeleteFolderResult> => {
   const folderRelations: Array<{ id: string; parentId: string | null }> = [];
   let localFolders: Folder[] = [];
@@ -2114,6 +2136,7 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
     storagePaths.add(media.thumbnailPath || getThumbnailStoragePath(media.id));
   }
 
+  /** Split values into batches that fit one storage or filter request. */
   const chunk = <T,>(values: T[], size = 100): T[][] => {
     const chunks: T[][] = [];
     for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
@@ -2222,6 +2245,7 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
   };
 };
 
+/** Move items to a folder on the server and in the offline cache. */
 export const moveImagesToFolder = async (imageIds: string[], folderId: string | null): Promise<void> => {
   const operationUserId = await bindMediaSession();
   const uniqueIds = Array.from(new Set(imageIds));
@@ -2268,6 +2292,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
   }
 };
 
+/** Reparent a folder; the database rejects cycles and foreign parents. */
 export const moveFolderToFolder = async (folderId: string, targetParentId: string | null): Promise<void> => {
   const operationUserId = await bindMediaSession();
   // Basic protection against self-nesting
@@ -2308,6 +2333,7 @@ export const moveFolderToFolder = async (folderId: string, targetParentId: strin
 
 // --- Template Methods ---
 
+/** Save a template; a server write failure rejects. */
 export const saveTemplate = async (template: Template): Promise<void> => {
   template = { ...template, config: { ...template.config, referenceImages: template.config.referenceImages?.map(withoutLegacyMask) } };
   const operationUserId = await bindMediaSession();
@@ -2334,6 +2360,7 @@ export const saveTemplate = async (template: Template): Promise<void> => {
   }
 };
 
+/** Load every template page in saved order. */
 export const getTemplates = async (): Promise<Template[]> => {
   if (supabase) {
     try {
@@ -2360,6 +2387,7 @@ export const getTemplates = async (): Promise<Template[]> => {
   return [];
 };
 
+/** Delete a template; a server write failure rejects. */
 export const deleteTemplate = async (id: string): Promise<void> => {
   const operationUserId = await bindMediaSession();
   if (supabase) {

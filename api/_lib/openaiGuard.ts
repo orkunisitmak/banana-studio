@@ -15,8 +15,10 @@ export const getOpenAISessionId = (req: VercelRequest): string | null => {
   } catch { return null; }
 };
 
-// The historical server-only ledger now also admits OpenRouter requests, so
-// provider switching cannot bypass the existing session/spend limits.
+/**
+ * The historical server-only ledger now also admits OpenRouter requests, so
+ * provider switching cannot bypass the existing session/spend limits.
+ */
 export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' = 'OpenAI') {
   const prefix = provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
   const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
@@ -66,6 +68,7 @@ export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse
   let finished = false;
   return {
     id,
+    /** Close the ledger entry once with its outcome and operational identifiers only. */
     async finish(outcome: 'completed' | 'failed' | 'rejected', providerRequestId?: string | null, providerStatus?: number, retry?: OpenAIRefusalRetry) {
       if (finished) return;
       finished = true;

@@ -75,8 +75,10 @@ const determineMode = (
   return 'text_only';
 };
 
-// Keep persisted task details in the app's vocabulary; the provider boundary
-// uses Seedance's canonical text-to-video mode.
+/**
+ * Keep persisted task details in the app's vocabulary; the provider boundary
+ * uses Seedance's canonical text-to-video mode.
+ */
 const seedanceRequestMode = (mode: EvoMode): string => mode === 'text_only' ? 'text_to_video' : mode;
 
 const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
@@ -494,6 +496,7 @@ const prepareH3ReferenceAudio = async (reference: ReferenceAudio, index: number)
   }
 };
 
+/** Upload reference videos, scaling any whose ratio or size does not fit the target. */
 const prepareReferenceVideos = async (
   refVids: ReferenceVideo[],
   targetAspectRatio: VideoAspectRatio,
@@ -859,6 +862,7 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     cost:estimateH3MaxCost(resolved),mode,referenceImages:resolved.referenceImages,referenceVideos:resolved.referenceVideos,referenceAudios};
 };
 
+/** Prepare references and submit a video task, bound to the current session and generation. */
 export const createVideoTask = async (
   config: GenerationConfig, context?:{id:string}
 ): Promise<{ taskId: string; endpoint?: string; queueEndpoint?: string; cost: VideoCost | undefined; mode: EvoMode; referenceImages?: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[] }> => {

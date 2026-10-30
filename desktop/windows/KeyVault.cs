@@ -74,6 +74,7 @@ internal static class KeyVault
         finally { Array.Clear(bytes); }
     }
     internal sealed record Snapshot(Dictionary<string, string> Values, string[] Unavailable);
+    /// <summary>Reads every provider key. A key that cannot be read keeps its previous value and is reported as unavailable.</summary>
     internal static Snapshot ReadSnapshot(Dictionary<string, string>? previous = null, Func<string, string?>? read = null)
     {
         var values = previous == null ? new Dictionary<string, string>() : new Dictionary<string, string>(previous);

@@ -32,7 +32,9 @@ export const collectBatchDownload = async (
   const results: Array<BatchDownloadFile | undefined> = new Array(ids.length);
   let cursor = 0, completed = 0, bytes = 0, fatal: unknown;
   const report = () => options.onProgress?.({ completed, total: ids.length, bytes });
+  /** Error for an export that exceeds the memory budget. */
   const limitError = () => new BatchDownloadLimitError(`ZIP input size limit (${maxBytes === BATCH_DOWNLOAD_MAX_BYTES ? '128 MiB' : `${maxBytes} bytes`}) exceeded. Select fewer items or download large videos individually.`);
+  /** Download items in order until done, cancelled or over budget. */
   const worker = async () => {
     while (cursor < ids.length && !controller.signal.aborted) {
       const index = cursor++;

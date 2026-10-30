@@ -9,6 +9,7 @@ import { signedMediaUrl } from './_lib/imageStorage.js';
 
 export const config = { maxDuration: 300 };
 const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
+/** Submit (POST) or poll (GET) a Seedance video task on fal, OpenRouter or EvoLink. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res); res.setHeader('Cache-Control','no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();

@@ -177,6 +177,7 @@ internal sealed class StudioWindow : Form
         }
         finally { fullscreenTransition = false; CaptureNormalWindowBounds(); }
     }
+    /// <summary>Tells the person which saved provider keys could not be read; the gallery still opens.</summary>
     private void ShowKeyWarning()
     {
         if (workspace.UnavailableKeys.Length == 0) return;

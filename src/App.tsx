@@ -43,6 +43,7 @@ class DeletedVideoError extends Error { constructor() { super('The video was del
 
 const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => getActiveImageModel(value);
 
+/** Apply the storage URLs and paths of a completed save to the in-memory media. */
 const mergeSavedMedia = (
   media: GeneratedMedia,
   savedResult?: { publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | null
@@ -88,6 +89,7 @@ export default function App() {
   )}</AuthBoundary>;
 }
 
+/** The studio for one authorized account: gallery, composer, jobs and history. */
 const AuthorizedWorkspace: React.FC<{
   userId: string;
   userProfile: UserProfile | null;
@@ -268,6 +270,7 @@ const AuthorizedWorkspace: React.FC<{
     setIsGalleryIndexLoading(true);
     setGalleryHistoryError(null);
 
+    /** Load history and templates, merging late pages without undoing local changes. */
     const loadData = async () => {
       try {
         const [history, savedTemplates] = await Promise.all([
@@ -630,6 +633,7 @@ const AuthorizedWorkspace: React.FC<{
     );
   };
 
+  /** Poll an accepted video task until it finishes, then save the result; recoverable failures keep the task. */
   const resumeVideoPolling = async (videoId: string, taskId: string, baseMedia?: GeneratedMedia) => {
     setActiveRequests(prev => prev + 1);
     setGeneratedMedia(prev => prev.map(item =>
@@ -850,6 +854,7 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  /** Validate the request and start image, video or brainstorm generation for each requested item. */
   const handleGenerate = async (requestConfig: GenerationConfig = config, fromEditor = false) => {
     if (!fromEditor && recreateLoadingRef.current !== null) {
       toast.info('Loading saved references', 'Wait for the saved references to finish loading before generating.');
@@ -1289,6 +1294,7 @@ const AuthorizedWorkspace: React.FC<{
 
   const handleCancelBrainstorm = (id: string) => brainstormBatchesRef.current.get(id)?.cancel();
 
+  /** Clear the whole history and discard pending history pages, reporting any failure. */
   const handleClearHistory = async () => {
     try {
       await clearImages();

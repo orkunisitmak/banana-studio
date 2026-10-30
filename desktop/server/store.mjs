@@ -68,10 +68,13 @@ export class LocalWorkspace {
     this.origin='http://127.0.0.1';
   }
   setting(key,value) { if(value!==undefined)this.db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key,JSON.stringify(value));const row=this.db.prepare('SELECT value FROM settings WHERE key=?').get(key);return row?JSON.parse(row.value):null; }
+  /** Run `write` in one immediate SQLite transaction; any failure rolls back every row. */
   transaction(write) { this.db.exec('BEGIN IMMEDIATE');try { const result=write();this.db.exec('COMMIT');return result; }catch(error) { this.db.exec('ROLLBACK');throw error; } }
   all(table) { return this.db.prepare('SELECT payload FROM records WHERE collection=? ORDER BY id').all(table).map(r=>JSON.parse(r.payload)); }
-  // Only exact scalar filters and unsorted reads are paginated in SQL. Rich JSON,
-  // OR expressions and JavaScript ordering keep the established evaluator.
+  /**
+   * Only exact scalar filters and unsorted reads are paginated in SQL. Rich JSON,
+   * OR expressions and JavaScript ordering keep the established evaluator.
+   */
   selectRows(plan, table, filters, order) {
     if(order.length || plan.or)return null;
     const clauses=['collection=?'],values=[table];
@@ -115,6 +118,7 @@ export class LocalWorkspace {
   }
   mediaUrl(key) { this.mediaPath(key);return `${this.origin}/storage/v1/object/authenticated/media/${key.split('/').map(encodeURIComponent).join('/')}`; }
   materialize(value) { if(typeof value==='string'){const key=this.mediaKey(value);return key?this.mediaUrl(key):value;}if(Array.isArray(value))return value.map(v=>this.materialize(v));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,this.materialize(v)]));return value; }
+  /** Write media through a temporary file and rename; a failed write leaves no partial file. */
   async upload(key,bytes,options={}) {
     const target=this.mediaPath(key);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
     if(fs.existsSync(target)&&!options.upsert)return fail('Media already exists.','23505');
@@ -129,6 +133,7 @@ export class LocalWorkspace {
     createSignedUrls:async keys=>({data:keys.map(key=>({path:key,signedUrl:fs.existsSync(this.mediaPath(key))?this.mediaUrl(key):'',error:fs.existsSync(this.mediaPath(key))?null:'Not found'})),error:null}),
     remove:async keys=>{for(const key of keys)fs.rmSync(this.mediaPath(key),{force:true});return {data:keys,error:null};} }; }
   client(trusted = true) { const send=async plan=>this.materialize(this.execute(plan,trusted));return { from:table=>new WorkspaceQuery(send,table),rpc:(rpc,args)=>new WorkspaceQuery(send,undefined,rpc,args),storage:{from:bucket=>{if(bucket!=='media')throw new Error('Unknown media bucket.');return this.storage();}} }; }
+  /** Run one validated query plan (select, insert, upsert, update, delete, RPC or media) against the workspace. */
   execute(plan,trusted=false) {
     try {
       if(!plan||typeof plan!=='object'||Array.isArray(plan))throw new Error('Invalid workspace operation.');

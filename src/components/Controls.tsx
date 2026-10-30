@@ -357,6 +357,7 @@ const RefActionPopover: React.FC<RefActionPopoverProps> = ({ anchorRect, items, 
   );
 };
 
+/** The generation composer: prompt, references, model settings and Generate. */
 export const Controls: React.FC<ControlsProps> = ({
   config,
   imageCostHistory = [],
@@ -1198,6 +1199,7 @@ export const Controls: React.FC<ControlsProps> = ({
     setIsDraggingSavedRef(false);
   };
 
+  /** Add media dragged from the gallery as references. */
   const handleGalleryDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingToGallery(false);
@@ -1373,6 +1375,7 @@ export const Controls: React.FC<ControlsProps> = ({
     setIsDraggingSavedRef(false);
   };
 
+  /** Add dropped files or gallery media as references; text drops keep native behavior. */
   const handleDrop = async (e: React.DragEvent) => {
     // If dropping an internal reference onto the textarea, let native text insertion happen
     if (draggedRefId && e.target instanceof HTMLTextAreaElement) {

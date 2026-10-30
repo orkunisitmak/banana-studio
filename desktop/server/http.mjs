@@ -9,6 +9,7 @@ const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 const equal=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const json=(res,status,value)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
 const body=async(req,limit)=>{const parts=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>limit)throw new Error('LIMIT');parts.push(chunk);}return Buffer.concat(parts);};
+/** Stream a regular, non-symlinked file with range support; media is served with restrictive headers. */
 const serveFile=(req,res,file,media=false)=>{
   let stat;try{stat=fs.statSync(file);}catch{return json(res,404,{error:'File not found.'});}if(!stat.isFile()||fs.lstatSync(file).isSymbolicLink())return json(res,404,{error:'File not found.'});
   const extension=path.extname(file).toLowerCase();

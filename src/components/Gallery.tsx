@@ -704,6 +704,7 @@ const RecoverImageButton = ({ media, onRecover }: { media: GeneratedMedia; onRec
   </button>;
 };
 
+/** Gallery grid, folders, viewer, selection and batch actions. */
 export const Gallery: React.FC<GalleryProps> = ({
   images,
   currentFolderId,
@@ -1656,6 +1657,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       .finally(() => { photoShareInFlightRef.current = false; setIsSharingPhotos(false); });
   };
 
+  /** Download the selection as one ZIP with progress, cancellation and a size budget. */
   const handleBatchDownload = async () => {
     if (selectedIds.size === 0 || batchDownloadRef.current) return;
     const controller = new AbortController();

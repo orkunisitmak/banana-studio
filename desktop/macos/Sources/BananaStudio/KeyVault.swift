@@ -41,6 +41,7 @@ enum KeyVault {
         let values: [String: String]
         let unavailable: [ProviderKey]
     }
+    /// Reads every provider key. A key that cannot be read keeps its previous value and is reported as unavailable.
     static func snapshot(previous: [String: String] = [:], read: (ProviderKey) throws -> String? = { try KeyVault.read($0) }) -> Snapshot {
         var values = previous, unavailable: [ProviderKey] = []
         for key in ProviderKey.allCases {

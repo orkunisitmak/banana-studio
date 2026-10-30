@@ -2,8 +2,10 @@ namespace BananaStudio;
 
 internal static class WebViewSessions
 {
-    // Called only after Program owns the single-instance mutex. The folder is a
-    // disposable WebView profile root, never the SQLite or media directory.
+    /// <summary>
+    /// Creates a fresh WebView profile folder and removes stale ones. Called only after Program owns
+    /// the single-instance mutex. The folder is a disposable WebView profile root, never the SQLite or media directory.
+    /// </summary>
     internal static string Create(string dataDirectory)
     {
         var root = Path.Combine(dataDirectory, "webview-sessions");
@@ -14,12 +16,14 @@ internal static class WebViewSessions
         Directory.CreateDirectory(profile);
         return profile;
     }
+    /// <summary>True when no folder from <paramref name="directory"/> up to the root is a link or junction.</summary>
     private static bool PlainAncestors(string directory)
     {
         for (var entry = new DirectoryInfo(directory); entry != null; entry = entry.Parent)
             if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return false;
         return true;
     }
+    /// <summary>True when nothing inside the folder is a link or junction.</summary>
     private static bool PlainTree(DirectoryInfo directory)
     {
         foreach (var entry in directory.EnumerateFileSystemInfos())
@@ -29,6 +33,7 @@ internal static class WebViewSessions
         }
         return true;
     }
+    /// <summary>Deletes stale GUID-named profiles; anything else, or anything containing a link, is kept.</summary>
     private static void Cleanup(string root)
     {
         foreach (var directory in new DirectoryInfo(root).EnumerateDirectories())
@@ -43,6 +48,7 @@ internal static class WebViewSessions
             catch (UnauthorizedAccessException) { }
         }
     }
+    /// <summary>Self-test for <c>--test-webview-sessions</c>, using a synthetic temporary folder.</summary>
     internal static void Test()
     {
         var fixture = Path.Combine(Path.GetTempPath(), "banana-sessions-test-" + Guid.NewGuid());

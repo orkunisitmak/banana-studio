@@ -58,6 +58,7 @@ export async function claimVideoGeneration(writer: RegistryWriter, res: VercelRe
   return {id:generationId,metadata:next};
 }
 
+/** Record task ownership, and for videos the gallery association, before the task ID reaches the browser. */
 export async function registerProviderTask(writer: RegistryWriter, provider: Provider, taskId: string, userId: string, association?: VideoTaskAssociation): Promise<void> {
   const { error } = await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId,
     ...(association?.generationId ? {generation_id:association.generationId,task_metadata:association.metadata}:{}),

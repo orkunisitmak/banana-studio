@@ -124,6 +124,7 @@ const ModelCard: React.FC<{ name: string; badge: string; badgeTone: string; best
   </div>
 );
 
+/** Modal help center with section navigation. */
 export const HelpCenter: React.FC<HelpCenterProps> = ({ open, onClose }) => {
   const [activeSection, setActiveSection] = useState<HelpSectionId>('start');
   const closeButtonRef = useRef<HTMLButtonElement>(null);

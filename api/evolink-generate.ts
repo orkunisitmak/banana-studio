@@ -54,6 +54,7 @@ const ensureSeedance20ReferenceEditAnchor = (prompt: string): string => {
   return `Use @VIDEO as the primary source footage and visual source of truth. Preserve its action, sequence, people, identity, environment, and camera language while applying only the requested changes. ${trimmedPrompt}`;
 };
 
+/** Submit an EvoLink Seedance video task for an authorized member. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();

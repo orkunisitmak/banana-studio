@@ -22,6 +22,7 @@ export const validateMediaDownloadBlob = async (blob: Blob, contentType: string)
   throw new DownloadHttpError('The download link returned a page instead of media. Reload the gallery and try again.');
 };
 
+/** Read a download response, rejecting HTTP errors and non-media bodies. */
 export const readMediaDownloadBlob = async (response: Response): Promise<Blob> => {
   if (!response.ok) throw new DownloadHttpError(`Download failed (${response.status}). Reload the gallery and try again.`);
   return validateMediaDownloadBlob(await response.blob(), response.headers.get('content-type') || '');

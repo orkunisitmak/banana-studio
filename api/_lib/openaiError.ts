@@ -29,6 +29,7 @@ export function imageQuotaDelay(response: Response, data: any, now = Date.now())
   return providerRetryDelay(response,3600,now);
 }
 
+/** Seconds to wait after a provider refusal, from Retry-After or rate-limit reset headers, never below `minimum`. */
 function providerRetryDelay(response: Response, minimum: number, now: number): number | undefined {
   // Some refusals omit `error.code` or return an opaque error body. The HTTP
   // status is authoritative; timeouts/5xx never enter this path.

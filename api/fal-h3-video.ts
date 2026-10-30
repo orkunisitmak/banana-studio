@@ -115,6 +115,7 @@ export const config = {
   maxDuration: 60,
 };
 
+/** Submit (POST) or poll (GET) a MiniMax H3 Max video task on fal. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
   // Queue state changes behind the same request URL. Without an explicit

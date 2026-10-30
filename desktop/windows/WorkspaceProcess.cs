@@ -56,12 +56,14 @@ internal sealed class WorkspaceProcess : IDisposable
         try { if (process == null) throw new IOException(); await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(value)); await process.StandardInput.FlushAsync(); }
         finally { writer.Release(); }
     }
+    /// <summary>Current keys for the workspace server; unreadable keys keep the last value sent.</summary>
     private Dictionary<string, string> LoadKeys()
     {
         var snapshot = KeyVault.ReadSnapshot(activeKeys);
         activeKeys = snapshot.Values; UnavailableKeys = snapshot.Unavailable;
         return activeKeys;
     }
+    /// <summary>Keeps a key saved in this session, so a later failed read cannot drop it.</summary>
     internal void RecordKeyChange(string name, string? value) { if (value == null) activeKeys.Remove(name); else activeKeys[name] = value; }
     internal Task RefreshKeys() => Send(new { action = "keys", keys = LoadKeys() });
     public void Dispose()

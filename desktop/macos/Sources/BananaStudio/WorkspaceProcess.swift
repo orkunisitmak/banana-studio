@@ -60,11 +60,13 @@ final class WorkspaceProcess {
         guard let handle = input?.fileHandleForWriting else { throw LaunchError.missingRuntime }
         try handle.write(contentsOf: data)
     }
+    /// Current keys for the workspace server; unreadable keys keep the last value sent.
     private func loadKeys() -> [String: String] {
         let snapshot = KeyVault.snapshot(previous: activeKeys)
         activeKeys = snapshot.values; unavailableKeys = snapshot.unavailable
         return activeKeys
     }
+    /// Keeps a key saved in this session, so a later failed read cannot drop it.
     func recordKeyChange(_ key: ProviderKey, value: String?) { activeKeys[key.rawValue] = value }
     func refreshKeys() throws { try send(["action": "keys", "keys": loadKeys()]) }
     private func failOnce() {

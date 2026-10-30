@@ -1,6 +1,7 @@
 import React, { Component, Suspense, useEffect, useRef, type ReactNode } from 'react';
 
 interface Props { label: string; onClose: () => void; inline?: boolean; children: ReactNode }
+/** Accessible loading or failure state for a lazily loaded feature. */
 const FeatureFallback = ({ label, inline, onClose, failed = false }: Omit<Props, 'children'> & { failed?: boolean }) => {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -37,6 +38,7 @@ const FeatureFallback = ({ label, inline, onClose, failed = false }: Omit<Props,
 class FeatureErrorBoundary extends Component<Props, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
+  /** Show the failure fallback after a chunk load error. */
   render() {
     return this.state.failed ? <FeatureFallback {...this.props} failed /> : this.props.children;
   }

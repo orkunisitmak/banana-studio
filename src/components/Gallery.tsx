@@ -26,6 +26,7 @@ import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { getCurrentUserId } from '../services/authService';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
@@ -1656,14 +1657,23 @@ export const Gallery: React.FC<GalleryProps> = ({
     setBatchDownloadError(null);
     try {
       const ids: string[] = Array.from(selectedIds);
+      // The manifest carries prompts and references, so a ZIP built for one
+      // account must never be saved after a switch to another.
+      const sessionUser = async () => { try { return await getCurrentUserId(); } catch { return null; } };
+      const startedBy = await sessionUser();
       const { files, failed } = await collectBatchDownload(ids, images);
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
+      // Grid records omit reference_images; the manifest needs the full row.
+      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id));
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
-      // Grid records omit reference_images; the manifest needs the full row.
-      zip.file('manifest.json', buildBatchManifest(ids, await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id)), files));
+      zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
       const content = await zip.generateAsync({ type: "blob" });
+      if (await sessionUser() !== startedBy) {
+        setBatchDownloadError('Your account changed while the ZIP was being prepared. Nothing was saved.');
+        return;
+      }
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
@@ -2463,7 +2473,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <button
                   onClick={handleBatchDownload}
                   disabled={isDownloadingBatch || isMoving}
-                  aria-label="Download selected media as ZIP"
+                  aria-label="Download selected media as ZIP, including a manifest with prompts and references"
+                  title="Includes manifest.json with prompts, settings and reference names"
                   className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
                 >
                   {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -2592,7 +2603,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>
                 {(photoShareError || photoShareMessage) && <p role={photoShareError ? 'alert' : 'status'} className={`mt-2 text-xs ${photoShareError ? 'text-red-300' : 'text-gray-400'}`}>{photoShareError || photoShareMessage}</p>}
                 <button type="button" onClick={handleBatchDownload} disabled={isDownloadingBatch || isPreparingPhotos || isSharingPhotos || isMoving}
-                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50">Download ZIP to Files instead</button>
+                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50" title="Includes manifest.json with prompts, settings and reference names">Download ZIP to Files instead</button>
               </div>
             )}
           </div>

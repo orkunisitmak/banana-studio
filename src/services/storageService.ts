@@ -35,6 +35,9 @@ const signedMediaUrls = new Map<string, { url: string; expiresAt: number }>();
 const savedPersonCovers = new Map<string, { updatedAt: number; cover: string }>();
 let mediaSessionUserId: string | null = null;
 const cacheConnections = new Set<IDBDatabase>();
+// One shared connection per account database. Opening a new connection for every
+// read left each one open until sign-out, so batch reads piled up connections.
+const sharedConnections = new WeakMap<IDBFactory, Map<string, Promise<IDBDatabase>>>();
 const localMediaObjectUrls = new Set<string>();
 const createLocalMediaObjectUrl = (blob: Blob): string => {
   const url = URL.createObjectURL(blob);
@@ -311,6 +314,7 @@ export const clearLocalMediaCache = async (previousUserId?: string): Promise<voi
   mediaSessionUserId = null;
   for (const db of cacheConnections) db.close();
   cacheConnections.clear();
+  if (typeof indexedDB !== 'undefined') sharedConnections.get(indexedDB)?.clear();
   try {
     localStorage.removeItem(PENDING_DELETIONS_KEY);
     if (previousUserId) localStorage.removeItem(`${PENDING_DELETIONS_KEY}:${previousUserId}`);
@@ -590,13 +594,29 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
   if (supabase && !userId) throw new Error('Not authenticated');
   if (expectedUserId !== undefined && userId !== expectedUserId) throw new Error('Media session changed');
   const scopedName = `${DB_NAME}:${userId || 'offline'}`;
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(scopedName, DB_VERSION);
-    request.onerror = () => reject(request.error);
+  const factory = indexedDB;
+  let shared = sharedConnections.get(factory);
+  if (!shared) sharedConnections.set(factory, shared = new Map());
+  const existing = shared.get(scopedName);
+  if (existing) return existing;
+  const connections = shared;
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
+    const request = factory.open(scopedName, DB_VERSION);
+    request.onerror = () => {
+      if (connections.get(scopedName) === opening) connections.delete(scopedName);
+      reject(request.error);
+    };
     request.onsuccess = () => {
-      cacheConnections.add(request.result);
-      request.result.onversionchange = () => { request.result.close(); cacheConnections.delete(request.result); };
-      resolve(request.result);
+      const db = request.result;
+      cacheConnections.add(db);
+      const forget = () => {
+        db.close();
+        cacheConnections.delete(db);
+        if (connections.get(scopedName) === opening) connections.delete(scopedName);
+      };
+      db.onversionchange = forget;
+      db.onclose = forget;
+      resolve(db);
     };
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -614,6 +634,8 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
       }
     };
   });
+  shared.set(scopedName, opening);
+  return opening;
 };
 
 const mapRowToMedia = (row: any): GeneratedMedia => {

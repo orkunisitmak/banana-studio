@@ -40,16 +40,26 @@ test('index records are replaced by the loaded detail record, with the index as 
   ];
   const load = async id => id === 'a' ? { ...index[0], imageGenerationPrompt: 'A pear [ref: Me]', referenceImages: [{ id: 'r1', data: 'x', mimeType: 'image/png', personName: 'Me' }] } : Promise.reject(new Error('offline'));
   const media = await loadManifestMedia(['a', 'b', 'gone'], index, load);
-  assert.deepEqual(media.map(item => item.id), ['a', 'b']);
-  const { items } = JSON.parse(buildBatchManifest(['a', 'b'], media, []));
-  assert.deepEqual([items[0].references, items[0].providerPrompt], [['Me'], 'A pear [ref: Me]']);
-  assert.deepEqual([items[1].references, items[1].providerPrompt], [[], undefined]);
+  assert.deepEqual(media.map(item => [item.media.id, item.source]), [['a', 'record'], ['b', 'index']]);
+  const { version, items } = JSON.parse(buildBatchManifest(['a', 'b'], media, []));
+  assert.equal(version, 1);
+  assert.deepEqual([items[0].references, items[0].providerPrompt, items[0].source], [['Me'], 'A pear [ref: Me]', 'record']);
+  assert.deepEqual([items[1].references, items[1].providerPrompt, items[1].source], [[], undefined, 'index']);
   // Passing the index records straight through is the bug this guards against.
   assert.deepEqual(JSON.parse(buildBatchManifest(['a'], index, [])).items[0].references, []);
 });
 
 test('a detail load that never settles falls back to the index record after the timeout', async () => {
   const index = [{ id: 'a', url: 'https://cdn/a', mediaType: 'image', prompt: 'A', aspectRatio: '1:1', resolution: '1K', createdAt: 1, referenceImages: [] }];
-  const media = await loadManifestMedia(['a'], index, () => new Promise(() => {}), 20);
-  assert.deepEqual(media.map(item => item.id), ['a']);
+  const media = await loadManifestMedia(['a'], index, () => new Promise(() => {}), { timeoutMs: 20 });
+  assert.deepEqual(media.map(item => [item.media.id, item.source]), [['a', 'index']]);
+});
+
+test('detail loads run at most `concurrency` at a time and keep selection order', async () => {
+  const index = Array.from({ length: 9 }, (_, i) => ({ id: `m${i}`, url: 'https://cdn/x', mediaType: 'image', prompt: 'P', aspectRatio: '1:1', resolution: '1K', createdAt: i, referenceImages: [] }));
+  let active = 0, peak = 0;
+  const load = async id => { active++; peak = Math.max(peak, active); await new Promise(r => setTimeout(r, 5)); active--; return { ...index.find(m => m.id === id), imageGenerationPrompt: id }; };
+  const media = await loadManifestMedia(index.map(m => m.id), index, load, { concurrency: 3 });
+  assert.equal(peak, 3);
+  assert.deepEqual(media.map(item => item.media.imageGenerationPrompt), index.map(m => m.id));
 });

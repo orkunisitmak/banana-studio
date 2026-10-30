@@ -1655,13 +1655,13 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsDownloadingBatch(true);
     setBatchDownloadError(null);
     try {
-      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
+      const ids: string[] = Array.from(selectedIds);
+      const { files, failed } = await collectBatchDownload(ids, images);
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
       // Grid records omit reference_images; the manifest needs the full row.
-      const ids: string[] = Array.from(selectedIds);
       zip.file('manifest.json', buildBatchManifest(ids, await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id)), files));
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);

@@ -1512,6 +1512,7 @@ export const Controls: React.FC<ControlsProps> = ({
             await processImageFiles(imageFiles);
         }
 
+        if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
         if (videoFiles.length > 0) {
             if (isH3VideoConfig && maxReferenceVideos === 0) {
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');

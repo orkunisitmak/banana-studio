@@ -34,7 +34,7 @@ function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = tru
   let state = { mode: 'video', videoModel: h3 ? 'minimax-h3' : 'seedance-2.5', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
   const errors = [], requests = [], gates = new Map(), slots = [], updates = []; let cursor = 0, version = 0, effects = [];
   const api = (commit = true) => { cursor = 0; effects = []; const handlers = mod.exports({ config: state, onChange: update => { if (deferred) updates.push(update); else state = typeof update === 'function' ? update(state) : update; }, setAttachmentError: value => errors.push(typeof value === 'function' ? value(errors.at(-1)) : value),
-    isH3VideoConfig: h3, h3State: { mode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: 4,
+    isH3VideoConfig: h3, h3State: { mode: state.h3MaxMode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: state.h3MaxMode === 'image_to_video' ? 0 : 4,
     useLayoutEffect: effect => effects.push(effect), useRef: value => { const index = cursor++; return slots[index] ||= { current: value }; }, useState: initial => [uploadState ?? initial, update => { uploadState = update(uploadState ?? initial); }], promptLoadVersion: version,
     draggedRefId: null, draggedGalleryItem: null, setIsDragging() {}, setIsDraggingSavedRef() {}, setDraggedGalleryItem() {}, handleAddFromGallery() {}, processImageFiles: files => new Promise(resolve => gates.set(files[0].name, { resolve })), processAudioFiles() { throw new Error('Unexpected audio read'); }, maxReferenceAudios: 3,
     setUndoStack() {}, getPersonDefinitions: () => [], refInputRef: { current: null }, setEnhanceError() {},
@@ -227,4 +227,13 @@ test('an obsolete mixed drop cannot start its video phase or clear the new draft
   assert.deepEqual(f.requests, ['new.mp4']);
   assert.equal(f.errors.at(-1), 'new.mp4 upload failed');
   assert.deepEqual(f.state().referenceVideos, []);
+});
+
+test('an obsolete mixed drop cannot report a disallowed-video error from its old action', async () => {
+  const f = scenario([], 'image_to_video'); const old = f.drop(['image.png', 'late.mp4']); await tick();
+  f.clear(); f.change(state => ({ ...state, h3MaxMode: 'insert_video' }));
+  const current = f.pick(['new.mp4']); await tick(); f.gates.get('new.mp4').reject(); await current;
+  f.gates.get('image.png').resolve(); await old;
+  assert.equal(f.errors.at(-1), 'new.mp4 upload failed');
+  assert.deepEqual(f.requests, ['new.mp4']);
 });

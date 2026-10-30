@@ -118,6 +118,11 @@ export class LocalWorkspace {
     } catch(error) { return fail(error.code==='23505'?'Row already exists.':'Local workspace operation could not be completed.',error.code||'LOCAL_VALIDATION'); }
   }
   rpc(name,args,trusted) {
+    if(name==='get_interface_language')return this.setting('interfaceLanguage');
+    if(name==='save_interface_language'){
+      if(!['en','tr'].includes(args.p_language))throw new Error('Unsupported interface language.');
+      this.setting('interfaceLanguage',args.p_language);return args.p_language;
+    }
     if(name==='get_provider_preferences')return this.setting('providerRoutes')||{};
     if(name==='save_provider_preference'){
       if(!MODEL_ROUTES[args.p_model] || args.p_provider!=='auto'&&!MODEL_ROUTES[args.p_model].includes(args.p_provider))throw new Error('Unsupported provider choice.');

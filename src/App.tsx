@@ -1,3 +1,4 @@
+import { I18nProvider } from './lib/i18n';
 import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -81,9 +82,9 @@ const normalizeStoredMedia = (media: GeneratedMedia): GeneratedMedia => {
 };
 
 export default function App() {
-  return <AuthBoundary>{({ userId, profile }, onSignOut) => (
+  return <I18nProvider><AuthBoundary>{({ userId, profile }, onSignOut) => (
     <AuthorizedWorkspace key={userId} userId={userId} userProfile={profile} onSignOut={onSignOut} />
-  )}</AuthBoundary>;
+   )}</AuthBoundary></I18nProvider>;
 }
 
 const AuthorizedWorkspace: React.FC<{

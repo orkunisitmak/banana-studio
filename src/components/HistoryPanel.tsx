@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import React from 'react';
 import { Clock, RotateCcw, X, Image as ImageIcon, Layers } from 'lucide-react';
 import { GeneratedImage } from '../types';
@@ -16,6 +17,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { t } = useI18n();
   React.useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -37,7 +39,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
       <div className="p-5 border-b border-gray-800 flex justify-between items-center bg-gray-900/50 backdrop-blur-sm">
         <div className="flex items-center gap-2 text-white">
           <Clock className="w-5 h-5 text-violet-400" />
-          <h2 className="font-semibold">History</h2>
+          <h2 className="font-semibold">{t('history')}</h2>
         </div>
         <button 
           onClick={onClose}

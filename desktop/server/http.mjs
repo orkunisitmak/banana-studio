@@ -40,7 +40,7 @@ export async function startLocalServer({ workspace, root, bootstrap, routes={}, 
       if(!equal(cookie,bootstrap))return json(res,401,{error:'Open this workspace in Banana Studio.'});
       req[LOCAL_AUTH]=true;
       if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==workspace.origin)return json(res,403,{error:'Local request origin required.'});
-      if(url.pathname==='/api/workspace-config'&&req.method==='GET')return json(res,200,{mode:'local',...workspace.identity});
+      if(url.pathname==='/api/workspace-config'&&req.method==='GET')return json(res,200,{mode:'local',...workspace.identity,language:workspace.setting('interfaceLanguage')});
       if(url.pathname==='/local/query'&&req.method==='POST'){
         if(!String(req.headers['content-type']).startsWith('application/json'))return json(res,415,{error:'JSON is required.'});
         const plan=JSON.parse((await body(req,16*1024*1024)).toString());

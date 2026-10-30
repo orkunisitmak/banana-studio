@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
@@ -402,6 +403,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const preEnhancePrompt = (config.mode === 'image'
     ? getOriginalImagePrompt(config.prompt, config.originalPrompt)
     : config.originalPrompt) ?? null;
+  const { t } = useI18n();
   const [isMinimized, setIsMinimized] = useState(false);
   const lastPromptLoadRef = useRef(0);
   useLayoutEffect(() => {
@@ -2610,7 +2612,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 <button
                     ref={templateButtonRef}
                     onClick={handleToggleTemplateMenu}
-                    title="Templates"
+                    title={t('templates')}
                     className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border transition-all ${
                         isTemplateMenuOpen ? 'border-violet-400/35 bg-violet-500/15 text-violet-200' : 'border-white/[0.07] bg-[#171e28] text-gray-400 hover:border-white/15 hover:bg-[#1b2330] hover:text-white'
                     }`}
@@ -2648,7 +2650,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                             autoFocus
                                             value={newTemplateName} 
                                             onChange={(e) => setNewTemplateName(e.target.value)}
-                                            placeholder="Template Name..."
+                                            placeholder={t('templateName')}
                                             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50"
                                             onKeyDown={(e) => e.key === 'Enter' && handleConfirmSave()}
                                          />
@@ -2660,7 +2662,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 rounded-xl text-sm font-medium text-violet-300 hover:text-violet-200 transition-all"
                                      >
                                          <Plus className="w-4 h-4" />
-                                         Save Current Settings
+                                         {t('saveSettings')}
                                      </button>
                                  )}
                              </div>
@@ -2705,7 +2707,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                                         setIsTemplateMenuOpen(false);
                                                     }}
                                                     className="p-1.5 hover:bg-blue-500/20 rounded-lg text-gray-500 hover:text-blue-400 transition-all"
-                                                    title="Update with current settings"
+                                                    title={t('updateSettings')}
                                                 >
                                                     <RefreshCw className="w-3.5 h-3.5" />
                                                 </button>
@@ -2715,7 +2717,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                                         onDeleteTemplate(t.id);
                                                     }}
                                                     className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-500 hover:text-red-400 transition-all"
-                                                    title="Delete"
+                                                    title={t('delete')}
                                                 >
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </button>
@@ -2734,7 +2736,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 <button
                     ref={brainstormButtonRef}
                     onClick={handleToggleBrainstormPanel}
-                    title="Brainstorm Ideas"
+                    title={t('brainstorm')}
                     className={`relative flex items-center justify-center w-[42px] h-[42px] rounded-xl border transition-all shrink-0 ${
                         isBrainstormPreparing
                           ? 'bg-amber-900/30 border-amber-500/50 text-amber-300' 
@@ -2768,13 +2770,13 @@ export const Controls: React.FC<ControlsProps> = ({
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <Lightbulb className="w-4 h-4 text-amber-400" />
-                              <span className="text-sm font-semibold text-white">Brainstorm Ideas</span>
+                              <span className="text-sm font-semibold text-white">{t('brainstorm')}</span>
                             </div>
                             <button 
                               onClick={() => {
                                 setIsBrainstormPanelOpen(false);
                               }}
-                              aria-label="Close Brainstorm"
+                              aria-label={t('closeBrainstorm')}
                               className="p-1 text-gray-500 hover:text-white rounded transition-colors"
                             >
                               <X className="w-4 h-4" />
@@ -2878,7 +2880,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     className={`px-2.5 h-full flex items-center gap-1 text-xs font-semibold transition-colors ${
                       !isVideoMode ? 'rounded-lg bg-violet-600 text-white shadow-sm' : 'rounded-lg text-gray-400 hover:bg-white/[0.05] hover:text-white'
                     }`}
-                    title="Image Generation"
+                    title={t('imageGeneration')}
                     aria-label="Image generation"
                     aria-pressed={!isVideoMode}
                   >
@@ -3009,7 +3011,7 @@ export const Controls: React.FC<ControlsProps> = ({
                       ) : (
                           <>
                               <span className="flex items-center gap-1.5 whitespace-nowrap text-xs">
-                                {hasStaleEnhancedPrompt ? 'Re-enhance required' : isVideoMode ? videoActionLabel : 'Generate image'}
+                                {hasStaleEnhancedPrompt ? t('enhanceRequired') : isVideoMode ? videoActionLabel : t('generateImage')}
                                 {hasStaleEnhancedPrompt
                                   ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                                   : <Sparkles className="h-3.5 w-3.5 shrink-0 fill-black" />}

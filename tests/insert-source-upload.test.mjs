@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { transformSync } from 'esbuild';
+import { build, transformSync } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
 // Execute the real file-selection handlers with independently gated upload outcomes.
-const source = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('  const processVideoFiles = async');
 const handlers = source.slice(start, source.indexOf('  const processAudioFiles = async', start));
 const counterStart = source.indexOf('  const [uploadingReferenceVideos, setUploadingReferenceVideos]');
@@ -14,10 +15,12 @@ const clearStart = source.indexOf('  const handleClearAll =');
 const clearHandler = source.slice(clearStart, source.indexOf('  const handleRemoveImage', clearStart));
 const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError } = env; ${initialize} ${handlers} ${clearHandler}; return { handleVideoFileUpload, handleClearAll, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
-const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const h3 = await build({ entryPoints: [fileURLToPath(new URL('../src/components/H3MaxSettings.tsx', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic' });
+const { getH3MaxUIState } = await import('data:text/javascript;base64,' + Buffer.from(h3.outputFiles[0].text).toString('base64'));
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const templateStart = appSource.indexOf('  const handleSelectTemplate =');
 const templateCode = transformSync(`module.exports = env => {
-  const { config, resolveImageModel, mergePersonReferenceInputs, SUNBURST_MODEL, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, toast } = env;
+  const { config, resolveImageModel, mergePersonReferenceInputs, SUNBURST_MODEL, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, getH3MaxUIState, toast } = env;
   ${appSource.slice(templateStart, appSource.indexOf('  const displayedMedia', templateStart))}
   return handleSelectTemplate;
 };`, { loader: 'ts', format: 'cjs' }).code;
@@ -37,7 +40,7 @@ function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = tru
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
     discardRender: () => { const previous = state; state = { ...state, videoModel: 'uncommitted-model' }; api(false); state = previous; },
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
-    loadTemplate: () => { templateMod.exports({ config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
+    loadTemplate: () => { templateMod.exports({ getH3MaxUIState, config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
       mergePersonReferenceInputs: (references, current, prompt) => ({ references, prompt, personGroups: [] }),
       recreateLoadIdRef: { current: 0 }, recreateLoadingRef: { current: null }, setIsRecreateLoading() {},
       setConfig: value => { state = value; }, setPromptLoadVersion: update => { version = update(version); },

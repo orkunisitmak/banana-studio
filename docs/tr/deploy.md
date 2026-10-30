@@ -40,6 +40,15 @@ Bu uygulamaya ayrılmış boş bir proje kullan. Başlangıç SQL'i sabit adlarl
 4. **Table Editor** bölümünde `profiles`, `generations`, `folders`, `authorized_emails` gibi tabloları kontrol et.
 5. **Storage** bölümünde `media` alanının oluştuğunu ve **private / özel** olduğunu kontrol et. Dosyanın oluşturduğu erişim kurallarını koru.
 
+Başlangıç dosyasından sonra aşağıdaki SQL dosyalarının her birini **bu sırayla**, uygulamayı dağıtmadan önce bir kez çalıştır. Her dosya için ayrı SQL Editor sorgusu aç. Mevcut kurulumda önce veritabanını yedekle ve yalnızca daha önce uygulanmamış dosyaları çalıştır; başlangıç dosyasını yeniden çalıştırma. Görev kurtarma API’si en güncel şemayı gerektirir.
+
+1. [20261020170000_openrouter_video_tasks.sql](../../supabase/migrations/20261020170000_openrouter_video_tasks.sql)
+2. [20261028120000_image_job_unbilled_retries.sql](../../supabase/migrations/20261028120000_image_job_unbilled_retries.sql)
+3. [20261030120000_folder_ownership.sql](../../supabase/migrations/20261030120000_folder_ownership.sql)
+4. [20261030121000_durable_refusal_retry.sql](../../supabase/migrations/20261030121000_durable_refusal_retry.sql)
+5. [20261030122000_provider_video_storage.sql](../../supabase/migrations/20261030122000_provider_video_storage.sql)
+6. [20261030123000_video_task_recovery.sql](../../supabase/migrations/20261030123000_video_task_recovery.sql)
+
 **Kontrol:** SQL başarıyla çalıştı, tablolar var, `media` özel. Geliştiriciler CLI migration yolunu da kullanabilir; migration geçmişini eşleştirmeden aynı şemaya iki yöntemi birden uygulama.
 
 ## 4. Kopyanı Vercel'e bağla

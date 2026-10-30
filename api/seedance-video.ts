@@ -1,14 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, requireUser, createUserScopedClient } from './_lib/auth.js';
+import { applyCors, requireUser, createUserScopedClient, createServiceRoleClient } from './_lib/auth.js';
 import { chooseProvider, providerKey } from './_lib/providerConfiguration.js';
 import { seedanceProviderError, falSeedanceInput, openRouterSeedanceInput } from '../src/lib/video/seedanceProviders.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
-import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
+import { prepareTaskRegistry, registerProviderTask, claimVideoGeneration, persistAcceptedVideo, requireProviderTaskOwner } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
 
 export const config = { maxDuration: 300 };
 const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
+/** Submit (POST) or poll (GET) a Seedance video task on fal, OpenRouter or EvoLink. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res); res.setHeader('Cache-Control','no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -16,13 +17,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await requireUser(req,res); if (!user) return;
   try {
     if (req.method === 'POST') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const parsed = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const body = parsed && typeof parsed==='object' ? {...parsed,mode:parsed.mode==='text_only'?'text_to_video':parsed.mode} : parsed;
       let provider;
       try { provider = chooseProvider(body?.videoModel, body?.provider); }
       catch (error) { return res.status(400).json({ error:(error as Error).message }); }
       const error = seedanceProviderError(provider, body);
       if (error) return res.status(400).json({ error });
-      if (provider === 'evolink') return evolinkGenerate(req,res);
+      if (provider === 'evolink') {
+        req.body = {...body,mode:body.mode==='text_to_video'?'text_only':body.mode};
+        return evolinkGenerate(req,res);
+      }
       if (provider !== 'fal' && provider !== 'openrouter') return res.status(400).json({ error: 'Unsupported video provider.' });
       if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 20000) return res.status(400).json({ error: 'Enter a prompt up to 20,000 characters.' });
       for (const field of ['imageUrls','videoUrls','audioUrls']) {
@@ -30,6 +35,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const registry = await prepareTaskRegistry(res); if (!registry) return;
       const fal = falSeedanceInput(body);
+      const taskMetadata = { generationProvider:provider, providerModel:provider==='fal'?fal.endpoint:`openrouter/bytedance/${body.videoModel}`, falEndpoint:provider==='fal'?fal.endpoint:`openrouter/bytedance/${body.videoModel}` };
+      const claim = await claimVideoGeneration(registry,res,body.generationId,user.id,taskMetadata); if (!claim) return;
       const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${providerKey(provider)}`, 'Content-Type':'application/json' },
         body: JSON.stringify(provider === 'fal' ? fal.input : openRouterSeedanceInput(body)),
@@ -39,14 +46,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const id = provider === 'fal' ? data?.request_id : data?.id;
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('The provider did not confirm a task ID.');
       const taskId = `bs_${provider}_${body.videoModel}_${id}`;
-      await registerProviderTask(registry, provider, taskId, user.id);
-      return res.status(200).json({ taskId, provider, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
+      await registerProviderTask(registry, provider, taskId, user.id, {generationId:claim.id,metadata:taskMetadata});
+      const persistenceWarning = await persistAcceptedVideo(registry,user.id,taskId,claim,taskMetadata);
+      return res.status(200).json({ taskId, provider, persistenceWarning, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
     }
     const taskId = req.query.taskId as string;
     const match = typeof taskId === 'string' && taskId.match(HANDLE);
     if (!match) return res.status(400).json({ error: 'Invalid video task.' });
     const [,provider,model,id] = match;
-    if (!await requireProviderTask(req,res,provider as 'fal' | 'openrouter',taskId)) return;
+    const taskOwner = await requireProviderTaskOwner(req,res,provider as 'fal' | 'openrouter',taskId);
+    if (!taskOwner) return;
     const key = process.env[provider === 'fal' ? 'FAL_KEY' : 'OPENROUTER_API_KEY'];
     if (!key) return res.status(503).json({ error: 'Restore the original provider key to recover this video.', retryable: true });
     const headers = { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${key}` };
@@ -70,7 +79,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (signed.length) return res.status(200).json({ status:'SUCCEEDED', output:signed, actualCostUsd });
     // OpenRouter's unsigned content endpoint needs our key. Copy to the user's
     // storage instead of exposing credentials or an unusable download URL.
-    const db = createUserScopedClient(req), bucket = db.storage.from('media'), path = `${user.id}/openrouter-video/${id}.mp4`;
+    // RLS on the registry already verified this caller as owner or admin.
+    // Admin polling must write under the owner's path using the server client;
+    // authenticated storage INSERT policies permit only the caller's own path.
+    const db = taskOwner === user.id ? createUserScopedClient(req) : createServiceRoleClient();
+    if (!db) return res.status(503).json({ error:'Private video storage is unavailable.', retryable:true });
+    const bucket = db.storage.from('media'), path = `${taskOwner}/openrouter-video/${id}.mp4`;
     const existing = await bucket.createSignedUrl(path,3600);
     if (!existing.error && existing.data?.signedUrl) return res.status(200).json({ status:'SUCCEEDED', output:[existing.data.signedUrl], actualCostUsd });
     const content = await fetch(`${base}/content?index=0`, { headers, redirect:'error', signal:AbortSignal.timeout(120_000) });

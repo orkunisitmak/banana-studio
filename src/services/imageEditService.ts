@@ -2,12 +2,14 @@ import type { GeneratedMedia, GenerationConfig, ReferenceImage } from '../types'
 import { SUNBURST_MODEL } from '../lib/images/openaiImage';
 import { EDIT_REGION_REQUIRED, isValidEditRegion, editRegionPixels } from '../lib/images/imageEditRegion';
 import { compositeEditPixels } from '../lib/images/imageEditPixels';
+import { refreshMediaAccessUrl } from './storageService';
 
 const imageUrl = (ref: ReferenceImage) => /^(?:data:|blob:|https?:|\/)/.test(ref.data) ? ref.data : `data:${ref.mimeType};base64,${ref.data}`;
+/** Decode an image (renewing private URLs) into a canvas, optionally at a required size. */
 const loadPixels = async (url: string, size?: { width: number; height: number }) => {
   const image = new Image();
   image.crossOrigin = 'anonymous';
-  image.src = url;
+  image.src = await refreshMediaAccessUrl(url, false);
   await image.decode().catch(() => { throw new Error('The edit image could not be loaded. Reopen it before generating.'); });
   const width = size?.width || image.naturalWidth, height = size?.height || image.naturalHeight;
   if (!width || !height || width * height > 33_554_432) throw new Error('This image is too large for protected editing.');

@@ -13,8 +13,8 @@ import { EDIT_REGION_REQUIRED, isValidEditRegion, copyEditRegion, describeEditRe
 import { readEditSource, compositeProtectedEdit } from './_lib/protectedImageEdit.js';
 import { readImageDimensions } from './_lib/imageDimensions.js';
 import { saveGeneratedImage, readStoredImage, imageSha256, signedMediaUrl, canonicalMediaUrl } from './_lib/imageStorage.js';
-import { startOpenAIRequest } from './_lib/openaiGuard.js';
-import { openAIErrorMessage, safeOpenAIErrorCode, imageRateLimitDelay } from './_lib/openaiError.js';
+import { startOpenAIRequest, type OpenAIRefusalRetry } from './_lib/openaiGuard.js';
+import { openAIErrorMessage, safeOpenAIErrorCode, imageRateLimitDelay, imageQuotaDelay } from './_lib/openaiError.js';
 
 // Match the existing deployment's 300-second function budget. No automatic
 // retry of a billable request; the saved row can be recovered after a reload.
@@ -106,6 +106,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   const guard = context.guard || await startOpenAIRequest(req, res, user, 'image', body.id);
   if (!guard) return;
   let providerStatus: number | undefined;
+  let refusedRetry: OpenAIRefusalRetry | undefined;
   let providerErrorCode: string | undefined;
   let outcome: 'completed' | 'failed' | 'rejected' = 'rejected';
   let storedPath: string | undefined;
@@ -155,13 +156,14 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       providerErrorCode = safeOpenAIErrorCode(data);
       const quotaWait = response.status===429 && providerErrorCode==='insufficient_quota' && data?.usage==null
         && (data?.data==null || Array.isArray(data.data)&&data.data.length===0);
-      const retryAfter = provider === 'openai' ? (quotaWait ? 3600 : imageRateLimitDelay(response,data)) : null;
+      const retryAfter = provider === 'openai' ? (quotaWait ? imageQuotaDelay(response,data) : imageRateLimitDelay(response,data)) : null;
       if (retryAfter && context.deferRateLimit) {
         outcome = 'rejected';
+        refusedRetry = { seconds:retryAfter, reason:quotaWait?'quota':'rate' };
         let deferred = false;
         try { deferred = await context.deferRateLimit(retryAfter,metadata.openaiRequestId as string|null,quotaWait?'quota':'rate'); }
         catch { /* Reconcile this same job if the deferral acknowledgement was lost. */ }
-        await guard.finish('rejected',metadata.openaiRequestId as string|null,429);
+        await guard.finish('rejected',metadata.openaiRequestId as string|null,429,refusedRetry);
         return res.status(202).json({ code:deferred?'IMAGE_PROVIDER_RATE_WAIT':'IMAGE_PROVIDER_RATE_STATE_UNKNOWN',retryAfter });
       }
       metadata.openaiError = { status: response.status, ...(providerErrorCode ? { code: providerErrorCode } : {}) };
@@ -238,6 +240,6 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     await guard.finish('failed', typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
     return res.status(error?.status >= 400 && error?.status <= 599 ? error.status : 502).json({ error: message });
   } finally {
-    await guard.finish(outcome, typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
+    await guard.finish(outcome, typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus, refusedRetry);
   }
 }

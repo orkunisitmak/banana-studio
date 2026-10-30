@@ -12,7 +12,9 @@
     "audit": "node scripts/audit-public-release.mjs --history",
     "build:desktop": "node scripts/build-desktop.mjs",
     "test:database": "node scripts/test-fresh-database.mjs",
-    "test:macos": "swift test --package-path desktop/macos"
+    "test:macos": "swift test --package-path desktop/macos",
+    "test:browser": "playwright test",
+    "audit:dependencies": "npm audit --audit-level=high"
   },
   "dependencies": {
     "@fal-ai/client": "1.10.1",
@@ -27,11 +29,15 @@
     "tus-js-client": "4.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/node": "22.19.7",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@vercel/node": "5.10.2",
     "@vitejs/plugin-react": "5.1.2",
     "autoprefixer": "10.4.21",
     "esbuild": "0.25.12",
+    "fake-indexeddb": "6.2.6",
     "postcss": "8.5.32",
     "postgres": "3.4.8",
     "tailwindcss": "3.4.17",
@@ -39,5 +45,20 @@
     "vite": "6.4.5"
   },
   "license": "MIT",
-  "description": "A self-hosted and local-first AI media studio"
+  "description": "A self-hosted and local-first AI media studio",
+  "overrides": {
+    "@vercel/node": {
+      "path-to-regexp": "6.3.0",
+      "undici": "6.29.1"
+    },
+    "@vercel/static-config": {
+      "ajv": "8.18.0"
+    },
+    "tsx": {
+      "esbuild": "0.28.1"
+    },
+    "@vercel/cli-config": {
+      "zod": "4.6.6"
+    }
+  }
 }

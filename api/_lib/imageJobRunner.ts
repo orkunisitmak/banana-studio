@@ -4,6 +4,7 @@ import { executeOpenAIImage } from '../openai-image-generate.js';
 import { refreshImageJobReferences } from './imageJobPayload.js';
 import { readStoredImage } from './imageStorage.js';
 import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
+import type { OpenAIRefusalRetry } from './openaiGuard.js';
 import type { ImageJobMessage } from './imageJobQueue.js';
 
 export class ImageJobWait extends Error {
@@ -16,10 +17,12 @@ const rpc = async (db:any,name:string,args:Record<string,unknown>) => {
 };
 const finishAudit = (db:any,id:string) => {
   let finished=false;
-  return { id, async finish(outcome:'completed'|'failed'|'rejected',requestId?:string|null,status?:number) {
+  return { id,
+  /** Record the audit outcome once; a refusal can carry a retry delay. */
+  async finish(outcome:'completed'|'failed'|'rejected',requestId?:string|null,status?:number,retry?:OpenAIRefusalRetry) {
     if (finished) return;
     const safe = requestId && /^[a-zA-Z0-9_-]{1,128}$/.test(requestId)?requestId:null;
-    await rpc(db,'finish_openai_request',{p_id:id,p_outcome:outcome,p_provider_request_id:safe,p_provider_status:status||null});
+    await rpc(db,'finish_openai_request',{p_id:id,p_outcome:outcome,p_provider_request_id:safe,p_provider_status:status||null,...(retry?{p_retry_after:retry.seconds,p_wait_reason:retry.reason}:{})});
     finished=true;
   } };
 };

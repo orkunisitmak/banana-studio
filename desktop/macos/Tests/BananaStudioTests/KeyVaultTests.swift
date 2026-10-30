@@ -21,3 +21,22 @@ final class KeyVaultTests: XCTestCase {
         XCTAssertNil(try KeyVault.read(.openAI, service: service))
     }
 }
+
+final class KeyVaultRecoveryTests: XCTestCase {
+    func testUnreadableProviderDoesNotPreventOtherKeysLoading() {
+        let snapshot = KeyVault.snapshot { key in
+            if key == .openAI { throw KeyVault.VaultError.unavailable }
+            return key == .fal ? "synthetic-fal" : nil
+        }
+        XCTAssertEqual(snapshot.values, [ProviderKey.fal.rawValue: "synthetic-fal"])
+        XCTAssertEqual(snapshot.unavailable, [.openAI])
+    }
+    func testRefreshPreservesUnreadableKeysAndClearsOnlyConfirmedMissingKeys() {
+        let snapshot = KeyVault.snapshot(previous: [ProviderKey.openAI.rawValue:"synthetic-openai", ProviderKey.fal.rawValue:"synthetic-fal"]) { key in
+            if key == .openAI { throw KeyVault.VaultError.unavailable }
+            return nil
+        }
+        XCTAssertEqual(snapshot.values, [ProviderKey.openAI.rawValue:"synthetic-openai"])
+        XCTAssertEqual(snapshot.unavailable, [.openAI])
+    }
+}

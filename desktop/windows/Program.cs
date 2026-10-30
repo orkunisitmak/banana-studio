@@ -12,6 +12,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Contains("--test-vault")) { try { KeyVault.Test(); return 0; } catch { return 1; } }
+        if (args.Contains("--test-webview-sessions")) { try { WebViewSessions.Test(); return 0; } catch { return 1; } }
         if (args.Contains("--test-window-placement")) { try { WindowPlacement.Test(); return 0; } catch { return 1; } }
         ApplicationConfiguration.Initialize();
         using var instance = new Mutex(true, "Local\\BananaStudio.Workspace", out var first);
@@ -114,7 +115,7 @@ internal sealed class StudioWindow : Form
         {
             // A fresh browser profile matches the Mac shell's nonpersistent session.
             // Durable user data lives in the shared SQLite workspace, never here.
-            profile = Path.Combine(WorkspaceProcess.DataDirectory, "webview-sessions", Guid.NewGuid().ToString());
+            profile = WebViewSessions.Create(WorkspaceProcess.DataDirectory);
             var environment = await CoreWebView2Environment.CreateAsync(null, profile);
             await web.EnsureCoreWebView2Async(environment);
             var core = web.CoreWebView2;
@@ -155,7 +156,8 @@ internal sealed class StudioWindow : Form
                 // Unicode text, undo and selection retain real clipboard semantics.
             };
             var ready = await workspace.Start(); origin = ready.Origin;
-            core.NavigationCompleted += (_, args) => { if (args.IsSuccess && Local(core.Source)) status.Visible = false; else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio."); };
+            var keyNoticeShown = false;
+            core.NavigationCompleted += (_, args) => { if (args.IsSuccess && Local(core.Source)) { status.Visible = false; if (!keyNoticeShown) { keyNoticeShown = true; ShowKeyWarning(); } } else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio."); };
             var request = environment.CreateWebResourceRequest(new Uri(origin, "/local/bootstrap").AbsoluteUri, "GET", null, "X-Banana-Bootstrap: " + ready.Bootstrap + "\r\n");
             core.NavigateWithWebResourceRequest(request);
         }
@@ -175,6 +177,13 @@ internal sealed class StudioWindow : Form
         }
         finally { fullscreenTransition = false; CaptureNormalWindowBounds(); }
     }
+    /// <summary>Tells the person which saved provider keys could not be read; the gallery still opens.</summary>
+    private void ShowKeyWarning()
+    {
+        if (workspace.UnavailableKeys.Length == 0) return;
+        var providers = KeyVault.Providers.Where(p => workspace.UnavailableKeys.Contains(p.Name)).Select(p => p.Label);
+        MessageBox.Show(this, "Windows Credential Manager could not read: " + string.Join(", ", providers) + ". Your gallery is available and saved keys are kept. Check Credential Manager, then open Provider API Keys and Save to retry.", "Some provider keys are unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
     private bool keysOpen;
     private async Task ShowKeys()
     {
@@ -188,9 +197,10 @@ internal sealed class StudioWindow : Form
             grid.Controls.Add(info, 0, 0); grid.SetColumnSpan(info, 3);
             var rows = new List<(string Name, TextBox Field, CheckBox Remove)>();
             var row = 1;
+            var snapshot = KeyVault.ReadSnapshot();
             foreach (var provider in KeyVault.Providers)
             {
-                var field = new TextBox { Width = 300, UseSystemPasswordChar = true, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = KeyVault.Read(provider.Name) != null ? "Saved in Credential Manager" : "Paste your API key" };
+                var field = new TextBox { Width = 300, UseSystemPasswordChar = true, BackColor = Color.FromArgb(13, 17, 23), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, PlaceholderText = snapshot.Unavailable.Contains(provider.Name) ? "Credential Manager unavailable; key kept" : snapshot.Values.ContainsKey(provider.Name) ? "Saved in Credential Manager" : "Paste your API key" };
                 var remove = new CheckBox { Text = "Remove", AutoSize = true };
                 grid.Controls.Add(new Label { Text = provider.Label, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
                 grid.Controls.Add(field, 1, row); grid.Controls.Add(remove, 2, row++); rows.Add((provider.Name, field, remove));
@@ -200,8 +210,13 @@ internal sealed class StudioWindow : Form
             buttons.Controls.Add(save); buttons.Controls.Add(cancel); grid.Controls.Add(buttons, 0, row); grid.SetColumnSpan(buttons, 3);
             dialog.Controls.Add(grid); dialog.AcceptButton = save; dialog.CancelButton = cancel;
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            foreach (var item in rows) { if (item.Remove.Checked) KeyVault.Save(item.Name, null); else if (!string.IsNullOrWhiteSpace(item.Field.Text)) KeyVault.Save(item.Name, item.Field.Text.Trim()); item.Field.Clear(); }
-            await workspace.RefreshKeys();
+            foreach (var item in rows)
+            {
+                if (item.Remove.Checked) { KeyVault.Save(item.Name, null); workspace.RecordKeyChange(item.Name, null); }
+                else if (!string.IsNullOrWhiteSpace(item.Field.Text)) { var value = item.Field.Text.Trim(); KeyVault.Save(item.Name, value); workspace.RecordKeyChange(item.Name, value); }
+                item.Field.Clear();
+            }
+            await workspace.RefreshKeys(); ShowKeyWarning();
         }
         catch { MessageBox.Show(this, "The keys could not be saved or activated. Check Windows Credential Manager and try again.", "Provider API Keys", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         finally { keysOpen = false; }

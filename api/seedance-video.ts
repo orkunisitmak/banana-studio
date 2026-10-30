@@ -6,6 +6,7 @@ import { isReferenceUrl } from './_lib/providerMedia.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 export const config = { maxDuration: 300 };
 const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
@@ -14,6 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!['GET','POST'].includes(req.method || '')) return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireUser(req,res); if (!user) return;
+  if (req.method === 'POST' && !await requireSpendingAllowance(req, res)) return;
   try {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;

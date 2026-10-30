@@ -14,6 +14,7 @@ import {
   ProviderUsageSummary,
 } from '../services/authService';
 import { TextModelSettings } from './TextModelSettings';
+import { SpendingLimitSettings } from './SpendingLimitSettings';
 import { AdminModelUsage, AdminProviderUsage } from './AdminModelUsage';
 import { AdminUsageFilter } from './AdminUsageFilter';
 import { AdminUsagePeriod, resolveAdminUsageRange } from '../lib/admin/adminUsageRange';
@@ -503,6 +504,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
           <div className="p-4 sm:p-6">
             <div className="max-w-2xl">
               <TextModelSettings />
+              <SpendingLimitSettings admin />
 
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-1">

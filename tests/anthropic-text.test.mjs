@@ -7,6 +7,16 @@ import fs from 'node:fs';
 const compiled = await build({ entryPoints: [fileURLToPath(new URL('../api/_lib/anthropicText.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' });
 const { buildAnthropicMessage, readAnthropicMessage, calculateAnthropicCost } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
+test('web setup in both languages accepts an Anthropic-only Opus key', () => {
+  for (const lang of ['en', 'tr']) {
+    const deploy = fs.readFileSync(fileURLToPath(new URL(`../docs/${lang}/deploy.md`, import.meta.url)), 'utf8');
+    const models = fs.readFileSync(fileURLToPath(new URL(`../docs/${lang}/models.md`, import.meta.url)), 'utf8');
+    assert.match(deploy, /Opus 5\.5[^\n]*`ANTHROPIC_API_KEY`[^\n]*`OPENROUTER_API_KEY`/);
+    assert.doesNotMatch(deploy, /Opus 5\.5[^\n]*(?:requires OpenRouter|OpenRouter ister)/);
+    assert.match(models, /\| Anthropic \| \[[^\]]+\]\(https:\/\/platform\.claude\.com\/settings\/keys\)/);
+  }
+});
+
 test('Claude can use a direct Anthropic key without OpenRouter', () => {
   assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'auto', { anthropic: true }), 'anthropic');
   assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'anthropic', { anthropic: true }), 'anthropic');
@@ -23,6 +33,12 @@ test('native Messages payload maps text, base64 image and structured brainstorm 
   assert.equal(request.messages[0].content[0].type, 'text');
   assert.equal(request.reasoning, undefined);
   assert.equal(request.response_format, undefined);
+});
+
+test('malformed base64 image data is rejected before a paid provider call', () => {
+  assert.throws(() => buildAnthropicMessage({ model: 'anthropic/claude-opus-5.5',
+    contents: { parts: [{ text: 'Describe this' }, { inlineData: { mimeType: 'image/png', data: 'a' } }] },
+    usageContext: { action: 'enhance', prompt: 'Describe this' } }), /image references/);
 });
 
 test('Opus 5.5 supports Max effort through the direct Anthropic API', () => {
@@ -51,4 +67,58 @@ test('server route, frontend route and desktop vaults expose direct Anthropic wi
   assert.match(read('desktop/macos/Sources/BananaStudio/KeyVault.swift'), /ANTHROPIC_API_KEY/);
   assert.match(read('desktop/windows/KeyVault.cs'), /ANTHROPIC_API_KEY/);
   assert.match(read('api/gemini-status.ts'), /providers\.anthropic/);
+});
+
+async function loadHandler() {
+  const route = await build({ entryPoints: [fileURLToPath(new URL('../api/anthropic-text-generate.ts', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'anthropic-handler-fixture', setup(builder) {
+      builder.onResolve({ filter: /_lib\/(auth|openaiGuard)\.js$/ }, args => ({ path: args.path.includes('auth') ? 'auth' : 'guard', namespace: 'fixture' }));
+      builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: args.path === 'auth'
+        ? `export const applyCors = () => {}; export const requireUser = async () => ({ id: 'fixture-user' }); export const createUserScopedClient = () => ({ from: () => ({ insert: () => ({ abortSignal: async () => ({ error: globalThis.__anthropicUsageError ?? null }) }) }) });`
+        : `export const startOpenAIRequest = async () => ({ id: 'fixture-request', finish: async () => {} });`, loader: 'js' }));
+    } }] });
+  const { default: handler } = await import('data:text/javascript;base64,' + Buffer.from(route.outputFiles[0].text).toString('base64'));
+  return handler;
+}
+
+async function runHandlerScenario(providerResponse, usageError = null) {
+  const handler = await loadHandler();
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.ANTHROPIC_API_KEY;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return providerResponse; };
+  globalThis.__anthropicUsageError = usageError;
+  process.env.ANTHROPIC_API_KEY = 'fixture-not-a-real-key';
+  const res = { statusCode: 200, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; }, off() {} };
+  try {
+    await handler({ method: 'POST', headers: {}, body: { model: 'anthropic/claude-opus-5.5', contents: { parts: [{ text: 'hello' }] }, usageContext: { action: 'enhance', prompt: 'hello' } } }, res);
+    return { res, calls };
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete globalThis.__anthropicUsageError;
+    if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = originalKey;
+  }
+}
+
+test('a non-JSON provider 529 remains a retryable 529 without a second paid request', async () => {
+  const { res, calls } = await runHandlerScenario(new Response('temporarily overloaded', { status: 529 }));
+  assert.equal(res.statusCode, 529);
+  assert.match(res.body.error, /busy or rate limited/);
+  assert.equal(calls, 1);
+});
+
+test('an incomplete provider reply fails rather than returning partial text or repeating the request', async () => {
+  const { res, calls } = await runHandlerScenario(Response.json({ stop_reason: 'max_tokens', content: [{ type: 'text', text: 'partial' }] }));
+  assert.equal(res.statusCode, 502);
+  assert.match(res.body.error, /did not finish/);
+  assert.equal(calls, 1);
+});
+
+test('a usage log insert error returns the result with usageLogged false', async () => {
+  const { res, calls } = await runHandlerScenario(Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'complete' }], usage: { input_tokens: 1, output_tokens: 1 } }), { message: 'fixture write failure' });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.text, 'complete');
+  assert.equal(res.body.usageMetadata.usageLogged, false);
+  assert.equal(calls, 1);
 });

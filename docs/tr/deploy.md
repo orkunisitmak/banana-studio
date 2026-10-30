@@ -68,8 +68,8 @@ Ortam değişkeni, Vercel'in uygulamaya verdiği isimli bir ayardır. Kurulum ek
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase sunucu kimlik bilgisi: server secret veya eski `service_role` anahtarı; uygulamadaki değişken adı budur | Sunucunun iş ve görevleri için evet |
 | `CRON_SECRET` | Parola yöneticinle ürettiğin yeni rastgele sır; tercihen en az 32 karakter | Evet |
 | `OPENAI_API_KEY` | OpenAI anahtarı | GPT Image 2.5 ve/veya GPT-6.1 Sol için |
-| `OPENROUTER_API_KEY` | OpenRouter anahtarı | Başlangıç yaratıcı modeli Opus 5.5 için |
-| `ANTHROPIC_API_KEY` | Anthropic Console anahtarı | Doğrudan Claude metin üretimi; ayarlıysa OpenRouter'dan önce seçilir |
+| `OPENROUTER_API_KEY` | OpenRouter anahtarı | Opus 5.5 ve desteklenen diğer modeller için isteğe bağlı rota |
+| `ANTHROPIC_API_KEY` | Anthropic Console anahtarı | Doğrudan Opus 5.5 metin üretimi; ikisi de ayarlıysa Auto önce bunu seçer |
 | `GEMINI_API_KEY` | Google Gemini anahtarı | Gemini metin görevleri ve video analizi için |
 | `FAL_KEY` | fal.ai anahtarı | Nano Banana, H3 Max ve desteklenen video ön işlemleri için |
 | `EVOLINK_API_KEY` | EvoLink anahtarı | Seedance için |
@@ -119,7 +119,7 @@ Script, örnek adresi ve doğrulanmamış/bulunmayan hesapları özellikle redde
 
 ## 8. Uçtan uca kontrol et
 
-1. **AI settings** bölümünde anahtarını girdiğin metin sağlayıcısını seç. Başlangıçtaki Opus 5.5 / Medium, OpenRouter ister.
+1. **AI settings** bölümünde anahtarını girdiğin metin sağlayıcısını seç. Başlangıçtaki Opus 5.5 / Medium için `ANTHROPIC_API_KEY` veya `OPENROUTER_API_KEY` yeterlidir. İkisi de ayarlıysa Auto önce Anthropic'i seçer.
 2. Ayarladığın görsel modelini seç; örneğin OpenAI anahtarıyla GPT Image 2.5.
 3. Kendi promptunla tek bir test görseli gönder. Bu gerçek sağlayıcı isteğidir, bakiyenden kullanım yapar.
 4. Sonucun tamamlandığını, sayfayı yenileyince galeride kaldığını ve indirildiğini doğrula.

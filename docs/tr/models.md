@@ -65,6 +65,7 @@ Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya W
 | --- | --- | --- |
 | OpenAI | [API anahtarları](https://platform.openai.com/api-keys) | [OpenAI API başlangıç rehberi](https://developers.openai.com/api/docs/quickstart) |
 | OpenRouter | [API anahtarları](https://openrouter.ai/settings/keys) | [Başlangıç rehberi](https://openrouter.ai/docs/quickstart) |
+| Anthropic | [API anahtarları](https://platform.claude.com/settings/keys) | [Messages API](https://platform.claude.com/docs/en/api/messages) |
 | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) | [Gemini API anahtarları](https://ai.google.dev/gemini-api/docs/api-key) |
 | fal.ai | [Anahtar paneli](https://fal.ai/dashboard/keys) | [fal başlangıç rehberi](https://fal.ai/docs/documentation/quickstart) |
 | EvoLink | [EvoLink hesabı](https://evolink.ai) | [API dokümanları](https://docs.evolink.ai) |

@@ -19,7 +19,8 @@ export function buildAnthropicMessage(body: any) {
   const content = parts.map((part: any) => {
     if (typeof part?.text === 'string' && !part.inlineData && !part.fileData) return { type: 'text', text: part.text };
     if (part?.text == null && !part.fileData && ['image/jpeg', 'image/png', 'image/webp'].includes(part?.inlineData?.mimeType)
-      && typeof part.inlineData.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(part.inlineData.data))
+      && typeof part.inlineData.data === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(part.inlineData.data)
+      && part.inlineData.data.length > 0)
       return { type: 'image', source: { type: 'base64', media_type: part.inlineData.mimeType, data: part.inlineData.data } };
     throw new Error('This model accepts text and image references. YouTube footage requires Gemini.');
   });

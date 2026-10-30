@@ -55,9 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }), deadline.signal);
     providerStatus = response.status;
     requestId = response.headers.get('request-id');
+    if (!response.ok) return fail(response.status, providerError(response.status));
     const data = await waitForTask(response.json(), deadline.signal);
     deadline.dispose();
-    if (!response.ok) return fail(response.status, providerError(response.status));
     requestId = typeof data?.id === 'string' ? data.id : requestId;
     let usageLogged = false, usageLoggingPending = false;
     const accounting = createTaskDeadline(5_000);

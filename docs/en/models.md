@@ -65,6 +65,7 @@ Create an account with the provider, open its key dashboard, create a key and co
 | --- | --- | --- |
 | OpenAI | [API keys](https://platform.openai.com/api-keys) | [OpenAI API quickstart](https://developers.openai.com/api/docs/quickstart) |
 | OpenRouter | [API keys](https://openrouter.ai/settings/keys) | [Quickstart](https://openrouter.ai/docs/quickstart) |
+| Anthropic | [API keys](https://platform.claude.com/settings/keys) | [Messages API](https://platform.claude.com/docs/en/api/messages) |
 | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) | [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key) |
 | fal.ai | [Key dashboard](https://fal.ai/dashboard/keys) | [fal quickstart](https://fal.ai/docs/documentation/quickstart) |
 | EvoLink | [EvoLink account](https://evolink.ai) | [API documentation](https://docs.evolink.ai) |

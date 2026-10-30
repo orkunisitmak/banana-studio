@@ -25,7 +25,7 @@ import { YouTubePreviewDialog } from './YouTubePreviewDialog';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
-import { buildBatchManifest } from '../lib/gallery/batchManifest';
+import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
@@ -1660,7 +1660,9 @@ export const Gallery: React.FC<GalleryProps> = ({
       if (!files.length) return;
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
-      zip.file('manifest.json', buildBatchManifest(Array.from(selectedIds), images, files));
+      // Grid records omit reference_images; the manifest needs the full row.
+      const ids: string[] = Array.from(selectedIds);
+      zip.file('manifest.json', buildBatchManifest(ids, await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id)), files));
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');

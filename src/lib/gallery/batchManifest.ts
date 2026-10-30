@@ -18,6 +18,16 @@ export interface BatchManifestEntry {
   references: string[];
 }
 
+/** Gallery index records omit reference_images and other detail-only
+ * fields, so load the full record for each item and keep the index record
+ * only when that load fails. */
+export const loadManifestMedia = async (
+  ids: string[], index: GeneratedMedia[], load: (id: string) => Promise<GeneratedMedia | null>,
+): Promise<GeneratedMedia[]> => {
+  const records = await Promise.all(ids.map(async id => (await load(id).catch(() => null)) ?? index.find(media => media.id === id)));
+  return records.filter((media): media is GeneratedMedia => !!media);
+};
+
 const timestamp = (value: number): string => Number.isFinite(value) ? new Date(value).toISOString() : '';
 
 /** Describe the selected items next to their ZIP file names. Only reference
@@ -42,7 +52,11 @@ export const buildBatchManifest = (
       resolution: item.mediaType === 'video' ? item.videoQuality : item.resolution,
       videoDuration: item.videoOutputDuration ?? item.videoDuration,
       costUsd: item.generationCost?.usd,
-      references: (item.referenceImages || []).map(reference => reference.personName || reference.id),
+      references: [
+        ...(item.referenceImages || []).map(reference => reference.personName || reference.id),
+        ...(item.referenceVideos || []).map(reference => reference.id),
+        ...(item.referenceAudios || []).map(reference => reference.name || reference.id),
+      ],
     };
     return [entry];
   });

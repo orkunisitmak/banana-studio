@@ -18,13 +18,15 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT plan (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY`, or [Codex sign-in](#use-gpt-image-with-a-chatgpt-plan) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
+| Opus 5.5 — default creative model, Medium | Anthropic Console API → OpenRouter | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
 | YouTube search / channel and video metadata | YouTube Data API v3 | `YOUTUBE_API_KEY` |
+
+Direct Anthropic uses the [Messages API](https://platform.claude.com/docs/en/api/messages) with server-side keys, image input and [structured Brainstorm output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs). The native model ID is `claude-opus-5-5`; the app keeps `anthropic/claude-opus-5.5` as its route identifier. Direct Anthropic supports Low through Max effort. Footage analysis still requires Gemini; a Claude text/image brief does not read YouTube footage.
 
 ### Use GPT Image with a ChatGPT plan
 

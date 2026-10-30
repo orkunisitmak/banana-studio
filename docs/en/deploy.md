@@ -69,6 +69,7 @@ An environment variable is a named setting supplied to the application by Vercel
 | `CRON_SECRET` | A fresh random secret, preferably at least 32 characters, generated with your password manager | Yes |
 | `OPENAI_API_KEY` | OpenAI key | For GPT Image 2.5 and/or GPT-6.1 Sol |
 | `OPENROUTER_API_KEY` | OpenRouter key | For Opus 5.5, the initial creative default |
+| `ANTHROPIC_API_KEY` | Anthropic Console key | Direct Claude text generation; preferred over OpenRouter when configured |
 | `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |
 | `FAL_KEY` | fal.ai key | For Nano Banana, H3 Max and supported video preprocessing |
 | `EVOLINK_API_KEY` | EvoLink key | For Seedance |

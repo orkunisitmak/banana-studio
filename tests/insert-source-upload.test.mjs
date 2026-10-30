@@ -17,10 +17,12 @@ const code = transformSync(`module.exports = env => { const { config, onChange, 
 const mod = { exports: {} }; new Function('module', code)(mod);
 const h3 = await build({ entryPoints: [fileURLToPath(new URL('../src/components/H3MaxSettings.tsx', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic' });
 const { getH3MaxUIState } = await import('data:text/javascript;base64,' + Buffer.from(h3.outputFiles[0].text).toString('base64'));
+const referenceModule = await build({ entryPoints: [fileURLToPath(new URL('../src/lib/images/imageReferences.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { getReferenceImageLimit } = await import('data:text/javascript;base64,' + Buffer.from(referenceModule.outputFiles[0].text).toString('base64'));
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const templateStart = appSource.indexOf('  const handleSelectTemplate =');
 const templateCode = transformSync(`module.exports = env => {
-  const { config, resolveImageModel, mergePersonReferenceInputs, SUNBURST_MODEL, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, getH3MaxUIState, toast } = env;
+  const { config, resolveImageModel, mergePersonReferenceInputs, SUNBURST_MODEL, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, getH3MaxUIState, getReferenceImageLimit, toast } = env;
   ${appSource.slice(templateStart, appSource.indexOf('  const displayedMedia', templateStart))}
   return handleSelectTemplate;
 };`, { loader: 'ts', format: 'cjs' }).code;
@@ -40,7 +42,7 @@ function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = tru
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
     discardRender: () => { const previous = state; state = { ...state, videoModel: 'uncommitted-model' }; api(false); state = previous; },
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
-    loadTemplate: () => { templateMod.exports({ getH3MaxUIState, config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
+    loadTemplate: () => { templateMod.exports({ getH3MaxUIState, getReferenceImageLimit, config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
       mergePersonReferenceInputs: (references, current, prompt) => ({ references, prompt, personGroups: [] }),
       recreateLoadIdRef: { current: 0 }, recreateLoadingRef: { current: null }, setIsRecreateLoading() {},
       setConfig: value => { state = value; }, setPromptLoadVersion: update => { version = update(version); },

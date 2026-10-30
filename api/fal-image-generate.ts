@@ -3,6 +3,7 @@ import { applyCors, requireUser } from './_lib/auth.js';
 import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
 import { getNanoBanana21InputError, NANO_BANANA_21_ENDPOINT } from '../src/lib/images/nanoBanana21.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 
@@ -67,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const user = await requireUser(req, res);
   if (!user) return;
+  if (!await requireSpendingAllowance(req, res)) return;
 
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });

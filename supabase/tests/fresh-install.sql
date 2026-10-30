@@ -78,3 +78,47 @@ BEGIN
  PERFORM public.dispatch_image_job('sent-job',token,'{}');
  IF public.claim_image_job('sent-job',member,gen_random_uuid())->>'action'<>'observe' THEN RAISE EXCEPTION 'An accepted dispatch was requeued';END IF;
 END $$;
+-- Spending limits: a workspace default limits members, not admins; account
+-- limits and exemptions override it; only admins change or read other accounts.
+INSERT INTO public.usage_logs(user_id,action,model,image_count,estimated_cost,created_at) VALUES
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic',1,4,now()),
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic',1,-100,now()),
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic',1,50,date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'-interval '1 second');
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000002',false);
+SELECT set_config('request.jwt.claims','{"email":"member@example.invalid"}',false);
+DO $$ DECLARE s jsonb; BEGIN
+ s:=public.get_spending_status();
+ IF (s->>'spentUsd')::numeric<>4 OR s->>'limitUsd' IS NOT NULL OR (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Unlimited member status is incorrect: %',s;END IF;
+ BEGIN PERFORM public.set_spending_limit('workspace',NULL,'limit',1);RAISE EXCEPTION 'Member changed the workspace limit';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ BEGIN PERFORM public.get_spending_status('00000000-0000-4000-8000-000000000001');RAISE EXCEPTION 'Member read another account';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ BEGIN PERFORM public.get_workspace_spending();RAISE EXCEPTION 'Member listed workspace spending';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ BEGIN PERFORM * FROM public.user_spending_limits;RAISE EXCEPTION 'Member read limit rows';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+END $$;
+SELECT set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000001',false);
+SELECT set_config('request.jwt.claims','{"email":"owner@example.invalid"}',false);
+DO $$ DECLARE member uuid:='00000000-0000-4000-8000-000000000002'; s jsonb; BEGIN
+ s:=public.set_spending_limit('workspace',NULL,'limit',4);
+ IF s->>'source'<>'admin' OR s->>'limitUsd' IS NOT NULL THEN RAISE EXCEPTION 'Workspace default limited an admin: %',s;END IF;
+ s:=public.get_spending_status(member);
+ IF s->>'source'<>'workspace' OR (s->>'limitUsd')::numeric<>4 OR NOT (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Workspace default not applied: %',s;END IF;
+ s:=public.set_spending_limit('account',member,'limit',10);
+ IF s->>'source'<>'account' OR (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Account limit not applied: %',s;END IF;
+ s:=public.set_spending_limit('account',member,'exempt',NULL);
+ IF s->>'source'<>'exempt' OR s->>'limitUsd' IS NOT NULL THEN RAISE EXCEPTION 'Exemption not applied: %',s;END IF;
+ s:=public.set_spending_limit('account',member,'inherit',NULL);
+ IF s->>'source'<>'workspace' THEN RAISE EXCEPTION 'Inherit did not restore the default: %',s;END IF;
+ BEGIN PERFORM public.set_spending_limit('account',member,'limit',-1);RAISE EXCEPTION 'Negative limit accepted';
+ EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+ BEGIN PERFORM public.set_spending_limit('workspace',NULL,'limit',NULL);RAISE EXCEPTION 'Empty workspace limit accepted';
+ EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+ IF jsonb_array_length(public.get_workspace_spending())<>2 OR NOT EXISTS(SELECT FROM jsonb_array_elements(public.get_workspace_spending()) e WHERE e->>'email'='member@example.invalid' AND (e->>'spentUsd')::numeric=4)
+  THEN RAISE EXCEPTION 'Workspace spending list is incorrect: %',public.get_workspace_spending();END IF;
+ PERFORM public.set_spending_limit('workspace',NULL,'none',NULL);
+ IF (public.get_spending_status(member)->>'limitUsd') IS NOT NULL THEN RAISE EXCEPTION 'Workspace limit was not removed';END IF;
+END $$;
+RESET ROLE;

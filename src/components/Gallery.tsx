@@ -25,8 +25,7 @@ import { YouTubePreviewDialog } from './YouTubePreviewDialog';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
-import { buildBatchManifest, loadManifestMedia, settleWithin, DETAIL_LOAD_TIMEOUT_MS } from '../lib/gallery/batchManifest';
-import { getCurrentUserId } from '../services/authService';
+import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
@@ -812,6 +811,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  const galleryAccountRef = useRef('');
+  galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
@@ -1659,10 +1660,10 @@ export const Gallery: React.FC<GalleryProps> = ({
     try {
       const ids: string[] = Array.from(selectedIds);
       // The manifest carries prompts and references, so a ZIP built for one
-      // account must never be saved after a switch to another.
-      // A lookup that fails or hangs counts as no account, so it can neither block the ZIP nor match a real one.
-      const sessionUser = () => settleWithin(getCurrentUserId(), DETAIL_LOAD_TIMEOUT_MS, null);
-      const startedBy = await sessionUser();
+      // account or gallery must never be saved after a switch to another. The
+      // key is pinned at the click, synchronously, from the state the gallery
+      // itself resets on a switch; no network lookup can race or fail here.
+      const startedFor = galleryAccountRef.current;
       const { files, failed } = await collectBatchDownload(ids, images);
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
@@ -1674,7 +1675,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       const content = await zip.generateAsync({ type: "blob" });
       // The account switch already reset the gallery and its selection bar, so
       // there is nowhere to report this; the new account's gallery is the feedback.
-      if (await sessionUser() !== startedBy) return;
+      if (galleryAccountRef.current !== startedFor) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;

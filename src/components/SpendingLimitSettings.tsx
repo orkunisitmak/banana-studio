@@ -143,7 +143,7 @@ export function SpendingLimitSettings({ admin = false }: { admin?: boolean }) {
     </div>}
     {admin && !local && accounts.length > 0 && <div>
       <p className="mb-2 text-xs font-medium text-gray-300">Accounts</p>
-      <ul className="space-y-2">{accounts.map(account => <AccountRow key={account.userId} account={account} onSaved={() => void reload()} />)}</ul>
+      <ul className="space-y-2">{accounts.map(account => <React.Fragment key={account.userId}><AccountRow account={account} onSaved={() => void reload()} /></React.Fragment>)}</ul>
     </div>}
     {message && <p role="status" className="mt-3 text-xs text-emerald-300">{message}</p>}
     {error && <p role="alert" className="mt-3 text-xs text-red-300">{error}</p>}

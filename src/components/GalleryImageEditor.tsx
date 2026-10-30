@@ -1,7 +1,7 @@
 import { ProviderRouteControl, useProviderRoute } from './ProviderRoutingSettings';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getClipboardImages } from '../lib/references/clipboardImages';
-import { AlertTriangle, ArrowRight, Check, Image as ImageIcon, ImagePlus, Loader2, Pencil, RotateCcw, Sparkles, Wand2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Expand, Image as ImageIcon, ImagePlus, Loader2, Pencil, RotateCcw, Sparkles, SquareDashedMousePointer, Wand2, X } from 'lucide-react';
 import { displayReferencePrompt, storeReferencePrompt } from '../lib/references/dynamicReferences';
 import { getStableImageTag } from '../lib/references/referenceTokens';
 import { validateImageGenerationReferences } from '../lib/images/imagePrompting';
@@ -11,7 +11,7 @@ import { isValidEditRegion, type ImageEditRegion } from '../lib/images/imageEdit
 import { enhancePrompt } from '../services/geminiService';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
-import { getPromptEnhancementTarget, IMAGE_MODEL_OPTIONS, isEnhancedPromptStale, type GeneratedMedia, type GenerationConfig, type ImageModelId, type OpenAIImageOptions, type ReferenceImage, type TextModelId } from '../types';
+import { getPromptEnhancementTarget, IMAGE_MODEL_OPTIONS, isEnhancedPromptStale, type AspectRatio, type GeneratedMedia, type GenerationConfig, type ImageModelId, type OpenAIImageOptions, type ReferenceImage, type TextModelId } from '../types';
 import { getGalleryEditJobs, getEditJobProgress } from '../lib/gallery/galleryEditJobs';
 import { GalleryEditResults } from './GalleryEditResults';
 import { ImageEditCanvas } from './ImageEditCanvas';
@@ -19,6 +19,15 @@ import { ImageEditComparison } from './ImageEditComparison';
 import { Dropdown } from './ControlDropdown';
 import { ImageCountControl, PROMPT_PANEL_CLASS, PROMPT_INPUT_CLASS, PROMPT_TEXTAREA_CLASS, PROMPT_TOOLBAR_CLASS, PROMPT_SETTINGS_CLASS, PROMPT_ACTIONS_CLASS, PROMPT_REVERT_CLASS, promptResizeClass, promptEnhanceClass, promptGenerateClass } from './PromptComposerUI';
 import { buildGalleryImageEditConfig, canUseNanoEditCanvas, getEditSource, getGalleryEditReferenceLimit, readGalleryEditReference } from './galleryImageEdit';
+import { computeOutpaintLayout, isOutpaintRatioDifferent, OUTPAINT_RATIOS, type OutpaintAnchor, type OutpaintLayout } from '../lib/images/outpaint';
+import { renderOutpaintSource } from './outpaintSource';
+
+// An expansion needs no instructions; the model continues the scene.
+const DEFAULT_EXPAND_PROMPT = 'Extend the scene naturally beyond the original borders.';
+const ANCHOR_LABELS: Record<'wide' | 'tall', Record<OutpaintAnchor, string>> = {
+  wide: { start: 'Keep left', center: 'Keep centered', end: 'Keep right' },
+  tall: { start: 'Keep top', center: 'Keep centered', end: 'Keep bottom' },
+};
 
 interface GalleryImageEditorProps {
   image: GeneratedMedia;
@@ -35,6 +44,11 @@ interface GalleryImageEditorProps {
 export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, images = [], isEditing, onStart, onGenerate, onClose, onEditResult, initialTextModel, refreshSource }) => {
   const [region, setRegion] = useState<ImageEditRegion>();
   const [canvas, setCanvas] = useState<{ width: number; height: number }>();
+  const [mode, setMode] = useState<'select' | 'expand'>('select');
+  const [expandRatio, setExpandRatio] = useState<AspectRatio>();
+  const [expandAnchor, setExpandAnchor] = useState<OutpaintAnchor>('center');
+  const [expanded, setExpanded] = useState<{ key: string; url: string; layout: OutpaintLayout }>();
+  const [expandError, setExpandError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -63,8 +77,18 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const resultsRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const source = useMemo(() => getEditSource(image, region), [image.id, image.url, image.openaiImageOptions?.outputFormat, region]);
-  const hasArea = isValidEditRegion(region);
-  const baseConfig = hasArea && canvas ? buildGalleryImageEditConfig(image, prompt, imageModel, count, canvas, region!, references) : undefined;
+  const expandRatios = canvas ? OUTPAINT_RATIOS.filter(ratio => isOutpaintRatioDifferent(canvas.width, canvas.height, ratio)) : [];
+  const layout = mode === 'expand' && canvas && expandRatio ? computeOutpaintLayout(canvas.width, canvas.height, expandRatio, expandAnchor) : null;
+  const expandKey = layout ? `${image.url}|${layout.width}x${layout.height}|${layout.image.left},${layout.image.top}` : '';
+  const expansion = layout && expanded?.key === expandKey ? expanded : undefined;
+  const isExpanding = mode === 'expand';
+  // The expanded canvas is the edit source: the original plus placeholder fill.
+  const editImage: GeneratedMedia = expansion ? { ...image, url: expansion.url, openaiImageOptions: { ...getOpenAIImageOptions(image.openaiImageOptions), outputFormat: 'png' } } : image;
+  const editCanvas = expansion ? { width: expansion.layout.width, height: expansion.layout.height } : isExpanding ? undefined : canvas;
+  const editRegion = expansion ? expansion.layout.region : isExpanding ? undefined : region;
+  const editPrompt = expansion && !prompt.trim() ? DEFAULT_EXPAND_PROMPT : prompt;
+  const hasArea = isValidEditRegion(editRegion);
+  const baseConfig = hasArea && editCanvas ? buildGalleryImageEditConfig(editImage, editPrompt, imageModel, count, editCanvas, editRegion!, references) : undefined;
   const config = baseConfig ? { ...baseConfig, openaiImageOptions: { ...baseConfig.openaiImageOptions!, quality }, ...enhancement } : undefined;
   const editReferences = baseConfig?.referenceImages || [source, ...references];
   const displayPrompt = displayReferencePrompt(prompt, editReferences);
@@ -84,11 +108,24 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const preview = jobs.find(job => job.id === previewId && !getEditJobProgress(job).pending && !getEditJobProgress(job).failed && job.url);
   const isStale = config ? isEnhancedPromptStale(config) : false;
   const busy = isEnhancing || isGenerating || isUploading;
-  const nanoCanvasSupported = canvas ? canUseNanoEditCanvas(canvas) : true;
-  const canvasError = canvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${canvas.width}x${canvas.height}`)
+  const nanoCanvasSupported = editCanvas ? canUseNanoEditCanvas(editCanvas) : true;
+  const canvasError = editCanvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${editCanvas.width}x${editCanvas.height}`)
     : !nanoCanvasSupported ? 'Choose GPT Image 2.5 to keep this canvas.' : null : null;
-  const canGenerate = !providerRoute.error && !busy && !preview && !!prompt.trim() && !!config && !isStale && !canvasError && !referenceError;
+  const canGenerate = !providerRoute.error && !busy && !preview && !!editPrompt.trim() && !!config && !isStale && !canvasError && !referenceError;
+  const previewExpands = !!preview?.referenceImages?.some(reference => reference.isEditSource && reference.editRegion?.expandsCanvas);
   const imageCostPreview = config ? getImageCostPreview({ ...config, imageProvider: providerRoute.provider }) : undefined;
+
+  useEffect(() => {
+    if (!layout || expanded?.key === expandKey) return;
+    let active = true;
+    setExpandError(null);
+    const render = async () => renderOutpaintSource(refreshSource ? await refreshSource(image) : image.url, layout);
+    render().then(url => { if (active) setExpanded({ key: expandKey, url, layout }); })
+      .catch(failure => { if (active) setExpandError(failure instanceof Error ? failure.message : 'The image could not be expanded.'); });
+    return () => { active = false; };
+  // The key captures every input of the layout.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandKey]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -184,7 +221,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   };
 
   const handleGenerate = async () => {
-    if (!config || !prompt.trim() || busyRef.current) return;
+    if (!config || !editPrompt.trim() || busyRef.current) return;
     if (referenceError) { setError(referenceError); return; }
     if (canvasError) { setError(canvasError); return; }
     if (isStale) { setError('References or model changed. Enhance again or revert to your original prompt.'); return; }
@@ -210,7 +247,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (canGenerate) void handleGenerate(); }
   }}>
     <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-sm font-semibold text-gray-100"><Pencil className="h-4 w-4 text-lime-400" /> Edit image <span className="hidden text-xs font-normal text-gray-500 sm:inline">Only the masked area changes</span></div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-100"><Pencil className="h-4 w-4 text-lime-400" /> Edit image <span className="hidden text-xs font-normal text-gray-500 sm:inline">{isExpanding ? 'The original stays as it is' : 'Only the masked area changes'}</span></div>
       <button type="button" onClick={onClose} disabled={busy} aria-label="Close image edit" className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-white/[0.06] hover:text-white disabled:opacity-40"><X className="h-4 w-4" /></button>
     </div>
     {preview && <div ref={previewRef} className="space-y-3" data-edit-result-preview>
@@ -218,13 +255,41 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
         <button type="button" onClick={() => setPreviewId(undefined)} className="rounded-xl bg-white/[0.06] px-3 py-2 font-medium text-white hover:bg-white/10">Back to editing source</button>
         {onEditResult && <button type="button" onClick={() => onEditResult(preview)} className="flex items-center gap-1.5 rounded-xl bg-lime-400/10 px-3 py-2 font-medium text-lime-300 hover:bg-lime-400/20"><Pencil className="h-3.5 w-3.5" />Edit this result</button>}
       </div></div>
-      <ImageEditComparison source={image} result={preview} refreshSource={refreshSource}
-        normalResult={<div className="flex items-center justify-center"><img src={preview.url} alt={preview.prompt} className="h-auto max-h-[65dvh] max-w-full rounded-2xl object-contain md:max-h-[calc(100dvh-170px)]" /></div>} />
+      {previewExpands
+        // The original has a different canvas, so a slider would misalign.
+        ? <div className="flex items-center justify-center"><img src={preview.url} alt={preview.prompt} className="h-auto max-h-[65dvh] max-w-full rounded-2xl object-contain md:max-h-[calc(100dvh-170px)]" /></div>
+        : <ImageEditComparison source={image} result={preview} refreshSource={refreshSource}
+          normalResult={<div className="flex items-center justify-center"><img src={preview.url} alt={preview.prompt} className="h-auto max-h-[65dvh] max-w-full rounded-2xl object-contain md:max-h-[calc(100dvh-170px)]" /></div>} />}
       <p className="px-1 text-xs text-gray-500">Your source, selections and prompt are kept. Choose “Edit this result” to start a new edit from this image.</p>
     </div>}
-    <div inert={busy || undefined} className={preview ? 'hidden' : busy ? 'pointer-events-none opacity-70' : undefined}>
+    {!preview && <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Edit mode">
+      {([['select', 'Select area', SquareDashedMousePointer], ['expand', 'Expand canvas', Expand]] as const).map(([value, label, Icon]) => <button key={value} type="button" aria-pressed={mode === value} disabled={busy || (value === 'expand' && !expandRatios.length)}
+        onClick={() => { setMode(value); setError(null); setGenerationStarted(false); setEnhancement({}); if (value === 'expand' && (!expandRatio || !expandRatios.includes(expandRatio))) setExpandRatio(expandRatios[0]); }}
+        className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${mode === value ? 'bg-lime-400/15 text-lime-300' : 'bg-white/[0.04] text-gray-300 hover:bg-white/[0.08]'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
+      {isExpanding && canvas && <>
+        <span className="mx-1 h-5 w-px bg-white/10" aria-hidden="true" />
+        <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="New aspect ratio">
+          {expandRatios.map(ratio => <button key={ratio} type="button" role="radio" aria-checked={expandRatio === ratio} disabled={busy} onClick={() => { setExpandRatio(ratio); setEnhancement({}); setGenerationStarted(false); }}
+            className={`rounded-lg px-2.5 py-1.5 text-xs tabular-nums ${expandRatio === ratio ? 'bg-violet-600/30 text-white' : 'bg-white/[0.04] text-gray-400 hover:bg-white/[0.08]'}`}>{ratio}</button>)}
+        </div>
+        {layout && <select value={expandAnchor} disabled={busy} aria-label="Position of the original" onChange={event => { setExpandAnchor(event.target.value as OutpaintAnchor); setEnhancement({}); setGenerationStarted(false); }}
+          className="rounded-lg border border-white/10 bg-[#0d1117] px-2 py-1.5 text-xs text-gray-200">
+          {(['start', 'center', 'end'] as const).map(anchor => <option key={anchor} value={anchor}>{ANCHOR_LABELS[layout.image.width < layout.width ? 'wide' : 'tall'][anchor]}</option>)}
+        </select>}
+      </>}
+    </div>}
+    <div inert={busy || undefined} className={preview || isExpanding ? 'hidden' : busy ? 'pointer-events-none opacity-70' : undefined}>
       <ImageEditCanvas source={source} region={region} onChange={next => { if (busyRef.current) return; setRegion(next); setError(null); setGenerationStarted(false); }} onCanvasLoad={next => setCanvas(next.width > 0 && next.height > 0 ? next : undefined)} maxHeight={null} imageClassName="max-h-[65dvh] md:max-h-[calc(100dvh-170px)]" />
     </div>
+    {isExpanding && !preview && <div className={`flex items-center justify-center ${busy ? 'opacity-70' : ''}`} data-outpaint-preview>
+      {expansion ? <figure className="relative inline-block max-w-full">
+        <img src={expansion.url} alt="Expanded canvas preview" className="block h-auto max-h-[65dvh] max-w-full rounded-2xl object-contain md:max-h-[calc(100dvh-170px)]" />
+        <span aria-hidden="true" className="pointer-events-none absolute rounded-sm border-2 border-dashed border-lime-300/80" style={{
+          left: `${expansion.layout.image.left / expansion.layout.width * 100}%`, top: `${expansion.layout.image.top / expansion.layout.height * 100}%`,
+          width: `${expansion.layout.image.width / expansion.layout.width * 100}%`, height: `${expansion.layout.image.height / expansion.layout.height * 100}%` }} />
+        <figcaption className="mt-2 text-center text-[11px] text-gray-500">{expansion.layout.width}×{expansion.layout.height}. The dashed frame is the original; the blurred areas will be painted.</figcaption>
+      </figure> : expandError ? null : <p role="status" className="flex items-center gap-2 py-10 text-xs text-gray-400"><Loader2 className="h-4 w-4 animate-spin" />Preparing the expanded canvas…</p>}
+    </div>}
     {hasArea ? <div className={`${PROMPT_PANEL_CLASS} rounded-[1.6rem] border border-white/[0.09] ${preview ? 'hidden' : ''}`} data-gallery-edit-prompt>
       <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] px-3 py-3 sm:px-4" data-edit-reference-tray>
         <input ref={referenceInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" aria-label="Upload edit reference files" disabled={busy} onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,7 +325,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
           onKeyDown={event => { if (!busy && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); event.stopPropagation(); setPromptHeight(current => clampPromptHeight(current + (event.key === 'ArrowUp' ? 24 : -24))); } }}>
           <span className="h-1 w-12 rounded-full bg-current shadow-sm transition-colors" />
         </button>
-        <textarea ref={promptRef} value={displayPrompt} onChange={handlePromptChange} disabled={busy} aria-label="Edit prompt" aria-autocomplete="list" aria-controls={mention ? mentionListId : undefined} aria-activedescendant={mention && mentionOptions.length ? `${mentionListId}-${mentionOptions[mentionIndex % mentionOptions.length].reference.id}` : undefined} placeholder="What would you like to change? Type @ to use a reference." spellCheck={false} className={PROMPT_TEXTAREA_CLASS} style={{ height: `${promptHeight}px`, minHeight: '96px', maxHeight: 'min(600px, calc(100dvh - 17.5rem))', outline: 'none', boxShadow: 'none' }}
+        <textarea ref={promptRef} value={displayPrompt} onChange={handlePromptChange} disabled={busy} aria-label="Edit prompt" aria-autocomplete="list" aria-controls={mention ? mentionListId : undefined} aria-activedescendant={mention && mentionOptions.length ? `${mentionListId}-${mentionOptions[mentionIndex % mentionOptions.length].reference.id}` : undefined} placeholder={isExpanding ? 'Optional: describe what should appear in the new areas. Type @ to use a reference.' : 'What would you like to change? Type @ to use a reference.'} spellCheck={false} className={PROMPT_TEXTAREA_CLASS} style={{ height: `${promptHeight}px`, minHeight: '96px', maxHeight: 'min(600px, calc(100dvh - 17.5rem))', outline: 'none', boxShadow: 'none' }}
           onPaste={(event: React.ClipboardEvent<HTMLTextAreaElement>) => {
             const files = getClipboardImages(event.clipboardData);
             if (files.length) { event.preventDefault(); void addReferences(files); }
@@ -302,11 +367,12 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
           </button>
         </div>
       </div>
-    </div> : !preview && <p className="px-1 text-xs text-gray-500">Draw around the part you want to edit. Then describe your change below.</p>}
+    </div> : !preview && !isExpanding && <p className="px-1 text-xs text-gray-500">Draw around the part you want to edit. Then describe your change below.</p>}
+    {expandError && isExpanding && <p role="alert" className="px-1 text-xs text-red-400">{expandError}</p>}
     {isStale && <p role="status" className="px-1 text-xs text-amber-300">References or model changed. Enhance again or revert before generating.</p>}
     {referenceError && <p role="status" className="px-1 text-xs text-amber-300">{referenceError}</p>}
     {canvasError && <p role="status" className="px-1 text-xs text-amber-300">{canvasError}</p>}
-    {canvas && !nanoCanvasSupported && !canvasError && <p className="px-1 text-[11px] text-gray-500">GPT Image 2.5 keeps this canvas. Nano Banana needs a standard image ratio.</p>}
+    {editCanvas && !nanoCanvasSupported && !canvasError && <p className="px-1 text-[11px] text-gray-500">GPT Image 2.5 keeps this canvas. Nano Banana needs a standard image ratio.</p>}
     {error && <p role="alert" className="px-1 text-xs text-red-400">{error}</p>}
     {generationStarted && <p role="status" className="flex items-center gap-1.5 px-1 text-xs text-lime-300"><Check className="h-3.5 w-3.5" /> {lastQueuedIds.length} image{lastQueuedIds.length === 1 ? '' : 's'} added to the queue.</p>}
     <div ref={resultsRef}><GalleryEditResults source={image} jobs={jobs} selectedId={preview?.id} onSelect={id => setPreviewId(id)} /></div>

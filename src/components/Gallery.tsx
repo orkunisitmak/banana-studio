@@ -26,6 +26,7 @@ import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { useMountedRef } from './useMountedRef';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
@@ -812,6 +813,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
   const galleryAccountRef = useRef('');
+  const galleryMountedRef = useMountedRef();
   galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
@@ -1675,7 +1677,9 @@ export const Gallery: React.FC<GalleryProps> = ({
       const content = await zip.generateAsync({ type: "blob" });
       // The account switch already reset the gallery and its selection bar, so
       // there is nowhere to report this; the new account's gallery is the feedback.
-      if (galleryAccountRef.current !== startedFor) return;
+      // An account switch remounts the whole workspace, so this handler may belong to
+      // an unmounted Gallery whose account ref is never updated again.
+      if (!galleryMountedRef.current || galleryAccountRef.current !== startedFor) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;

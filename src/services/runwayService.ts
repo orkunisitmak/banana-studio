@@ -1,6 +1,7 @@
 import { selectProvider } from './providerRouting';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
+import { getQuotedPromptPattern } from '../lib/references/referenceTokens';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
 import { logUsage, supabase } from './authService';
 import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublicUrl, refreshMediaAccessUrl } from './storageService';
@@ -641,7 +642,12 @@ export const prepareSeedanceReferenceGenerationPrompt = (
     ? `${referenceTags.slice(0, -1).join(', ')} and ${referenceTags[referenceTags.length - 1]}`
     : referenceTags[0] || 'the attached material';
 
-  const rephrased = prompt
+  // Keep literal copy opaque while matching whole commands around quoted nouns.
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  const protectedPrompt = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const rephrased = protectedPrompt
     .replace(/\[(?:EDIT|EXTEND)(?:\s+DIRECTION)?\]/gi, '[NEW SHOT DIRECTION]')
     .replace(
       /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n]*[:.]\s*/gi,
@@ -716,7 +722,8 @@ export const prepareSeedanceReferenceGenerationPrompt = (
   const direction = continuationSource
     ? `Create a new ${aspectRatio} shot that chronologically follows ${continuationSource}'s final visible moment. Match the opening pose, identity, environment, camera framing, and motion to that terminal state; portray only subsequent action. Use other attached material as supplementary visual guidance.`
     : `Create a new standalone ${aspectRatio} composition. Use ${referenceList} only as visual reference material for the people, setting, lighting, camera language, and motion. The result is a newly generated shot with independent framing.`;
-  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`);
+  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`)
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
 };
 
 // Convert app-internal @ tags (and user-entered @/# aliases) to each

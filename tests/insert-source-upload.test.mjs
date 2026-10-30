@@ -14,6 +14,15 @@ const clearStart = source.indexOf('  const handleClearAll =');
 const clearHandler = source.slice(clearStart, source.indexOf('  const handleRemoveImage', clearStart));
 const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError } = env; ${initialize} ${handlers} ${clearHandler}; return { handleVideoFileUpload, handleClearAll, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const templateStart = appSource.indexOf('  const handleSelectTemplate =');
+const templateCode = transformSync(`module.exports = env => {
+  const { config, resolveImageModel, mergePersonReferenceInputs, SUNBURST_MODEL, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, toast } = env;
+  ${appSource.slice(templateStart, appSource.indexOf('  const displayedMedia', templateStart))}
+  return handleSelectTemplate;
+};`, { loader: 'ts', format: 'cjs' }).code;
+const templateMod = { exports: {} }; new Function('module', templateCode)(templateMod);
+
 function scenario(videos = [], mode = 'insert_video', deferred = false) {
   let state = { mode: 'video', videoModel: 'minimax-h3', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
   const errors = [], requests = [], gates = new Map(), slots = [], updates = []; let cursor = 0, version = 0;
@@ -27,6 +36,12 @@ function scenario(videos = [], mode = 'insert_video', deferred = false) {
   }); };
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
+    loadTemplate: () => { templateMod.exports({ config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
+      mergePersonReferenceInputs: (references, current, prompt) => ({ references, prompt, personGroups: [] }),
+      recreateLoadIdRef: { current: 0 }, recreateLoadingRef: { current: null }, setIsRecreateLoading() {},
+      setConfig: value => { state = value; }, setPromptLoadVersion: update => { version = update(version); },
+      toast: { info() {}, error: (...args) => assert.fail(args.join(' ')) },
+    })({ name: 'Another scene', config: { ...state, prompt: 'Template scene', referenceVideos: [] } }); api(); },
     change: update => { state = update(state); api(); }, gates, requests, errors, state: () => state, uploading: () => api().uploadingReferenceVideos };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -143,4 +158,14 @@ test('typing in the same draft keeps its pending Insert source', async () => {
   f.gates.get('source.mp4').resolve(); await pending;
   assert.equal(f.state().prompt, 'Keep this newly typed direction');
   assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['source.mp4']);
+});
+
+test('applying a template invalidates the pending source through the real App handler', async () => {
+  const f = scenario(); const old = f.pick(['old.mp4']); await tick();
+  f.loadTemplate(); const current = f.pick(['new.mp4']); await tick();
+  f.gates.get('new.mp4')?.resolve(); await tick(); f.gates.get('old.mp4').resolve();
+  await Promise.all([old, current]);
+  assert.deepEqual(f.requests, ['old.mp4', 'new.mp4']);
+  assert.equal(f.state().prompt, 'Template scene');
+  assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['new.mp4']);
 });

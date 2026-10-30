@@ -1,6 +1,6 @@
 import type { PersonGroupDefinition, ReferenceImage } from '../../types.js';
 import { getPersonGroups, getPersonId, getPersonTag } from './personReferences.js';
-import { bindImageReferences, getStableImageTag, mapUnquotedPrompt } from './referenceTokens.js';
+import { bindImageReferences, getQuotedPromptPattern, getStableImageTag, mapUnquotedPrompt } from './referenceTokens.js';
 
 const referenceTag = (ref: ReferenceImage) => {
   const person = getPersonId(ref);
@@ -12,7 +12,7 @@ const referenceTag = (ref: ReferenceImage) => {
 export const prepareEditableImagePrompt = (prompt: string, references: ReferenceImage[]): string => {
   // Collapse the app's expanded person mentions before protecting quoted names.
   const expandedPerson = /\bthe (?:main person|second person|person \d+) shown in ((?:image\s*\d+(?:\s*(?:,\s*(?:and\s+)?|and\s+))?)+) \(all these photos show the SAME single person\)(?: \(identity label "[^"\n]*"\))?/gi;
-  const quotedRanges = [...prompt.matchAll(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)/g)].map(match => [match.index!, match.index! + match[0].length]);
+  const quotedRanges = [...prompt.matchAll(getQuotedPromptPattern())].map(match => [match.index!, match.index! + match[0].length]);
   let editable = prompt;
   // The identity label is quoted metadata, not visible text. Match only the exact app phrase.
   editable = editable.replace(expandedPerson, (match, images, offset) => {

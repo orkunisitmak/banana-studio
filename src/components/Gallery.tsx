@@ -9,9 +9,7 @@ import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } fro
 import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
-import { ImageCompareDialog } from './ImageCompareDialog';
 import { GallerySearchDialog } from './GallerySearchDialog';
-import { GalleryImageEditor } from './GalleryImageEditor';
 import { ImageEditComparison } from './ImageEditComparison';
 import { useSavedImageEditSource } from './useSavedImageEditSource';
 import { ImageEditDetails, PromptPreparationDetails } from './GenerationDetails';
@@ -21,15 +19,23 @@ import { DetailImage } from './GalleryDetailImage';
 import { buildGalleryFolderStats } from './galleryFolderStats';
 import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
-import { YouTubePreviewDialog } from './YouTubePreviewDialog';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { FolderPreview } from './FolderPreview';
-import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
+import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
+import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
+import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
+
+const GalleryImageEditor = React.lazy(() => import('./GalleryImageEditor').then(module => ({ default: module.GalleryImageEditor })));
+const ImageCompareDialog = React.lazy(() => import('./ImageCompareDialog').then(module => ({ default: module.ImageCompareDialog })));
+const YouTubePreviewDialog = React.lazy(() => import('./YouTubePreviewDialog').then(module => ({ default: module.YouTubePreviewDialog })));
+const FolderShareDialog = React.lazy(() => import('./FolderShareDialog').then(module => ({ default: module.FolderShareDialog })));
+const dialogLoading = <div role="status" className="fixed inset-0 z-[350] grid place-items-center bg-black/70 text-sm text-gray-200 backdrop-blur-sm"><span className="flex items-center gap-2"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading dialog…</span></div>;
 
 // --- Constants ---
 const ITEMS_PER_PAGE = 48;
@@ -806,6 +812,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+  const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
   const [preparedPhotos, setPreparedPhotos] = useState<File[] | null>(null);
@@ -1647,20 +1655,13 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleBatchDownload = async () => {
     if (selectedIds.size === 0) return;
     setIsDownloadingBatch(true);
+    setBatchDownloadError(null);
     try {
+      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
+      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
+      if (!files.length) return;
       const zip = new JSZip();
-      const promises = Array.from(selectedIds).map(async (id) => {
-        const img = images.find(i => i.id === id);
-        if (!img) return;
-        const response = await fetch(img.url);
-        // An error body must never be saved as the media file.
-        if (!response.ok) throw new Error(`Download failed (${response.status}).`);
-        const blob = await response.blob();
-        const ext = img.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
-        zip.file(`banana-${id}.${ext}`, blob);
-      });
-
-      await Promise.all(promises);
+      for (const file of files) zip.file(file.name, file.blob);
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
@@ -1668,10 +1669,12 @@ export const Gallery: React.FC<GalleryProps> = ({
       link.download = `banana-batch-${Date.now()}.zip`;
       link.click();
       window.URL.revokeObjectURL(url);
+      if (failed) return;
       setIsSelectionMode(false);
       setSelectedIds(new Set());
     } catch (e) {
       console.error("Batch download failed", e);
+      setBatchDownloadError('The ZIP could not be created. Try again.');
     } finally {
       setIsDownloadingBatch(false);
     }
@@ -1684,7 +1687,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleBatchDelete = async () => {
     if (isReadOnly) return;
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} images?`)) return;
+    if (!confirm(describeBatchDelete(selectedIds, images))) return;
 
     const ids = Array.from(selectedIds);
     if (onDeleteMultiple) {
@@ -1702,12 +1705,17 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Download menu state - tracks which image has download options open
   const [downloadMenuId, setDownloadMenuId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<{ id: string; message: string } | null>(null);
+  const failDownload = (media: GeneratedMedia, error: unknown) => {
+    if (shouldOpenDownloadFallback(error)) window.open(media.url, '_blank');
+    else setDownloadError({ id: media.id, message: (error as Error).message });
+  };
 
   const handleDownloadPNG = async (media: GeneratedMedia) => {
+    setDownloadError(null);
     try {
-      const response = await fetch(media.url);
-      if (!response.ok) throw new Error(`Download failed (${response.status}).`);
-      const blob = await response.blob();
+      const downloadUrl = media.mediaType === 'video' ? media.url : await refreshMediaAccessUrl(media.url, false).catch(() => media.url);
+      const blob = await fetchMediaBlob(downloadUrl);
       const blobUrl = URL.createObjectURL(blob);
 
       const ext = media.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
@@ -1722,14 +1730,17 @@ export const Gallery: React.FC<GalleryProps> = ({
       setDownloadMenuId(null);
     } catch (error) {
       console.error('Download PNG failed:', error);
-      window.open(media.url, '_blank');
+      failDownload(media, error);
     }
   };
 
   const handleDownloadJPEG = async (media: GeneratedMedia) => {
+    setDownloadError(null);
+    let sourceUrl: string | undefined;
     try {
-      const response = await fetch(media.url);
-      const blob = await response.blob();
+      const downloadUrl = media.mediaType === 'video' ? media.url : await refreshMediaAccessUrl(media.url, false).catch(() => media.url);
+      const blob = await fetchMediaBlob(downloadUrl);
+      sourceUrl = URL.createObjectURL(blob);
 
       // Convert to JPEG using canvas
       const img = new Image();
@@ -1738,7 +1749,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = reject;
-        img.src = URL.createObjectURL(blob);
+        img.src = sourceUrl!;
       });
 
       const canvas = document.createElement('canvas');
@@ -1754,28 +1765,25 @@ export const Gallery: React.FC<GalleryProps> = ({
       ctx.drawImage(img, 0, 0);
 
       // Convert to JPEG at full quality
-      canvas.toBlob((jpegBlob) => {
-        if (!jpegBlob) {
-          console.error('JPEG conversion failed');
-          return;
-        }
+      const jpegBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('JPEG conversion failed')), 'image/jpeg', 1.0);
+      }); // Quality 1.0 = 100%
 
-        const blobUrl = URL.createObjectURL(jpegBlob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `banana-${media.id}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+      const blobUrl = URL.createObjectURL(jpegBlob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `banana-${media.id}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-        setDownloadMenuId(null);
-      }, 'image/jpeg', 1.0); // Quality 1.0 = 100%
-
-      URL.revokeObjectURL(img.src);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+      setDownloadMenuId(null);
     } catch (error) {
       console.error('Download JPEG failed:', error);
-      window.open(media.url, '_blank');
+      failDownload(media, error);
+    } finally {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     }
   };
 
@@ -1940,7 +1948,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     >
 
       <HelpCenter open={isHelpCenterOpen} onClose={() => setIsHelpCenterOpen(false)} />
-      {sharingFolder && !isReadOnly && <FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} />}
+      {sharingFolder && !isReadOnly && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} /></React.Suspense></LazyDialogErrorBoundary>}
 
       {isCreatingFolder && !isReadOnly && (
         <div
@@ -2400,6 +2408,13 @@ export const Gallery: React.FC<GalleryProps> = ({
 
         {adminGalleryBanner}
 
+        {downloadError && !selectedMedia && (
+          <div role="alert" className="flex items-center gap-2 border-b border-red-400/20 bg-[#25151d] px-4 py-2 text-xs text-red-200 sm:px-6">
+            <span>{downloadError.message}</span>
+            <button type="button" onClick={() => setDownloadError(null)} aria-label="Dismiss download error" className="ml-auto p-1"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
+
         {!isReadOnly && (activeDrag || isMoving || moveError) && (
           <div
             role={moveError ? 'alert' : 'status'}
@@ -2561,6 +2576,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               </div>
             </div>
             {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2992,16 +3008,16 @@ export const Gallery: React.FC<GalleryProps> = ({
         </div>
       )}
 
-      {comparisonIds && <ImageCompareDialog images={comparisonImages} onClose={closeComparison}
-        onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} />}
+      {comparisonIds && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><ImageCompareDialog images={comparisonImages} onClose={closeComparison}
+        onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} /></React.Suspense></LazyDialogErrorBoundary>}
 
-      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && <YouTubePreviewDialog
+      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><YouTubePreviewDialog
         media={selectedMedia}
         currentIndex={previewIndex} totalImages={previewImages.length} favoritesOnly={showFavoritesOnly}
         onNavigate={direction => handleNavigate(direction, true)}
         initialTitle={folders.find(folder => folder.id === selectedMedia.folderId)?.name || selectedMedia.referenceImages?.find(ref => ref.youtubeSource?.title)?.youtubeSource?.title || 'Your next video'}
         channelName={galleryOwner?.display_name || userProfile?.display_name}
-        onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} />}
+        onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} /></React.Suspense></LazyDialogErrorBoundary>}
 
       {/* Detail Modal */}
       {searchDialog}
@@ -3100,7 +3116,11 @@ export const Gallery: React.FC<GalleryProps> = ({
               </div>}
             </> : null}
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
-              <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+              <LazyDialogErrorBoundary inline>
+                <React.Suspense fallback={<div role="status" className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading edit controls…</div>}>
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                </React.Suspense>
+              </LazyDialogErrorBoundary>
             </div>}
           </div>
 
@@ -3468,6 +3488,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <button onClick={(e) => handleDownloadClick(e, selectedMedia.id)} className="py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium"><Download className="w-4 h-4" /> Download</button>
                 )}
               </div>
+              {downloadError?.id === selectedMedia.id && <p role="alert" className="text-xs text-red-300">{downloadError.message}</p>}
 
               {!isReadOnly && <div className="grid grid-cols-2 gap-3">
                 <button

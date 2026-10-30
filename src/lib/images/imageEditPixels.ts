@@ -47,7 +47,22 @@ export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, outp
     distances[i] = Math.min(distances[i], x < bw - 1 ? distances[i + 1] + 1 : 1, y < bh - 1 ? distances[i + bw] + 1 : 1);
     const alpha = Math.min(1, distances[i] / caps[i]);
     const index = ((bounds.top + y) * width + bounds.left + x) * 4;
-    for (let channel = 0; channel < 4; channel++) result[index + channel] = Math.round(source[index + channel] * (1 - alpha) + output[index + channel] * alpha);
+    if (alpha === 1) {
+      for (let channel = 0; channel < 4; channel++) result[index + channel] = output[index + channel];
+      continue;
+    }
+    if (source[index + 3] === output[index + 3]) {
+      for (let channel = 0; channel < 3; channel++) result[index + channel] = Math.round(source[index + channel] * (1 - alpha) + output[index + channel] * alpha);
+      result[index + 3] = source[index + 3];
+      continue;
+    }
+    // PNG/ImageData channels are straight RGBA. Interpolate premultiplied
+    // colors so invisible RGB cannot tint a partially transparent edit edge.
+    const sourceWeight = source[index + 3] * (1 - alpha), outputWeight = output[index + 3] * alpha;
+    const opacity = sourceWeight + outputWeight;
+    for (let channel = 0; channel < 3; channel++) result[index + channel] = opacity
+      ? Math.round((source[index + channel] * sourceWeight + output[index + channel] * outputWeight) / opacity) : 0;
+    result[index + 3] = Math.round(opacity);
   }
   return result;
 };

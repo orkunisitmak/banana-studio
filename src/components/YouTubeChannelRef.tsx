@@ -118,7 +118,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     isYouTubeConfigured().then((ok) => {
       if (configRequest.current === request) setConfigured(ok);
     });
-  }, [isOpen]);
+  }, [isOpen, configured]);
 
   useEffect(() => {
     if (!isOpen) return;

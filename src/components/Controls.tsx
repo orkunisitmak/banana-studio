@@ -418,6 +418,7 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
+  const insertSourceUploadRef = useRef(false);
 
   useLayoutEffect(() => {
     const element = generationBarRef.current;
@@ -763,6 +764,13 @@ export const Controls: React.FC<ControlsProps> = ({
     if (files.length === 0) return;
     const modeSwitchEpoch = typeof videoModeSwitchEpochRef === 'undefined' ? null : videoModeSwitchEpochRef.current;
     setAttachmentError(null);
+    const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
+    const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
+    const needsSource = isInsert && !sourceId;
+    if (needsSource && insertSourceUploadRef.current) {
+      addAttachmentError('Wait for the Insert source video to finish uploading before adding more clips.');
+      return;
+    }
     if (isH3VideoConfig && h3State.mode === 'insert_video' && currentReferenceVideos.length === 0 && files[0].size > 50 * 1024 * 1024) {
       // Dropping the first file would turn a supplemental reference into the
       // source. Keep the entire selection untouched until its source is valid.
@@ -775,9 +783,20 @@ export const Controls: React.FC<ControlsProps> = ({
       files = files.filter(file => file.size <= 50 * 1024 * 1024);
       if (!files.length) return;
     }
+    if (needsSource) insertSourceUploadRef.current = true;
     setUploadingReferenceVideos(count => count + files.length);
     try {
-      const results = await Promise.allSettled(files.map(file => uploadReferenceVideo(file, isH3VideoConfig)));
+      const results: PromiseSettledResult<ReferenceVideo>[] = [];
+      if (needsSource) {
+        // Supplemental clips must never become the source after its upload fails.
+        const source = await Promise.allSettled([uploadReferenceVideo(files[0], isH3VideoConfig)]);
+        if (source[0].status === 'rejected') {
+          setAttachmentError(source[0].reason instanceof Error ? source[0].reason.message : 'Source video upload failed.');
+          return;
+        }
+        results.push(...source);
+      }
+      results.push(...await Promise.allSettled(files.slice(needsSource ? 1 : 0).map(file => uploadReferenceVideo(file, isH3VideoConfig))));
       const newRefs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failures = results.flatMap(result =>
         result.status === 'rejected'
@@ -785,12 +804,16 @@ export const Controls: React.FC<ControlsProps> = ({
           : []
       );
 
-      let dropped = 0;
+      let dropped = 0, sourceChanged = false;
       if (newRefs.length > 0) {
         // Never exceed the latest limit (the operation may have changed while uploading),
         // even if another selection finished first. flushSync applies the update now,
         // so the warning reflects what it kept.
         flushSync(() => onChange(previous => {
+          if (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length)) {
+            sourceChanged = true;
+            return previous;
+          }
           const kept = newRefs.slice(0, Math.max(0, attachLimitsRef.current.videos - (previous.referenceVideos?.length || 0)));
           dropped = newRefs.length - kept.length;
           return {
@@ -803,8 +826,10 @@ export const Controls: React.FC<ControlsProps> = ({
       if (failures.length > 0) {
         setAttachmentError(failures.join('\n'));
       }
+      if (sourceChanged) addAttachmentError('The Insert source video changed while uploading. Add the clips again for the current source.');
       if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} videos max.`);
     } finally {
+      if (needsSource) insertSourceUploadRef.current = false;
       setUploadingReferenceVideos(count => Math.max(0, count - files.length));
     }
   };
@@ -1225,8 +1250,8 @@ export const Controls: React.FC<ControlsProps> = ({
       };
       
       try {
-        await saveReferenceImage(savedImage);
-        setRefGallery(prev => [savedImage, ...prev]);
+        const saved = await saveReferenceImage(savedImage, refGallery);
+        setRefGallery(prev => prev.some(image => image.id === saved.id) ? prev : [saved, ...prev]);
       } catch (error) { setGenerationError(error instanceof Error ? error.message : 'Could not save reference.'); }
       return;
     }
@@ -1257,8 +1282,8 @@ export const Controls: React.FC<ControlsProps> = ({
           };
           
           try {
-            await saveReferenceImage(savedImage);
-            setRefGallery(prev => [savedImage, ...prev]);
+            const saved = await saveReferenceImage(savedImage);
+            setRefGallery(prev => [saved, ...prev]);
           } catch (error) { setGenerationError(error instanceof Error ? error.message : 'Could not save reference.'); }
         };
         reader.readAsDataURL(blob);

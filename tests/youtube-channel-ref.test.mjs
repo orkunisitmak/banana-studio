@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // A minimal hook renderer, as in gallery-image-zoom.test.mjs: state slots, effects after render, re-render on change.
 const react = `const R=()=>globalThis.__renderer;export const useState=v=>R().useState(v),useRef=v=>R().useRef(v),useEffect=(f,d)=>R().useEffect(f,d),useCallback=(f,d)=>R().useMemo(()=>f,d),useMemo=(f,d)=>R().useMemo(f,d);
   const h=(type,props,...children)=>({type,props:{...props,children}});export default {createElement:h,Fragment:'Fragment'};`;
-const youtube = `export const isYouTubeConfigured=async()=>true;export const detectInputType=raw=>({kind:'channel',raw});
+const youtube = `export const isYouTubeConfigured=async()=>globalThis.__configured?globalThis.__configured():true;export const detectInputType=raw=>({kind:'channel',raw});
   export const resolveChannel=async input=>({id:'UC'+input,title:'Channel '+input,thumbnailUrl:'',uploadsPlaylistId:'UU'+input});
   export const getVideoInfo=async()=>{throw new Error('unused')};
   const gate=list=>playlist=>new Promise((resolve,reject)=>globalThis.__requests[list].push({playlist,resolve,reject}));
@@ -48,6 +48,28 @@ const mount = props => {
 const videos = (channel, count) => Array.from({ length: count }, (_, i) => ({ id: `${channel}${i}`, title: `${channel} video ${i}`, publishedAt: '2026-01-01', thumbnailUrl: '', viewCount: 1, likeCount: 0, duration: 60 }));
 
 const modes = { top: 'Top Performing', latest: 'Browse & Pick' };
+test('a failed availability check started before opening is retried while the panel stays open', async t => {
+  globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  let resolveFirst;
+  const firstCheck = new Promise(resolve => { resolveFirst = resolve; });
+  let calls = 0;
+  globalThis.__configured = () => ++calls === 1 ? firstCheck : Promise.resolve(true);
+  t.after(() => { delete globalThis.__configured; });
+  const ui = mount({ onAddReferences() {}, onPrepareBrainstorm() {}, draftKey: 'k', remainingSlots: 14 });
+  await ui.settle();
+  assert.equal(calls, 1);
+  await ui.click('YT');
+  assert.equal(calls, 1);
+
+  resolveFirst(false);
+  await ui.settle();
+
+  assert.equal(calls, 2);
+  assert.match(ui.text(), /YouTube Ref/);
+  assert.doesNotMatch(ui.text(), /YouTube API key not configured/);
+});
+
 const setup = async (first = 'top', second = 'latest') => {
   globalThis.document = { addEventListener() {}, removeEventListener() {} };
   globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };

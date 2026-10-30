@@ -35,6 +35,7 @@ import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './l
 import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
+import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
 
@@ -1306,7 +1307,7 @@ const AuthorizedWorkspace: React.FC<{
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
     try {
       await deleteImages(toDelete);
-      toast.success('Images Deleted', `${toDelete.length} image${toDelete.length > 1 ? 's' : ''} removed.`);
+      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
     } catch (e) {
       console.error("Batch delete failed", e);
       toast.error('Delete Failed', 'Some images could not be fully deleted. They will be retried automatically.');
@@ -1576,7 +1577,7 @@ const AuthorizedWorkspace: React.FC<{
 
       const timestamp = Date.now();
       const placeholder: GeneratedMedia = {
-        id: `temp-${timestamp}`,
+        id: crypto.randomUUID(),
         url: '',
         prompt: variedPrompt,
         promptPreparation: variationConfig.promptPreparation,
@@ -1726,8 +1727,8 @@ const AuthorizedWorkspace: React.FC<{
     };
 
     try {
-      await saveTemplate(newTemplate);
-      setTemplates(prev => [newTemplate, ...prev]);
+      const saved = await saveTemplate(newTemplate);
+      setTemplates(prev => [saved, ...prev]);
       toast.success('Template Saved', `"${name}" has been saved.`);
     } catch (e) {
       console.error("Failed to save template", e);
@@ -1741,8 +1742,8 @@ const AuthorizedWorkspace: React.FC<{
       config: { ...config } // Update with current config
     };
     try {
-      await saveTemplate(updatedTemplate);
-      setTemplates(prev => prev.map(t => t.id === template.id ? updatedTemplate : t));
+      const saved = await saveTemplate(updatedTemplate);
+      setTemplates(prev => prev.map(t => t.id === template.id ? saved : t));
       toast.success('Template Updated', `"${template.name}" has been updated.`);
     } catch (e) {
       console.error("Failed to update template", e);

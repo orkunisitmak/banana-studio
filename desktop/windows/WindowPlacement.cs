@@ -4,7 +4,8 @@ namespace BananaStudio;
 
 internal static class WindowPlacement
 {
-    private sealed record Saved(int Version, int X, int Y, int Width, int Height);
+    // Older files have no Maximized field and restore as a normal window.
+    private sealed record Saved(int Version, int X, int Y, int Width, int Height, bool Maximized = false);
     internal static Rectangle Constrain(Rectangle bounds, IReadOnlyList<Rectangle> workAreas, Size minimum)
     {
         if (workAreas.Count == 0) return bounds;
@@ -20,7 +21,7 @@ internal static class WindowPlacement
         return new Rectangle(Math.Clamp(bounds.X, screen.Left, screen.Right - width),
             Math.Clamp(bounds.Y, screen.Top, screen.Bottom - height), width, height);
     }
-    internal static Rectangle? Load(string directory)
+    internal static (Rectangle Bounds, bool Maximized)? Load(string directory)
     {
         try
         {
@@ -29,18 +30,18 @@ internal static class WindowPlacement
             var value = JsonSerializer.Deserialize<Saved>(File.ReadAllText(file));
             if (value == null || value.Version != 1 || value.Width <= 0 || value.Height <= 0 ||
                 new[] { value.X, value.Y, value.Width, value.Height }.Any(n => Math.Abs((long)n) > 100000)) return null;
-            return new Rectangle(value.X, value.Y, value.Width, value.Height);
+            return (new Rectangle(value.X, value.Y, value.Width, value.Height), value.Maximized);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
     }
-    internal static void Save(string directory, Rectangle bounds)
+    internal static void Save(string directory, Rectangle bounds, bool maximized = false)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
         var temporary = Path.Combine(directory, ".window-placement-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllText(temporary, JsonSerializer.Serialize(new Saved(1, bounds.X, bounds.Y, bounds.Width, bounds.Height)));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new Saved(1, bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized)));
             File.Move(temporary, Path.Combine(directory, "window-placement.json"), true);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { /* Preferences cannot prevent saving work. */ }
@@ -54,7 +55,10 @@ internal static class WindowPlacement
         {
             Require(Load(directory) == null);
             var original = new Rectangle(20, 30, 900, 650);
-            Save(directory, original); Require(Load(directory) == original);
+            Save(directory, original); Require(Load(directory) == (original, false));
+            Save(directory, original, true); Require(Load(directory) == (original, true));
+            File.WriteAllText(Path.Combine(directory, "window-placement.json"), "{\"Version\":1,\"X\":20,\"Y\":30,\"Width\":900,\"Height\":650}");
+            Require(Load(directory) == (original, false));
             var work = new Rectangle(0, 0, 1280, 720);
             var min = new Size(760, 560);
             Require(Constrain(original, new[] { work }, min) == original);

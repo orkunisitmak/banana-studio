@@ -1670,7 +1670,9 @@ export const Gallery: React.FC<GalleryProps> = ({
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
       // Grid records omit reference_images; the manifest needs the full row.
-      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id));
+      // requireRemote: a record missing remotely must not be read from this browser's
+      // own cache, which may hold another account's row; the index record is the fallback.
+      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id, { requireRemote: true }));
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
       zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));

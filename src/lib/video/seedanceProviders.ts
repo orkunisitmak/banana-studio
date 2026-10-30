@@ -1,5 +1,5 @@
 import type { AIProvider } from '../providers.js';
-import { mapUnquotedPrompt } from '../references/referenceTokens.ts';
+import { mapUnquotedPrompt } from '../references/referenceTokens.js';
 
 export type SeedanceRequest = { videoModel: string; mode: string; prompt?: string; duration: number; quality: string; aspectRatio: string;
   generateAudio?: boolean; referenceEditMode?: boolean; editSourcePreparationVersion?: number; imageUrls?: string[]; videoUrls?: string[]; audioUrls?: string[] };

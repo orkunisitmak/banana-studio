@@ -804,6 +804,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [newFolderName, setNewFolderName] = useState("");
   const [isSavingFolder, setIsSavingFolder] = useState(false);
   const [folderCreateError, setFolderCreateError] = useState<string | null>(null);
+  const [folderRenameError, setFolderRenameError] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
@@ -1395,7 +1396,14 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleRenameFolder = async () => {
     if (isReadOnly) return;
     if (!renamingFolderId || !newFolderName.trim()) return;
-    await renameFolder(renamingFolderId, newFolderName);
+    setFolderRenameError(null);
+    try {
+      await renameFolder(renamingFolderId, newFolderName);
+    } catch (error: any) {
+      // Keep the form open with the typed name; the old name is still saved.
+      setFolderRenameError(error?.message || 'The folder could not be renamed. Please try again.');
+      return;
+    }
     setFolders(prev => prev.map(f => f.id === renamingFolderId ? { ...f, name: newFolderName } : f));
     setRenamingFolderId(null);
     setNewFolderName("");
@@ -2643,9 +2651,12 @@ export const Gallery: React.FC<GalleryProps> = ({
                       value={newFolderName}
                       onChange={e => setNewFolderName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleRenameFolder()}
+                      aria-invalid={!!folderRenameError}
+                      aria-describedby={folderRenameError ? 'rename-folder-error' : undefined}
                     />
+                    {folderRenameError && <p id="rename-folder-error" role="alert" title={folderRenameError} className="truncate text-[10px] text-red-300">{folderRenameError}</p>}
                     <div className="flex w-full gap-1.5">
-                      <button onClick={() => setRenamingFolderId(null)} className="h-8 flex-1 rounded-lg border border-white/[0.07] text-[10px] font-semibold text-gray-400 hover:bg-white/[0.04] hover:text-white">Cancel</button>
+                      <button onClick={() => { setRenamingFolderId(null); setFolderRenameError(null); }} className="h-8 flex-1 rounded-lg border border-white/[0.07] text-[10px] font-semibold text-gray-400 hover:bg-white/[0.04] hover:text-white">Cancel</button>
                       <button onClick={handleRenameFolder} disabled={!newFolderName.trim()} className="h-8 flex-1 rounded-lg bg-violet-600 text-[10px] font-semibold text-white hover:bg-violet-500 disabled:opacity-40">Save</button>
                     </div>
                   </div>
@@ -2675,6 +2686,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                           e.stopPropagation();
                           setRenamingFolderId(folder.id);
                           setNewFolderName(folder.name);
+                          setFolderRenameError(null);
                         }}
                         className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.08] bg-black/55 text-gray-400 backdrop-blur-sm transition-colors hover:border-white/15 hover:text-white"
                         title="Rename"

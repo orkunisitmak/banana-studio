@@ -3,7 +3,7 @@ import { applyCors, requireUser, createUserScopedClient } from './_lib/auth.js';
 import { chooseProvider, providerKey } from './_lib/providerConfiguration.js';
 import { seedanceProviderError, falSeedanceInput, openRouterSeedanceInput } from '../src/lib/video/seedanceProviders.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
-import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
+import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
 
@@ -22,6 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       catch (error) { return res.status(400).json({ error:(error as Error).message }); }
       const error = seedanceProviderError(provider, body);
       if (error) return res.status(400).json({ error });
+      if (body?.generationId !== undefined && !isGenerationId(body.generationId)) return res.status(400).json({ error: 'A valid generation ID is required.' });
       if (provider === 'evolink') return evolinkGenerate(req,res);
       if (provider !== 'fal' && provider !== 'openrouter') return res.status(400).json({ error: 'Unsupported video provider.' });
       if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 20000) return res.status(400).json({ error: 'Enter a prompt up to 20,000 characters.' });
@@ -29,6 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (body[field] != null && (!Array.isArray(body[field]) || body[field].some((url: unknown) => !isReferenceUrl(url) && !(provider === 'openrouter' && typeof url === 'string' && /^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(url))))) return res.status(400).json({ error: 'Invalid reference media.' });
       }
       const registry = await prepareTaskRegistry(res); if (!registry) return;
+      if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
       const fal = falSeedanceInput(body);
       const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${providerKey(provider)}`, 'Content-Type':'application/json' },
@@ -40,6 +42,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('The provider did not confirm a task ID.');
       const taskId = `bs_${provider}_${body.videoModel}_${id}`;
       await registerProviderTask(registry, provider, taskId, user.id);
+      if (body.generationId && !await saveGenerationTask(registry, body.generationId, user.id, taskId)) {
+        return res.status(503).json({ error: `Generation was submitted, but its saved video could not be updated (Task: ${taskId}). Do not submit again; check task history or contact an administrator.`, taskId });
+      }
       return res.status(200).json({ taskId, provider, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
     }
     const taskId = req.query.taskId as string;

@@ -30,6 +30,25 @@ export async function registerProviderTask(writer: RegistryWriter, provider: Pro
   }
 }
 
+export const isGenerationId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(value);
+
+/** Save the accepted task on the caller's own gallery row, so a reload can
+ * resume it. The browser must not be the only durable copy of a paid task ID. */
+/** A billable submission for a saved video goes out only while that row exists and is the caller's. */
+export async function requireSavedVideo(reader: RegistryWriter, res: VercelResponse, generationId: string, userId: string): Promise<boolean> {
+  const { data, error } = await reader.from('generations').select('id,type')
+    .eq('id', generationId).eq('user_id', userId).maybeSingle();
+  if (error) { res.status(503).json({ error: 'The saved video could not be checked. No provider request was sent.' }); return false; }
+  if (!data || data.type !== 'video') { res.status(404).json({ error: 'The saved video no longer exists. No provider request was sent.' }); return false; }
+  return true;
+}
+
+export async function saveGenerationTask(writer: RegistryWriter, generationId: string, userId: string, taskId: string): Promise<boolean> {
+  const { data, error } = await writer.from('generations').update({ task_id: taskId })
+    .eq('id', generationId).eq('user_id', userId).select('id').maybeSingle();
+  return !error && !!data;
+}
+
 /**
  * RLS grants SELECT only to the owner or an active administrator. The registry
  * has no client write grants; editable generation metadata is never proof of

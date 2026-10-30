@@ -100,3 +100,12 @@ test('positive image counts retain provider-specific cost previews',()=>{
     assert.deepEqual(getImageCostPreview({...config,count:0},2),preview);
   }
 });
+
+test('a prompt-only Seedance task uses the app mode name on every provider',()=>{
+  // The client and EvoLink call this mode text_only; fal serves it at text-to-video.
+  for(const provider of ['evolink','fal','openrouter']) {
+    assert.equal(seedanceProviderError(provider,{videoModel:'seedance-2.5',mode:'text_only',duration:5,quality:'720p',aspectRatio:'16:9'}),undefined,provider);
+  }
+  assert.equal(falSeedanceInput({videoModel:'seedance-2.0',mode:'text_only',duration:5,quality:'720p',aspectRatio:'16:9'}).endpoint,'bytedance/seedance-2.0/text-to-video');
+  assert.equal(seedanceProviderError('fal',{videoModel:'seedance-2.5',mode:'text',duration:5,quality:'720p',aspectRatio:'16:9'}),'Unsupported video operation.');
+});

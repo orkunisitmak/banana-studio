@@ -1403,17 +1403,21 @@ export const saveVideo = async (
     let existingMeta: any = {};
     let existingReferenceImages: any[] | null = null;
     try {
-      const { data: existingRow } = await supabase
+      const { data: existingRow, error } = await supabase
         .from('generations')
         .select('metadata, reference_images')
         .eq('id', media.id)
         .maybeSingle();
+      if (error) throw error;
       existingMeta = existingRow?.metadata || {};
       if (Array.isArray(existingRow?.reference_images)) {
         existingReferenceImages = existingRow.reference_images;
       }
-    } catch {
-      // Non-fatal: if the row doesn't exist or the read fails we just upsert fresh.
+    } catch (readError: any) {
+      // A missing row upserts fresh above. A failed read must not replace the
+      // saved metadata (including a reconciled cost) or reference images.
+      console.warn('saveVideo: existing details could not be read:', readError?.message || readError);
+      return undefined;
     }
 
     const safeReferenceVideos = sanitizePublicMediaRefs(media.referenceVideos);
@@ -1740,13 +1744,19 @@ export const updateVideoStatus = async (
       if (storagePath) updateObj.storage_path = storagePath;
     }
     if (updates?.metadata) {
-      const { data: existing } = await supabase.from('generations').select('metadata').eq('id', id).single();
-      const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
-      if (status === 'completed') {
-        delete merged.error;
-        delete merged.pollingWarning;
+      // Without the saved metadata, writing it would drop the task endpoints and
+      // cost. Still save the status and URL; leave the saved metadata untouched.
+      const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      if (error) {
+        console.warn('updateVideoStatus: saved video details could not be read; keeping them unchanged:', error.message);
+      } else {
+        const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
+        if (status === 'completed') {
+          delete merged.error;
+          delete merged.pollingWarning;
+        }
+        updateObj.metadata = merged;
       }
-      updateObj.metadata = merged;
     }
     await supabase.from('generations').update(updateObj).eq('id', id);
   } catch (e: any) {
@@ -2049,7 +2059,8 @@ export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
 
 export const renameFolder = async (folderId: string, newName: string): Promise<void> => {
   if (supabase) {
-    await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    const { error } = await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    if (error) throw new Error(`Folder could not be renamed: ${error.message}`);
   }
   try {
     const db = await openDB();
@@ -2335,17 +2346,14 @@ export const saveTemplate = async (template: Template): Promise<void> => {
   const operationUserId = await bindMediaSession();
   if (supabase && !operationUserId) throw new Error('Sign in to save a reference.');
   if (supabase) {
-    try {
-      const userId = operationUserId;
-      if (!userId) throw new Error('Not authenticated');
-      await supabase.from('templates').upsert({
-        id: template.id,
-        user_id: userId,
-        name: template.name,
-        config: template.config,
-        created_at: template.createdAt
-      });
-    } catch (e) { }
+    const { error } = await supabase.from('templates').upsert({
+      id: template.id,
+      user_id: operationUserId,
+      name: template.name,
+      config: template.config,
+      created_at: template.createdAt
+    });
+    if (error) throw new Error(`Template could not be saved: ${error.message}`);
   }
 
   try {
@@ -2379,7 +2387,10 @@ export const getTemplates = async (): Promise<Template[]> => {
 };
 
 export const deleteTemplate = async (id: string): Promise<void> => {
-  if (supabase) await supabase.from('templates').delete().eq('id', id);
+  if (supabase) {
+    const { error } = await supabase.from('templates').delete().eq('id', id);
+    if (error) throw new Error(`Template could not be deleted: ${error.message}`);
+  }
   try {
     const db = await openDB();
     db.transaction(TEMPLATE_STORE_NAME, 'readwrite').objectStore(TEMPLATE_STORE_NAME).delete(id);

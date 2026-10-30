@@ -140,7 +140,10 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       user: user.id,
     };
     // Let Sunburst use its default input fidelity for generation and edits.
-    if (generationReferences.length) input.images = await Promise.all(generationReferences.map(async ref => ({ image_url: await providerImageUrl(db, ref.data) })));
+    if (generationReferences.length) {
+      try { input.images = await Promise.all(generationReferences.map(async ref => ({ image_url: await providerImageUrl(db, ref.data) }))); }
+      catch { throw new SavedImageError('A reference image could not be prepared. Attach it again. No image request was sent.'); }
+    }
 
     if (context.dispatch && !await context.dispatch(metadata)) {
       await guard.finish('rejected');
@@ -235,7 +238,8 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     console.warn('OpenAI image request failed', { id: body.id, auditId: guard.id, status: providerStatus ?? null,
       code: providerErrorCode ?? null, elapsedMs: Date.now() - startedAt });
     await db.from('generations').update({ status: 'failed', metadata: { ...metadata, error: message } }).eq('id', body.id).eq('user_id', user.id);
-    await guard.finish('failed', typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
+    // Until the provider call starts, nothing was sent; keep the ledger at rejected.
+    await guard.finish(outcome === 'rejected' ? 'rejected' : 'failed', typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
     return res.status(error?.status >= 400 && error?.status <= 599 ? error.status : 502).json({ error: message });
   } finally {
     await guard.finish(outcome, typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);

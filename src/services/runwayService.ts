@@ -281,17 +281,33 @@ const normalizeVideoForEdit = async (
   }
 
   const startedAt = Date.now();
+  // The scale job is already paid for; ride out brief poll failures like the other task pollers.
+  let transientErrors = 0;
   while (Date.now() - startedAt < VIDEO_PREPROCESS_TIMEOUT) {
     await new Promise(resolve => setTimeout(resolve, VIDEO_PREPROCESS_POLL_INTERVAL));
     const pollHeaders = await getServerAuthHeaders();
-    const statusResponse = await fetch(
-      `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
-      { headers: pollHeaders },
-    );
+    let statusResponse: Response;
+    try {
+      statusResponse = await fetch(
+        `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
+        { headers: pollHeaders },
+      );
+    } catch (error) {
+      if (++transientErrors >= 5) throw error;
+      continue;
+    }
     const statusData = await statusResponse.json().catch(() => null);
     if (!statusResponse.ok) {
+      const transient = statusResponse.status === 408 || statusResponse.status === 429 || statusResponse.status >= 500;
+      if (transient && ++transientErrors < 5) continue;
       throw new Error(statusData?.error || 'Source-video compatibility preprocessing failed.');
     }
+    // An unreadable 200 body is a failed poll too; reset only after a readable status.
+    if (!statusData) {
+      if (++transientErrors >= 5) throw new Error('Source-video compatibility preprocessing status could not be read.');
+      continue;
+    }
+    transientErrors = 0;
     if (statusData?.status === 'SUCCEEDED' && typeof statusData.videoUrl === 'string') {
       return statusData.videoUrl;
     }
@@ -1003,6 +1019,7 @@ export const createVideoTask = async (
         generateAudio: audioEnabled !== false,
         ...(videoOperation === 'reference_edit' ? { referenceEditMode: true } : {}),
         ...(videoOperation === 'edit' ? { editSourcePreparationVersion: 1 } : {}),
+        ...(context?.id ? { generationId: context.id } : {}),
       };
 
   if (imageUrls.length > 0) body.imageUrls = imageUrls;
@@ -1020,7 +1037,8 @@ export const createVideoTask = async (
   });
 
   const createData = await createRes.json().catch(() => null);
-  if (!createRes.ok) throw new Error(createData?.error || 'Failed to start video generation');
+  // As with H3, an accepted task stays usable if only its gallery save failed.
+  if (!createRes.ok && !createData?.taskId) throw new Error(createData?.error || 'Failed to start video generation');
   if (!createData?.taskId) throw new Error('No task ID returned');
 
   const usage = createData.usage && typeof createData.usage === 'object'

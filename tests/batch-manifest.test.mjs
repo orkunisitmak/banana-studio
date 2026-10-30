@@ -47,3 +47,9 @@ test('index records are replaced by the loaded detail record, with the index as 
   // Passing the index records straight through is the bug this guards against.
   assert.deepEqual(JSON.parse(buildBatchManifest(['a'], index, [])).items[0].references, []);
 });
+
+test('a detail load that never settles falls back to the index record after the timeout', async () => {
+  const index = [{ id: 'a', url: 'https://cdn/a', mediaType: 'image', prompt: 'A', aspectRatio: '1:1', resolution: '1K', createdAt: 1, referenceImages: [] }];
+  const media = await loadManifestMedia(['a'], index, () => new Promise(() => {}), 20);
+  assert.deepEqual(media.map(item => item.id), ['a']);
+});

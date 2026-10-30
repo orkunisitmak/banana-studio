@@ -22,9 +22,14 @@ export interface BatchManifestEntry {
  * fields, so load the full record for each item and keep the index record
  * only when that load fails. */
 export const loadManifestMedia = async (
-  ids: string[], index: GeneratedMedia[], load: (id: string) => Promise<GeneratedMedia | null>,
+  ids: string[], index: GeneratedMedia[], load: (id: string) => Promise<GeneratedMedia | null>, timeoutMs = 10_000,
 ): Promise<GeneratedMedia[]> => {
-  const records = await Promise.all(ids.map(async id => (await load(id).catch(() => null)) ?? index.find(media => media.id === id)));
+  // A load that never settles must not hold the ZIP; the index record is used instead.
+  const bounded = (id: string) => new Promise<GeneratedMedia | null>(resolve => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    load(id).then(record => resolve(record), () => resolve(null)).finally(() => clearTimeout(timer));
+  });
+  const records = await Promise.all(ids.map(async id => (await bounded(id)) ?? index.find(media => media.id === id)));
   return records.filter((media): media is GeneratedMedia => !!media);
 };
 

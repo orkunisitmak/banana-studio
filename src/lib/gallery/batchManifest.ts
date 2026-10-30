@@ -23,6 +23,12 @@ export interface BatchManifestEntry {
 /** Gallery index records omit reference_images and other detail-only
  * fields, so load the full record for each item and keep the index record
  * only when that load fails. */
+/** Resolves to `fallback` if `work` rejects or has not settled within `ms`. */
+export const settleWithin = <T,>(work: Promise<T>, ms: number, fallback: T): Promise<T> => new Promise(resolve => {
+  const timer = setTimeout(() => resolve(fallback), ms);
+  work.then(resolve, () => resolve(fallback)).finally(() => clearTimeout(timer));
+});
+
 export const MANIFEST_VERSION = 1;
 /** Per-item bound on the detail load; a slow or hanging read falls back to the index record. */
 export const DETAIL_LOAD_TIMEOUT_MS = 10_000;
@@ -35,10 +41,7 @@ export const loadManifestMedia = async (
   ids: string[], index: GeneratedMedia[], load: (id: string) => Promise<GeneratedMedia | null>,
   { timeoutMs = DETAIL_LOAD_TIMEOUT_MS, concurrency = DETAIL_LOAD_CONCURRENCY } = {},
 ): Promise<ManifestMedia[]> => {
-  const bounded = (id: string) => new Promise<GeneratedMedia | null>(resolve => {
-    const timer = setTimeout(() => resolve(null), timeoutMs);
-    load(id).then(record => resolve(record), () => resolve(null)).finally(() => clearTimeout(timer));
-  });
+  const bounded = (id: string) => settleWithin(load(id), timeoutMs, null);
   const results: (ManifestMedia | undefined)[] = new Array(ids.length);
   let next = 0;
   const worker = async () => {

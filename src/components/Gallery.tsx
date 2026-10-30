@@ -25,7 +25,7 @@ import { YouTubePreviewDialog } from './YouTubePreviewDialog';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
-import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { buildBatchManifest, loadManifestMedia, settleWithin, DETAIL_LOAD_TIMEOUT_MS } from '../lib/gallery/batchManifest';
 import { getCurrentUserId } from '../services/authService';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
@@ -1115,6 +1115,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => {
     setComparisonIds(null);
     setComparisonNotice(null);
+    setBatchDownloadError(null);
     setIsSelectionMode(false);
     setSelectedIds(new Set());
     setIsSearchOpen(false);
@@ -1659,7 +1660,8 @@ export const Gallery: React.FC<GalleryProps> = ({
       const ids: string[] = Array.from(selectedIds);
       // The manifest carries prompts and references, so a ZIP built for one
       // account must never be saved after a switch to another.
-      const sessionUser = async () => { try { return await getCurrentUserId(); } catch { return null; } };
+      // A lookup that fails or hangs counts as no account, so it can neither block the ZIP nor match a real one.
+      const sessionUser = () => settleWithin(getCurrentUserId(), DETAIL_LOAD_TIMEOUT_MS, null);
       const startedBy = await sessionUser();
       const { files, failed } = await collectBatchDownload(ids, images);
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
@@ -1670,10 +1672,9 @@ export const Gallery: React.FC<GalleryProps> = ({
       for (const file of files) zip.file(file.name, file.blob);
       zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
       const content = await zip.generateAsync({ type: "blob" });
-      if (await sessionUser() !== startedBy) {
-        setBatchDownloadError('Your account changed while the ZIP was being prepared. Nothing was saved.');
-        return;
-      }
+      // The account switch already reset the gallery and its selection bar, so
+      // there is nowhere to report this; the new account's gallery is the feedback.
+      if (await sessionUser() !== startedBy) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;

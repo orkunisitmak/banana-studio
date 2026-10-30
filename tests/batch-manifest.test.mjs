@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
 const compiled = await build({ entryPoints: ['src/lib/gallery/batchManifest.ts'], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)), bundle: true, write: false, format: 'esm', platform: 'node' });
-const { buildBatchManifest, loadManifestMedia } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { buildBatchManifest, loadManifestMedia, settleWithin } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 const media = [
   { id: 'a', url: 'https://cdn/a?token=secret', mediaType: 'image', prompt: 'A pear', originalPrompt: 'pear', imageGenerationPrompt: 'A pear [ref: Me]',
@@ -62,4 +62,10 @@ test('detail loads run at most `concurrency` at a time and keep selection order'
   const media = await loadManifestMedia(index.map(m => m.id), index, load, { concurrency: 3 });
   assert.equal(peak, 3);
   assert.deepEqual(media.map(item => item.media.imageGenerationPrompt), index.map(m => m.id));
+});
+
+test('settleWithin returns the result, or the fallback on rejection or timeout', async () => {
+  assert.equal(await settleWithin(Promise.resolve('user-1'), 50, null), 'user-1');
+  assert.equal(await settleWithin(Promise.reject(new Error('auth down')), 50, null), null);
+  assert.equal(await settleWithin(new Promise(() => {}), 10, null), null);
 });

@@ -1,3 +1,4 @@
+import { imageDataMimeType } from '../services/imageCompression';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
@@ -720,7 +721,7 @@ export const Controls: React.FC<ControlsProps> = ({
           if (config.mode !== 'image' && estimatedSize > MAX_SIZE_BYTES) {
             try {
               data = await compressImage(data, 1536, 0.85);
-              mimeType = 'image/jpeg';
+              mimeType = imageDataMimeType(data, mimeType);
             } catch (e) {
               console.warn("Image compression failed, using original", e);
             }

@@ -1,3 +1,4 @@
+import { compressBase64Image, imageDataMimeType } from './imageCompression';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
@@ -549,35 +550,9 @@ const createVideoThumbnail = (videoBlob: Blob, maxWidth = 640): Promise<Blob> =>
 };
 
 // --- Helper: Compress Image for Reference ---
-export const compressImage = (dataUrl: string, maxWidth = 1024, quality = 0.85): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ratio = maxWidth / img.width;
-      const scale = ratio < 1 ? ratio : 1;
-
-      canvas.width = Math.floor(img.width * scale);
-      canvas.height = Math.floor(img.height * scale);
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error("Canvas context failed"));
-        return;
-      }
-
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      // Return as JPEG for smaller size
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-      resolve(compressedDataUrl);
-    };
-    img.onerror = (e) => reject(e);
-    img.src = dataUrl;
-  });
+export const compressImage = async (dataUrl: string, maxWidth = 1024, quality = 0.85): Promise<string> => {
+  const image = await compressBase64Image(dataUrl, imageDataMimeType(dataUrl), { maxDimension: maxWidth, quality, fallbackToOriginal: false });
+  return `data:${image.mimeType};base64,${image.data}`;
 };
 
 // --- Helper: Estimate data URL size in bytes ---

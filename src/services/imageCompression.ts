@@ -2,11 +2,10 @@
  * Reference images sent to /api/gemini-generate must fit within Vercel's
  * 4.5 MB serverless function body limit (combined across the whole request).
  * Brainstorm and image-generation flows can attach 5–10 references at once,
- * so each one is resized and re-encoded as JPEG before upload.
+ * so each one is resized before upload; PNG/WebP retain transparency.
  *
  * The 1568 px cap matches the maximum side length the Gemini image models
- * actually use internally — anything larger gets downscaled by Google before
- * inference, so this transformation is lossless from the model's perspective.
+ * use internally. Resizing and lossy re-encoding can change image details.
  */
 
 const MAX_DIMENSION = 1568;
@@ -20,26 +19,24 @@ const loadImage = (dataUrl: string): Promise<HTMLImageElement> =>
     img.src = dataUrl;
   });
 
-/**
- * Take a base64 string (without the `data:…;base64,` prefix), decode it,
- * downscale to fit MAX_DIMENSION on the longer side, and re-encode as JPEG.
- *
- * Always returns base64 + 'image/jpeg'. Falls back to the input data on any
- * canvas / decoding error so the upload doesn't fail outright.
- */
+/** Resize a reference while retaining PNG/WebP alpha and the actual encoder MIME. */
+export const imageDataMimeType = (data: string, fallback = 'image/jpeg'): string =>
+  /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(data)?.[1].toLowerCase() || fallback.toLowerCase();
+
 export const compressBase64Image = async (
   rawBase64: string,
   inputMimeType: string,
-  options?: { maxDimension?: number; quality?: number },
+  options?: { maxDimension?: number; quality?: number; fallbackToOriginal?: boolean },
 ): Promise<{ data: string; mimeType: string }> => {
-  if (!rawBase64) return { data: '', mimeType: inputMimeType || 'image/jpeg' };
+  const sourceMime = imageDataMimeType(rawBase64, inputMimeType || 'image/jpeg');
+  if (!rawBase64) return { data: '', mimeType: sourceMime };
 
   const maxDimension = options?.maxDimension ?? MAX_DIMENSION;
   const quality = options?.quality ?? JPEG_QUALITY;
 
   const dataUrl = rawBase64.startsWith('data:')
     ? rawBase64
-    : `data:${inputMimeType || 'image/jpeg'};base64,${rawBase64}`;
+    : `data:${sourceMime};base64,${rawBase64}`;
 
   try {
     const img = await loadImage(dataUrl);
@@ -54,17 +51,19 @@ export const compressBase64Image = async (
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas context unavailable');
 
-    // White backdrop so transparent PNGs flatten cleanly into JPEG.
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, targetW, targetH);
+    // Preserve alpha for PNG/WebP. JPEG sources remain JPEG.
+    const outputMime = sourceMime === 'image/jpeg' ? 'image/jpeg' : sourceMime === 'image/webp' ? 'image/webp' : 'image/png';
     ctx.drawImage(img, 0, 0, targetW, targetH);
 
-    const dataOut = canvas.toDataURL('image/jpeg', quality);
+    const dataOut = canvas.toDataURL(outputMime, quality);
     const base64 = dataOut.includes('base64,') ? dataOut.split('base64,')[1] : dataOut;
-    return { data: base64, mimeType: 'image/jpeg' };
+    const mimeType = imageDataMimeType(dataOut, '');
+    if (!mimeType || (outputMime !== 'image/jpeg' && mimeType === 'image/jpeg')) throw new Error('Encoder did not preserve transparency');
+    return { data: base64, mimeType };
   } catch (err) {
+    if (options?.fallbackToOriginal === false) throw err;
     console.warn('Image compression failed, sending original payload', err);
     const cleaned = rawBase64.includes('base64,') ? rawBase64.split('base64,')[1] : rawBase64;
-    return { data: cleaned, mimeType: inputMimeType || 'image/jpeg' };
+    return { data: cleaned, mimeType: sourceMime };
   }
 };

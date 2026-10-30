@@ -85,7 +85,7 @@ const fetchAsBase64 = async (img: ReferenceImage, signal?: AbortSignal): Promise
         const reader = new FileReader();
         reader.onloadend = () => {
           const result = reader.result as string;
-          resolve(result.includes('base64,') ? result.split('base64,')[1] : result);
+          resolve(result);
         };
         reader.onerror = reject;
         reader.readAsDataURL(blob);
@@ -96,24 +96,18 @@ const fetchAsBase64 = async (img: ReferenceImage, signal?: AbortSignal): Promise
       return '';
     }
   }
-  return img.data.includes('base64,') ? img.data.split('base64,')[1] : img.data;
+  return img.data;
 };
 
-/**
- * Returns base64 for a reference image, downscaled and re-encoded as JPEG so
- * the combined payload stays under Vercel's 4.5 MB serverless function body
- * limit even when several references are bundled into a single request. The
- * mime type for every successful return is always `image/jpeg`, which is why
- * the call sites below hard-code that string instead of using `img.mimeType`.
- */
-const resolveReferenceImageData = async (img: ReferenceImage, signal?: AbortSignal): Promise<string> => {
+/** Keep encoded bytes and their actual MIME together across every reference caller. */
+const resolveReferenceImageData = async (img: ReferenceImage, signal?: AbortSignal): Promise<{ data: string; mimeType: string }> => {
   const task = createTaskDeadline(20_000, signal, 'Referans görsel hazırlanamadı. Bağlantıyı kontrol edip referansı yeniden ekle.');
   try {
     task.signal.throwIfAborted();
     const raw = await waitForTask(fetchAsBase64(img, task.signal), task.signal);
-    if (!raw) return '';
+    if (!raw) return { data: '', mimeType: img.mimeType || 'image/jpeg' };
     const compressed = await waitForTask(compressBase64Image(raw, img.mimeType || 'image/jpeg'), task.signal);
-    return compressed.data;
+    return compressed;
   } finally { task.dispose(); }
 };
 
@@ -181,6 +175,7 @@ const shrinkInlineImagesToBudget = async (parts: any[], signal?: AbortSignal): P
     }
     if (totalBytes() <= TEXT_REQUEST_IMAGE_BUDGET_BYTES) break;
   }
+  if (totalBytes() > TEXT_REQUEST_IMAGE_BUDGET_BYTES) throw new Error('Reference images are too large. Use fewer or smaller references.');
 };
 // All text features share provider selection; image/video generation stays separate.
 // Capture the selected model before awaiting so usage is attributed correctly
@@ -260,10 +255,10 @@ const runImagePromptTask = async (
   if (roleChecks) parts.push({ text: roleChecks });
   const inputs = getSunburstReferences(references);
   for (const [index, ref] of inputs.entries()) {
-    const data = await resolveReferenceImageData(ref, options.signal);
+    const { data, mimeType } = await resolveReferenceImageData(ref, options.signal);
     // Silently skipping one input would shift the numbered reference contract.
     if (!data) throw new Error(`Referans görsel ${index + 1} okunamadı. Yeniden ekleyip tekrar dene.`);
-    parts.push({ text: describeSunburstReference(ref, index) }, { inlineData: { data, mimeType: 'image/jpeg' } });
+    parts.push({ text: describeSunburstReference(ref, index) }, { inlineData: { data, mimeType } });
   }
   parts.push({ text: `${customInstructions ? `USER CREATIVE DIRECTION:\n${prepareTextStagePrompt(customInstructions, references)}\n\n` : ''}USER BRIEF:\n${prepareTextStagePrompt(prompt, references) || 'Use the attached visual concept and the selected reference roles.'}` });
   const response = await generateTextContent(getGeminiClient(), parts, task, prompt, options, wardrobeRequired ? 'wardrobe' : undefined, task === 'brainstorm' ? count : undefined);
@@ -299,9 +294,9 @@ export const enhancePrompt = async (
   const conceptWardrobe = !localEdit ? buildConceptWardrobeGuidance(prompt) : '';
 
   for (const [index, img] of referenceImages.entries()) {
-    const base64Data = await resolveReferenceImageData(img);
+    const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
     if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
-    parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+    parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType } });
   }
 
   let imageContext = buildPersonIdentityContract(referenceImages) + '\n' + buildEditableReferenceGuidance(referenceImages);
@@ -417,9 +412,9 @@ export const enhanceVideoPrompt = async (
   if (h3) {
     const references = { images: referenceImages, videos: referenceVideos, audios: referenceAudios };
     for (const { label, image } of getH3MaxPromptImages(h3, referenceImages)) {
-      const data = await resolveReferenceImageData(image, options.signal);
+      const { data, mimeType } = await resolveReferenceImageData(image, options.signal);
       if (!data) throw new Error(`H3 Max ${label} görseli okunamadı; prompt eksik referansla oluşturulmadı.`);
-      parts.push({ text: `=== ${label} ===` }, { inlineData: { data, mimeType: 'image/jpeg' } });
+      parts.push({ text: `=== ${label} ===` }, { inlineData: { data, mimeType } });
     }
     const sourceContext = referenceVideos.map((video, index) => ({
       position: index + 1, duration: video.duration, description: video.previousPrompt || undefined,
@@ -468,9 +463,9 @@ export const enhanceVideoPrompt = async (
   if (mainPersonImgs.length > 0) {
     parts.push({ text: `=== @MAIN_PERSON (${mainPersonImgs.length} photo(s) of the first/main character) ===` });
     for (const img of mainPersonImgs) {
-      const base64Data = await resolveReferenceImageData(img);
+      const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
       if (!base64Data) throw new Error('Ana kişi referansı okunamadı; kişi eşleşmesini korumak için işlem durduruldu.');
-      parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+      parts.push({ inlineData: { data: base64Data, mimeType } });
     }
   }
 
@@ -478,9 +473,9 @@ export const enhanceVideoPrompt = async (
   if (secondPersonImgs.length > 0) {
     parts.push({ text: `=== @SECOND_PERSON (${secondPersonImgs.length} photo(s) of the second character) ===` });
     for (const img of secondPersonImgs) {
-      const base64Data = await resolveReferenceImageData(img);
+      const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
       if (!base64Data) throw new Error('İkinci kişi referansı okunamadı; kişi eşleşmesini korumak için işlem durduruldu.');
-      parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+      parts.push({ inlineData: { data: base64Data, mimeType } });
     }
   }
 
@@ -488,9 +483,9 @@ export const enhanceVideoPrompt = async (
   for (const group of additionalPeople) {
     parts.push({ text: `=== ${group.tag} (${group.images.length} photos of the SAME SINGLE person; label ${JSON.stringify(group.label)}) ===` });
     for (const img of group.images) {
-      const base64Data = await resolveReferenceImageData(img);
+      const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
       if (!base64Data) throw new Error('Kişi referansı okunamadı.');
-      parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+      parts.push({ inlineData: { data: base64Data, mimeType } });
     }
   }
 
@@ -500,23 +495,23 @@ export const enhanceVideoPrompt = async (
     const img = referenceImages[i];
     if (img.isFirstFrame || img.isLastFrame || getPersonId(img) != null) continue;
     parts.push({ text: `=== @REF_IMAGE_${i + 1} ===` });
-    const base64Data = await resolveReferenceImageData(img);
+    const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
     if (!base64Data) throw new Error(`Referans görsel ${i + 1} okunamadı; video promptu eksik kimlikle oluşturulmadı.`);
-    parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+    parts.push({ inlineData: { data: base64Data, mimeType } });
   }
 
   if (firstFrame) {
     parts.push({ text: "=== FIRST FRAME (video starts with this image) ===" });
-    const base64Data = await resolveReferenceImageData(firstFrame);
+    const { data: base64Data, mimeType } = await resolveReferenceImageData(firstFrame);
     if (!base64Data) throw new Error('İlk kare referansı okunamadı; video promptu eksik kareyle oluşturulmadı.');
-    parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+    parts.push({ inlineData: { data: base64Data, mimeType } });
   }
 
   if (lastFrame) {
     parts.push({ text: "=== LAST FRAME (video ends with this image) ===" });
-    const base64Data = await resolveReferenceImageData(lastFrame);
+    const { data: base64Data, mimeType } = await resolveReferenceImageData(lastFrame);
     if (!base64Data) throw new Error('Son kare referansı okunamadı; video promptu eksik kareyle oluşturulmadı.');
-    parts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+    parts.push({ inlineData: { data: base64Data, mimeType } });
   }
 
   let imageContext = additionalPeople.map(group => `\n${group.tag}: ${group.images.length} photos of the SAME person, separate from every other group. Use ${group.tag} verbatim whenever this person is requested. Never expand this tag to individual photos or treat these photos as different people.`).join('');
@@ -733,9 +728,9 @@ export const generatePromptVariation = async (
   // All input roles matter, including an episode cover without any cast photos.
   if (referenceImages.length > 0) {
     for (const [index, img] of referenceImages.entries()) {
-      const base64Data = await resolveReferenceImageData(img);
+      const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
       if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
-      parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+      parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType } });
     }
   }
 
@@ -805,9 +800,9 @@ const generateSingleImageContent = async (
     const refs = config.referenceImages || [];
     parts.push({ text: [normalizeReferencePrompt(prompt, refs), buildPersonIdentityContract(refs), buildYouTubeEditorialRule(prompt, refs, config), buildYouTubeWardrobeRule(prompt, refs, config), buildPersonSeparationRule(refs)].filter(Boolean).join('\n\n') });
     for (const [index, img] of refs.entries()) {
-      const base64Data = await resolveReferenceImageData(img);
+      const { data: base64Data, mimeType } = await resolveReferenceImageData(img);
       if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı.`);
-      parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: img.mimeType || 'image/jpeg' } });
+      parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType } });
     }
 
     let response;
@@ -1077,9 +1072,9 @@ const brainstormIdeasInternal = async (
   const styleReferenceImages = referenceImages.filter(img => getPersonId(img) == null && !img.isDraftImage && !img.isVideoContext);
   
   for (const [index, img] of referenceImages.entries()) {
-    const base64Data = await resolveReferenceImageData(img, options.signal);
+    const { data: base64Data, mimeType } = await resolveReferenceImageData(img, options.signal);
     if (!base64Data) throw new Error(`Referans ${index + 1} okunamadı; kişi eşleşmesini korumak için işlem durduruldu.`);
-    parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } });
+    parts.push({ text: describeSunburstReference(img, index) }, { inlineData: { data: base64Data, mimeType } });
   }
 
   if (userBrief) userBrief = prepareTextStagePrompt(userBrief, referenceImages);

@@ -9,10 +9,10 @@ const start = source.indexOf('  const processVideoFiles = async');
 const handlers = source.slice(start, source.indexOf('  const processAudioFiles = async', start));
 const counterStart = source.indexOf('  const [uploadingReferenceVideos, setUploadingReferenceVideos]');
 const initStart = counterStart >= 0 ? counterStart : source.indexOf('  const insertSourceUploadRef');
-const initialize = source.slice(initStart, source.indexOf('\n  useLayoutEffect(', initStart));
+const initialize = source.slice(initStart, source.indexOf('\n  useLayoutEffect(() => {\n    const element = generationBarRef.current;', initStart));
 const clearStart = source.indexOf('  const handleClearAll =');
 const clearHandler = source.slice(clearStart, source.indexOf('  const handleRemoveImage', clearStart));
-const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError } = env; ${initialize} ${handlers} ${clearHandler}; return { handleVideoFileUpload, handleClearAll, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
+const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError } = env; ${initialize} ${handlers} ${clearHandler}; return { handleVideoFileUpload, handleClearAll, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const templateStart = appSource.indexOf('  const handleSelectTemplate =');
@@ -23,18 +23,19 @@ const templateCode = transformSync(`module.exports = env => {
 };`, { loader: 'ts', format: 'cjs' }).code;
 const templateMod = { exports: {} }; new Function('module', templateCode)(templateMod);
 
-function scenario(videos = [], mode = 'insert_video', deferred = false) {
-  let state = { mode: 'video', videoModel: 'minimax-h3', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
-  const errors = [], requests = [], gates = new Map(), slots = [], updates = []; let cursor = 0, version = 0;
-  const api = () => { cursor = 0; return mod.exports({ config: state, onChange: update => { if (deferred) updates.push(update); else state = typeof update === 'function' ? update(state) : update; }, setAttachmentError: value => errors.push(typeof value === 'function' ? value(errors.at(-1)) : value),
-    isH3VideoConfig: true, h3State: { mode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: 4,
-    useRef: value => { const index = cursor++; return slots[index] ||= { current: value }; }, useState: initial => [uploadState ?? initial, update => { uploadState = update(uploadState ?? initial); }], promptLoadVersion: version,
+function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = true) {
+  let state = { mode: 'video', videoModel: h3 ? 'minimax-h3' : 'seedance-2.5', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
+  const errors = [], requests = [], gates = new Map(), slots = [], updates = []; let cursor = 0, version = 0, effects = [];
+  const api = (commit = true) => { cursor = 0; effects = []; const handlers = mod.exports({ config: state, onChange: update => { if (deferred) updates.push(update); else state = typeof update === 'function' ? update(state) : update; }, setAttachmentError: value => errors.push(typeof value === 'function' ? value(errors.at(-1)) : value),
+    isH3VideoConfig: h3, h3State: { mode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: 4,
+    useLayoutEffect: effect => effects.push(effect), useRef: value => { const index = cursor++; return slots[index] ||= { current: value }; }, useState: initial => [uploadState ?? initial, update => { uploadState = update(uploadState ?? initial); }], promptLoadVersion: version,
     setUndoStack() {}, getPersonDefinitions: () => [], refInputRef: { current: null }, setEnhanceError() {},
     uploadReferenceVideo: file => {
       requests.push(file.name); return new Promise((resolve, reject) => gates.set(file.name, { resolve: () => resolve({ id: file.name }), reject: () => reject(new Error(file.name + ' upload failed')) }));
     }, videoInputRef: { current: null }, attachLimitsRef: { get current() { return { videos: 4, config: state }; } }, flushSync: run => { run(); while (updates.length) { const update = updates.shift(); state = typeof update === 'function' ? update(state) : update; } },
-  }); };
+  }); if (commit) effects.forEach(effect => effect()); return handlers; };
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
+    discardRender: () => { const previous = state; state = { ...state, videoModel: 'uncommitted-model' }; api(false); state = previous; },
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
     loadTemplate: () => { templateMod.exports({ config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
       mergePersonReferenceInputs: (references, current, prompt) => ({ references, prompt, personGroups: [] }),
@@ -169,3 +170,23 @@ test('applying a template invalidates the pending source through the real App ha
   assert.equal(f.state().prompt, 'Template scene');
   assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['new.mp4']);
 });
+
+test('a discarded render cannot invalidate the committed draft upload', async () => {
+  const f = scenario(); const pending = f.pick(['source.mp4']); await tick();
+  f.discardRender(); f.gates.get('source.mp4').resolve(); await pending;
+  assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['source.mp4']);
+  assert.equal(f.uploading(), 0);
+});
+for (const outcome of ['resolve', 'reject']) {
+  test(`clearing a Seedance draft discards its obsolete upload ${outcome}`, async () => {
+    const f = scenario([], 'reference_to_video', false, false);
+    const old = f.pick(['old.mp4']); await tick(); f.clear();
+    const current = f.pick(['new.mp4']); await tick();
+    f.gates.get('old.mp4')[outcome](); await old;
+    assert.equal(f.uploading(), 1);
+    assert.equal(f.errors.at(-1), null);
+    f.gates.get('new.mp4').resolve(); await current;
+    assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['new.mp4']);
+    assert.equal(f.uploading(), 0);
+  });
+}

@@ -418,11 +418,11 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const insertSourceUploadRef = useRef<{ draft: object } | null>(null);
-  const insertDraftKey = JSON.stringify([promptLoadVersion, config.mode, config.videoModel, config.h3MaxMode]);
+  const insertDraftKey = JSON.stringify([promptLoadVersion, config.mode, config.videoModel, config.videoOperation, config.h3MaxMode]);
   const insertUploadDraftRef = useRef({ key: insertDraftKey, token: {} });
-  // Re-created/replaced drafts must not inherit another draft's pending source.
-  if (insertUploadDraftRef.current.key !== insertDraftKey) insertUploadDraftRef.current = { key: insertDraftKey, token: {} };
-  const videoUploadDraft = insertUploadDraftRef.current.token;
+  const videoUploadDraft = insertUploadDraftRef.current.key === insertDraftKey ? insertUploadDraftRef.current.token : {};
+  // Discarded renders must not invalidate work belonging to the committed draft.
+  useLayoutEffect(() => { insertUploadDraftRef.current = { key: insertDraftKey, token: videoUploadDraft }; }, [insertDraftKey, videoUploadDraft]);
   const [videoUploads, setVideoUploads] = useState<{ draft: object; count: number } | null>(null);
   const uploadingReferenceVideos = videoUploads?.draft === videoUploadDraft ? videoUploads.count : 0;
   const setUploadingReferenceVideos = (update: (count: number) => number) => setVideoUploads(previous => {
@@ -763,7 +763,7 @@ export const Controls: React.FC<ControlsProps> = ({
     if (files.length === 0) return;
     setAttachmentError(null);
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
-    const draft = isInsert ? insertUploadDraftRef.current.token : undefined;
+    const draft = videoUploadDraft;
     const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
     const needsSource = isInsert && !sourceId;
     if (needsSource && insertSourceUploadRef.current?.draft === draft) {
@@ -798,7 +798,7 @@ export const Controls: React.FC<ControlsProps> = ({
         results.push(...source);
       }
       results.push(...await Promise.allSettled(files.slice(needsSource ? 1 : 0).map(file => uploadReferenceVideo(file, isH3VideoConfig))));
-      if (isInsert && draft !== insertUploadDraftRef.current.token) return;
+      if (draft !== insertUploadDraftRef.current.token) return;
       const newRefs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failures = results.flatMap(result =>
         result.status === 'rejected'
@@ -812,7 +812,7 @@ export const Controls: React.FC<ControlsProps> = ({
         // even if another selection finished first. flushSync applies the update now,
         // so the warning reflects what it kept.
         flushSync(() => onChange(previous => {
-          if (isInsert && (draft !== insertUploadDraftRef.current.token || (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length))) {
+          if (draft !== insertUploadDraftRef.current.token || (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length))) {
             sourceChanged = true;
             return previous;
           }

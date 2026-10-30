@@ -11,7 +11,7 @@ const bundle = await build({ entryPoints: ['src/components/useMountedRef.ts'], a
   bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'mounted-ref', setup(b) {
     b.onResolve({ filter: /^react$/ }, () => ({ path: 'react', namespace: 'fixture' }));
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: `const r=()=>globalThis.__mountedRefFixture.renderer;
-      export const useRef=value=>r().useRef(value),useEffect=(fn,deps)=>r().useEffect(fn,deps);` }));
+      export const useRef=value=>r().useRef(value),useLayoutEffect=(fn,deps)=>r().useLayoutEffect(fn,deps);` }));
   } }],
 });
 const { useMountedRef } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
@@ -20,7 +20,7 @@ function instance() {
   const slots = []; let cursor = 0; const effects = [];
   const runtime = {
     useRef(value) { const i = cursor++; return slots[i] ||= { current: value }; },
-    useEffect(fn, deps) { const i = cursor++; if (!slots[i]) { slots[i] = { deps }; effects.push(i); slots[i].fn = fn; } },
+    useLayoutEffect(fn, deps) { const i = cursor++; if (!slots[i]) { slots[i] = { deps }; effects.push(i); slots[i].fn = fn; } },
   };
   let ref;
   return {

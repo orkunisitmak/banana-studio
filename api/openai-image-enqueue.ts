@@ -3,6 +3,7 @@ import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser
 import { getOpenAISessionId } from './_lib/openaiGuard.js';
 import { ImageJobInputError, prepareImageJobPayload } from './_lib/imageJobPayload.js';
 import { publishImageJob } from './_lib/imageJobQueue.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 export const config = { maxDuration: 60 };
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -10,6 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method==='OPTIONS') return res.status(200).end();
   if (req.method!=='POST') return res.status(405).json({ error:'Method not allowed' });
   const user = await requireUser(req,res); if (!user) return;
+  if (!await requireSpendingAllowance(req, res)) return;
   if ((process.env.VERCEL_ENV && process.env.VERCEL_ENV!=='production')) return res.status(503).json({ error:'Image generation is temporarily disabled.' });
   const sessionId = getOpenAISessionId(req), db = createServiceRoleClient();
   if (!sessionId) return res.status(401).json({ error:'Refresh your session before generating.' });

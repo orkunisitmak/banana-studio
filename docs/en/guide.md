@@ -100,4 +100,10 @@ Use multi-select to move or download work together, change the grid density and 
 
 Public folder links and multi-user administration belong to the hosted web workspace. Local Mac folders do not get public URLs.
 
+## Set a monthly spending limit
+
+Open **AI settings** to see this month's estimated spend (calendar month, UTC). On the desktop app you can set a monthly budget there; leave it empty for no limit. In a hosted workspace, admins set a default for members under **Workspace admin → Settings → Monthly spending**, and can give an account its own limit or exempt it. Admins are not limited by the default unless they set a limit for their own account.
+
+When the limit is reached, new generations, edits, videos, Enhance and Brainstorm requests stop with a *Spending Limit Reached* message. Jobs that were already accepted still finish, so the last request can take spend slightly past the limit. The limit uses Banana Studio's cost estimates; your provider bills separately.
+
 Next: [Desktop](desktop.md) · [Keys](models.md) · [Web deployment](deploy.md) · [Development](development.md) · [Security](../../SECURITY.md)

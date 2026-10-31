@@ -1724,7 +1724,7 @@ const AuthorizedWorkspace: React.FC<{
       toast.success('Template Saved', `"${name}" has been saved.`);
     } catch (e) {
       console.error("Failed to save template", e);
-      toast.error('Save Failed', 'Could not save template.');
+      toast.error('Save Failed', e instanceof Error ? e.message : 'Could not save template.');
     }
   };
 
@@ -1739,7 +1739,7 @@ const AuthorizedWorkspace: React.FC<{
       toast.success('Template Updated', `"${template.name}" has been updated.`);
     } catch (e) {
       console.error("Failed to update template", e);
-      toast.error('Update Failed', 'Could not update template.');
+      toast.error('Update Failed', e instanceof Error ? e.message : 'Could not update template.');
     }
   };
 

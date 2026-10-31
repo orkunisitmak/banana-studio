@@ -227,7 +227,7 @@ test('an account change skips cleanup with new credentials and reports retained 
 test('cleanup failure preserves the preparation error and reports the unsuccessful cleanup', async t => {
   setup(t); f.failUploadAt = 2; f.removeError = true;
   const warn = t.mock.method(console, 'warn', () => {});
-  await assert.rejects(saveTemplate(twoClips(t)), /audio could not be uploaded/i);
+  await assert.rejects(saveTemplate(twoClips(t)), /Upload rejected for audio\/wav: Storage unavailable/);
   assert.deepEqual(f.rows, []);
   assert.ok(f.removed.length > 0);
   assert.ok(warn.mock.calls.some(call => /Uncommitted template audio/.test(call.arguments[0])));
@@ -248,5 +248,22 @@ for (const code of ['08006', 'EPIPE']) {
     assert.equal(f.rows.length, 1);
     assert.equal(f.uploads.size, 2);
     assert.deepEqual(f.removed, []);
+  });
+}
+
+for (const operation of ['save', 'update']) {
+  test(`template ${operation} displays an upload error without changing the visible list`, async t => {
+    setup(t); t.mock.method(console, 'error', () => {});
+    for (const error of [new Error('Upload rejected for audio/mpeg: MIME type is not allowed'), 'unexpected']) {
+      const original = template('blob:picker');
+      let rows = [original];
+      const notifications = [];
+      const handler = create(original.config, async () => { throw error; }, update => { rows = update(rows); },
+        { success() { assert.fail('Rejected template cannot succeed'); }, error: (...args) => notifications.push(args) });
+      await handler[operation](operation === 'update' ? original : original.name);
+      assert.deepEqual(rows, [original]);
+      assert.deepEqual(notifications, [[operation === 'save' ? 'Save Failed' : 'Update Failed',
+        error instanceof Error ? error.message : operation === 'save' ? 'Could not save template.' : 'Could not update template.']]);
+    }
   });
 }

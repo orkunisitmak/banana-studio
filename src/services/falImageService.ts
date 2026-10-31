@@ -58,7 +58,7 @@ export const mapAspectRatioToFalSize = (
 
 const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
   if (img.data.startsWith('http')) return refreshMediaAccessUrl(img.data);
-  return uploadBase64ToPublicUrl(img.data, img.mimeType || 'image/jpeg', 'iref');
+  return uploadBase64ToPublicUrl(img.data, img.mimeType || '', 'iref', { throwOnError: true });
 };
 
 export const buildReferenceImageUrls = async (refs: ReferenceImage[]): Promise<string[]> => {

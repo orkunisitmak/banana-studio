@@ -53,7 +53,10 @@ export const recoverOpenAIImage = async (media: GeneratedMedia): Promise<Generat
   return { ...media, ...data.metadata, url: data.url, storagePath: data.storagePath, status: 'completed', error: undefined, isLoading: false, imageProgress: undefined };
 };
 
-const uploadReference = createReferenceUploader(uploadBase64ToPublicUrl, refreshMediaAccessUrl);
+const uploadReference = createReferenceUploader(
+  (data, mime, prefix) => uploadBase64ToPublicUrl(data, mime, prefix, { throwOnError: true }),
+  refreshMediaAccessUrl,
+);
 const activeImageJobs = new Map<string, Promise<GeneratedMedia>>();
 
 /** Only polls saved state; never resubmits a paid Images API request. */

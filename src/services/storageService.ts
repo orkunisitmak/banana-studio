@@ -1762,6 +1762,24 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
   if (supabase) {
     const userId = await bindMediaSession();
     if (!userId) throw new Error('Not authenticated');
+    // Delete or queue the DB row first: if it can be neither, this throws and
+    // the item is restored with its files intact.
+    let rowDeleted = false;
+    try {
+      const { error: dbError } = await supabase.from('generations').delete().eq('id', media.id);
+      if (dbError) {
+        console.error(`DB delete failed for ${media.id}, queuing for retry:`, dbError.message);
+        addPendingDeletion(media.id);
+      } else {
+        rowDeleted = true;
+      }
+    } catch (e) {
+      console.error(`DB delete error for ${media.id}, queuing for retry:`, e);
+      addPendingDeletion(media.id);
+    }
+    // The row is gone; a queue entry left by a failed cleanup only repeats that delete.
+    if (rowDeleted) try { removePendingDeletion(media.id); } catch { /* storage unavailable */ }
+
     // Delete storage files (best-effort - files may already be gone)
     try {
       const storagePath = media.storagePath || `${userId}/${getOriginalStoragePath(media.id)}`;
@@ -1775,28 +1793,23 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
     } catch (e) {
       // Non-fatal: storage files may not exist
     }
-
-    // Delete DB row — if this fails, queue for retry so the image stays hidden
-    try {
-      const { error: dbError } = await supabase.from('generations').delete().eq('id', media.id);
-      if (dbError) {
-        console.error(`DB delete failed for ${media.id}, queuing for retry:`, dbError.message);
-        addPendingDeletion(media.id);
-      } else {
-        removePendingDeletion(media.id);
-      }
-    } catch (e) {
-      console.error(`DB delete error for ${media.id}, queuing for retry:`, e);
-      addPendingDeletion(media.id);
-    }
   }
 
   await deleteImagesFromIndexedDb([media.id]);
 };
 
+/** Items whose delete failed without being queued for retry; their row and files still exist. */
+export class DeleteImagesError extends Error {
+  constructor(readonly failedIds: string[], total: number) { super(`${failedIds.length} of ${total} items could not be deleted.`); }
+}
+
 export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
   if (medias.length === 0) return;
-  await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  // Every delete still runs. One that failed without being queued for retry
+  // must reach the caller instead of a success message.
+  const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  const failedIds = medias.filter((_, index) => results[index].status === 'rejected').map(media => media.id);
+  if (failedIds.length) throw new DeleteImagesError(failedIds, medias.length);
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {

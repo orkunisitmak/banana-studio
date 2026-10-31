@@ -13,6 +13,7 @@ import { useToast } from './components/Toast';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
 import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
 import * as workspaceStorage from './services/storageService';
+import { DeleteImagesError } from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
@@ -1305,6 +1306,17 @@ const AuthorizedWorkspace: React.FC<{
       toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
     } catch (e) {
       console.error("Batch delete failed", e);
+      if (e instanceof DeleteImagesError) {
+        // These were not deleted or queued: show them again at their place.
+        const failed = toDelete.filter(m => e.failedIds.includes(m.id));
+        setGeneratedMedia(prev => failed.reduce((list, media) => {
+          if (list.some(m => m.id === media.id)) return list;
+          const at = list.findIndex(m => m.createdAt < media.createdAt);
+          return at < 0 ? [...list, media] : [...list.slice(0, at), media, ...list.slice(at)];
+        }, prev));
+        toast.error('Delete Failed', `${failed.length} of ${toDelete.length} images could not be deleted and were restored. Check that you are signed in and try again.`);
+        return;
+      }
       toast.error('Delete Failed', 'Some images could not be fully deleted. They will be retried automatically.');
     }
   };

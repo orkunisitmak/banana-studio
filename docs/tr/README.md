@@ -104,7 +104,7 @@ MiniMax H3 Max modları: **Text to Video Max · Image to Video Max · Reference 
 | Windows 10/11, 64-bit Intel/AMD | Bağımsız taşınabilir uygulama | [İndir](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) · [Kurulum rehberi](desktop.md#windows-indir-ve-aç) |
 | Diğer bilgisayarlar, telefon ve tablet | Tarayıcı üzerinden web sürümü | Kurulmuş web adresini aç; erişimi ve servis anahtarlarını web alanının sahibi yönetir. |
 
-**Masaüstünde hızlı başlangıç:** indir → zip'i ayıkla → aç (Mac'te önce Uygulamalar'a taşı) → **Provider keys** → modelin anahtarını gir → üret. Bağımsız uygulamada **Supabase, Vercel, Google ile giriş veya ayrıca Node kurulumu gerekmez**. Galeri bilgisayarında; anahtarlar Mac'te Anahtar Zinciri'nde, Windows'ta Credential Manager'da tutulur. Üretim sürerken uygulamayı açık tut; pencereyi küçültebilirsin. [İlk açılış izinleri, güncelleme ve yedekleme →](desktop.md)
+**Masaüstünde hızlı başlangıç:** indir → zip'i ayıkla → aç (Mac'te önce Uygulamalar'a taşı) → **Providers** → modelin anahtarını gir → üret. Bağımsız uygulamada **Supabase, Vercel, Google ile giriş veya ayrıca Node kurulumu gerekmez**. Galeri bilgisayarında; anahtarlar Mac'te Anahtar Zinciri'nde, Windows'ta Credential Manager'da tutulur. Üretim sürerken uygulamayı açık tut; pencereyi küçültebilirsin. [İlk açılış izinleri, güncelleme ve yedekleme →](desktop.md)
 
 ## Modeller ve API anahtarları
 

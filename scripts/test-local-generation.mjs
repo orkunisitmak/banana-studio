@@ -13,7 +13,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'banana-generation-test-'));
 const runtime=path.join(resources,windows?'runtime/node.exe':'runtime/node');
 const runtimeEnv=windows?Object.fromEntries(['SystemRoot','WINDIR','TEMP','TMP','USERPROFILE','LOCALAPPDATA'].filter(key=>process.env[key]).map(key=>[key,process.env[key]])):{PATH:'/usr/bin:/bin'};
 // Keep a developer's own Codex sign-in out of the mocked provider matrix.
-runtimeEnv.CODEX_ENABLED='false';
+for(const name of ['CODEX_ENABLED','CLAUDE_CODE_ENABLED','GEMINI_CLI_ENABLED','OPENCODE_ENABLED'])runtimeEnv[name]='false';
 const codecFile=path.join(root,'codec.mjs');
 if(windows)fs.writeFileSync(codecFile,`import {createRequire} from 'node:module';const sharp=createRequire(${JSON.stringify(pathToFileURL(path.join(resources,'workspace/package.json')).href)})('sharp');\nlet raw='';for await(const part of process.stdin)raw+=part;const input=JSON.parse(raw),bytes=Buffer.from(input.data,'base64');\nif(input.operation==='decode'){const {data,info}=await sharp(bytes).autoOrient().toColourspace('srgb').ensureAlpha().raw().toBuffer({resolveWithObject:true});process.stdout.write(JSON.stringify({data:data.toString('base64'),width:info.width,height:info.height}));}else{const data=await sharp(bytes,{raw:{width:input.width,height:input.height,channels:4}}).png().toBuffer();process.stdout.write(JSON.stringify({data:data.toString('base64')}));}`);
 const codec=input=>JSON.parse(execFileSync(windows?runtime:executable,windows?[codecFile]:['--raster-codec'],{input:JSON.stringify(input),maxBuffer:200*1024*1024,timeout:30_000,env:runtimeEnv}));

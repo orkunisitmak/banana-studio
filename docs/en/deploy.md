@@ -138,6 +138,6 @@ Your web workspace is now usable from its URL on Windows, Mac and mobile browser
 | “Set your verified, lowercase owner email” | Replace the placeholder in the SQL Editor copy, using lowercase and no extra spaces. |
 | Missing provider / rejected model | Match the selected model to the [provider table](models.md); check account credits and model access. |
 | Job remains queued or cannot save | Check the queue, Cron, service-role/server secret setting and Vercel function errors. Keep `media` private and preserve the migration's policies. |
-| Nothing changed after saving a key | Redeploy the web app. On Mac, use Provider keys → Save instead. |
+| Nothing changed after saving a key | Redeploy the web app. On Mac, use Providers → Add key instead. |
 
 For code-level work, logs and schema changes, continue with the [developer guide](development.md). See [SECURITY.md](../../SECURITY.md) before sharing logs or screenshots. The app's server configuration and [baseline](../../supabase/migrations/20261019123903_banana_studio_baseline.sql) are the source of truth for its required settings.

@@ -90,8 +90,31 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 else if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try KeyVault.save(key, value: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
                 field.stringValue = ""
             }
-            try workspace.refreshKeys()
+            try workspace.refreshKeys(); notifyKeysChanged()
         } catch { let failure = NSAlert(); failure.messageText = "The keys could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
+    }
+    /// One provider at a time, opened from the Providers panel. The key is typed here, never in the page.
+    func showKey(_ key: ProviderKey) {
+        let saved = ((try? KeyVault.read(key)) ?? nil) != nil
+        let alert = NSAlert(); alert.messageText = saved ? "Replace \(key.label) key" : "Add \(key.label) key"
+        alert.informativeText = "The key is stored in macOS Keychain on this Mac and is only sent to \(key.label)."
+        alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
+        if saved { alert.addButton(withTitle: "Remove Key").hasDestructiveAction = true }
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = saved ? "Saved in Keychain · paste a new key to replace it" : "Paste your API key"
+        alert.accessoryView = field; alert.window.initialFirstResponder = field
+        let response = alert.runModal()
+        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); field.stringValue = ""
+        do {
+            if response == .alertThirdButtonReturn { try KeyVault.save(key, value: nil) }
+            else if response == .alertFirstButtonReturn, !value.isEmpty { try KeyVault.save(key, value: value) }
+            else { return }
+            try workspace.refreshKeys(); notifyKeysChanged()
+        } catch { let failure = NSAlert(); failure.messageText = "The key could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
+    }
+    /// Tells the page to re-read provider status. The event carries no data.
+    private func notifyKeysChanged() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.webView.evaluateJavaScript("window.dispatchEvent(new Event('banana-native-keys-changed'))") }
     }
     func showFailure() { launchMessage.isHidden = false; launchMessage.stringValue = "The local workspace could not start. Reopen Banana Studio. Your data is kept on this Mac." }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -125,7 +148,9 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
               message.frameInfo.securityOrigin.port == origin.port,
               message.frameInfo.securityOrigin.protocol == origin.scheme,
               let body = message.body as? [String: String] else { return }
-        if body["action"] == "keys" { showKeys() }
+        if body["action"] == "keys" {
+            if let account = body["account"] { if let key = ProviderKey(rawValue: account) { showKey(key) } } else { showKeys() }
+        }
         if body["action"] == "lock" { NSApp.terminate(self) }
     }
     private func allowed(_ url: URL?) -> Bool { guard let url, let origin else { return false }; return url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port }

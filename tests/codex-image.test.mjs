@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, requestCodexImage } from '../api/_lib/codexImage.ts';
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
+// Bundled: the module imports its siblings with NodeNext `.js` specifiers.
+const compiled = await build({ entryPoints: [fileURLToPath(new URL('../api/_lib/codexImage.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, requestCodexImage } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 const withEnv = async (values, run) => {
@@ -43,8 +47,12 @@ test('Codex is offered only in the desktop runtime with a ChatGPT sign-in', { sk
     const binary = fakeCodex(home);
     await withEnv({ BANANA_RUNTIME: undefined, CODEX_HOME: home, CODEX_BIN: binary }, () => assert.equal(codexAvailable(), false));
     await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: 'false' }, () => assert.equal(codexAvailable(), false));
-    // Positive control. codexAvailable() caches this result, so the conditions below check its two inputs directly.
-    await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: undefined }, () => assert.equal(codexAvailable(), true));
+    // Positive control. codexAvailable() reads a cache that a background probe fills, so wait for it;
+    // the conditions below check its two inputs directly.
+    await withEnv({ BANANA_RUNTIME: 'local', CODEX_HOME: home, CODEX_BIN: binary, CODEX_ENABLED: undefined }, async () => {
+      for (let i = 0; i < 200 && !codexAvailable(); i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(codexAvailable(), true);
+    });
     await withEnv({ CODEX_HOME: home, CODEX_BIN: binary }, () => {
       assert.equal(findCodexBinary(), binary);
       assert.equal(hasChatGPTLogin(), true);

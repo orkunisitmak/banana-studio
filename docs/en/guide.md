@@ -12,7 +12,7 @@ For a shared browser workspace, use a [self-hosted web deployment](deploy.md). I
 
 ## Make your first image
 
-1. Open **Provider keys** in the desktop app, or ask your web workspace owner to configure a provider.
+1. Open **Providers** in the desktop app, or ask your web workspace owner to configure a provider.
 2. Add the appropriate key. GPT Image 2.5, for example, uses an OpenAI API key.
 3. Select image generation and a configured image model.
 4. Describe your idea: “A warm editorial illustration of a mountain cabin at sunrise, simple shapes, wide composition.”

@@ -1,4 +1,5 @@
 import type { AIProvider } from '../providers.js';
+import { mapUnquotedPrompt } from '../references/referenceTokens.js';
 
 export type SeedanceRequest = { videoModel: string; mode: string; prompt?: string; duration: number; quality: string; aspectRatio: string;
   generateAudio?: boolean; referenceEditMode?: boolean; editSourcePreparationVersion?: number; imageUrls?: string[]; videoUrls?: string[]; audioUrls?: string[] };
@@ -23,9 +24,9 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
     if (counts[0] > 9) return 'Use up to 9 image references with this OpenRouter route.';
   }
 }
-const referencePrompt = (prompt = '') => prompt.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
+const referencePrompt = (prompt = '') => mapUnquotedPrompt(prompt, text => text.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1'));
 export function falSeedanceInput(body: SeedanceRequest) {
-  const prompt = (body.prompt || '').replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
+  const prompt = mapUnquotedPrompt(body.prompt || '', text => text.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1'));
   const input: Record<string, unknown> = { prompt, resolution: body.quality, duration: body.duration === -1 ? 'auto' : String(body.duration),
     aspect_ratio: body.aspectRatio === 'adaptive' || body.mode === 'image_to_video' && body.videoModel === 'seedance-2.5' ? 'auto' : body.aspectRatio, generate_audio: body.generateAudio !== false };
   if (body.mode === 'image_to_video') { input.image_url = body.imageUrls?.[0]; if (body.imageUrls?.[1]) input.end_image_url = body.imageUrls[1]; }

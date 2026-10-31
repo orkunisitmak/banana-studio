@@ -31,7 +31,7 @@ import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { getTextModelLabel } from '../types';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
-import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
+import type { BrainstormGenerationRequest, BrainstormGenerationMode } from '../lib/brainstorm/brainstormGeneration';
 import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
@@ -46,6 +46,8 @@ interface ControlsProps {
   onGenerate: () => void;
   onBrainstormGenerate?: (request: BrainstormGenerationRequest) => void;
   isBrainstormPreparing?: boolean;
+  hasBrainstormSample?: boolean;
+  onBrainstormContextChange?: () => void;
   isDraftLoading?: boolean;
   promptLoadVersion?: number;
   activeRequests: number;
@@ -365,6 +367,8 @@ export const Controls: React.FC<ControlsProps> = ({
   onGenerate,
   onBrainstormGenerate,
   isBrainstormPreparing = false,
+  hasBrainstormSample = false,
+  onBrainstormContextChange,
   isDraftLoading = false,
   promptLoadVersion = 0,
   activeRequests,
@@ -472,6 +476,14 @@ export const Controls: React.FC<ControlsProps> = ({
   const brainstormSubmitRef = useRef(false);
   const [isBrainstormPanelOpen, setIsBrainstormPanelOpen] = useState(false);
   const [brainstormIdeaCount, setBrainstormIdeaCount] = useState(5);
+  const [brainstormGenerationMode, setBrainstormGenerationMode] = useState<BrainstormGenerationMode>('sample_first');
+  const brainstormAutoMinimizedRef = useRef(false);
+  useEffect(() => {
+    if (brainstormAutoMinimizedRef.current && !hasBrainstormSample) {
+      brainstormAutoMinimizedRef.current = false;
+      setIsMinimized(false);
+    }
+  }, [hasBrainstormSample, isMinimized]);
   const brainstormButtonRef = useRef<HTMLButtonElement>(null);
   const brainstormPanelRef = useRef<HTMLDivElement>(null);
   const [brainstormPanelPos, setBrainstormPanelPos] = useState({ bottom: 0, left: 0 });
@@ -1150,13 +1162,30 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const handleBrainstorm = async () => {
     if (!canBrainstormGenerate || brainstormSubmitRef.current || !onBrainstormGenerate) return;
+    const staged = brainstormGenerationMode === 'sample_first';
+    if (staged && (hasBrainstormSample || isBrainstormPreparing)) return;
+    if (staged && (!providerRoute.provider || providerRoute.error)) {
+      setBrainstormError('Önce kullanılabilir bir görsel sağlayıcısı seç.');
+      return;
+    }
+    const owner = brainstormOwnerRef.current;
+    const isCurrent = () => brainstormOwnerRef.current.mounted && brainstormOwnerRef.current.config === config && brainstormOwnerRef.current.key === owner.key;
     brainstormSubmitRef.current = true;
     setBrainstormError(null);
     try {
       const pendingPreferences = resolveTextModelPreferences();
       const preferences = pendingPreferences instanceof Promise ? await pendingPreferences : pendingPreferences;
+      if (staged && !isCurrent()) throw new Error('Taslak veya seçimler değişti. Güncel seçimlerle yeniden başlat.');
       onBrainstormGenerate({ settings: config, category: brainstormCategory, ideaCount: brainstormIdeaCount,
-        textModel: preferences.model, reasoningEffort: preferences.reasoningEffort, thinkingLevel: preferences.thinkingLevel });
+        textModel: preferences.model, reasoningEffort: preferences.reasoningEffort, thinkingLevel: preferences.thinkingLevel,
+        generationMode: brainstormGenerationMode, imageProvider: staged ? providerRoute.provider : undefined, isCurrent });
+      if (staged) {
+        setIsBrainstormPanelOpen(false);
+        if (brainstormIdeaCount * config.count > 1) {
+          brainstormAutoMinimizedRef.current = true;
+          setIsMinimized(true);
+        }
+      }
     } catch (error) {
       setBrainstormError(error instanceof Error ? error.message : 'Could not start Brainstorm.');
     } finally {
@@ -1866,6 +1895,16 @@ export const Controls: React.FC<ControlsProps> = ({
   const imageModelOptions = IMAGE_MODEL_OPTIONS;
   const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
   const providerRoute = useProviderRoute(config.mode === 'video' ? selectedVideoModel : config.imageModel);
+  const brainstormContextKey = JSON.stringify([brainstormCategory, brainstormIdeaCount, brainstormGenerationMode, providerRoute.choice, providerRoute.provider]);
+  const brainstormOwnerRef = useRef({ config, key: brainstormContextKey, mounted: true });
+  useLayoutEffect(() => {
+    brainstormOwnerRef.current = { config, key: brainstormContextKey, mounted: true };
+    onBrainstormContextChange?.();
+  }, [config, brainstormContextKey, onBrainstormContextChange]);
+  useLayoutEffect(() => () => {
+    brainstormOwnerRef.current.mounted = false;
+    onBrainstormContextChange?.();
+  }, []);
   const selectedVideoOperation = config.videoOperation || 'generate';
   const selectedVideoIntent = getVideoPromptIntent(config);
   const videoModelOptions = VIDEO_MODEL_OPTIONS.map(option => option.value === 'seedance-2.5' && providerRoute.provider !== 'evolink' ? { ...option, label: 'Seedance 2.5' } : option);
@@ -2002,6 +2041,8 @@ export const Controls: React.FC<ControlsProps> = ({
   const imageCostLabel = imageCostPreview.label;
   const brainstormImageCount = brainstormIdeaCount * config.count;
   const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, brainstormImageCount, imageCostHistory);
+  const brainstormCommitCostPreview = brainstormGenerationMode === 'sample_first'
+    ? getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, 1, imageCostHistory) : brainstormCostPreview;
   // While jobs run the button keeps its lime surface so another generation can be
   // queued, so busy-state labels must stay dark there and only turn light on the
   // disabled gray surface.
@@ -2900,16 +2941,27 @@ export const Controls: React.FC<ControlsProps> = ({
                           })()}
                           <ImageReferenceSummary references={brainstormInputImages} />
                           <p className="text-xs text-gray-400">{brainstormIdeaCount} ideas × {config.count} image{config.count > 1 ? 's' : ''} = {brainstormImageCount} images</p>
+                          <fieldset className="rounded-xl border border-white/10 p-3">
+                            <legend className="px-1 text-xs font-medium text-gray-300">Üretim şekli</legend>
+                            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-200">
+                              <label className="flex cursor-pointer items-center gap-2"><input type="radio" name="brainstorm-generation-mode" checked={brainstormGenerationMode === 'sample_first'}
+                                onChange={() => setBrainstormGenerationMode('sample_first')} className="accent-lime-400" />Önce 1 görsel</label>
+                              <label className="flex cursor-pointer items-center gap-2"><input type="radio" name="brainstorm-generation-mode" checked={brainstormGenerationMode === 'all'}
+                                onChange={() => setBrainstormGenerationMode('all')} className="accent-lime-400" />Hepsini üret</label>
+                            </div>
+                            {brainstormGenerationMode === 'sample_first' && <p className="mt-2 text-xs leading-relaxed text-gray-400">İlk görsel ücretsiz önizleme değildir; seçili sağlayıcının ücretine veya plan kotasına tabidir. Toplam adede dahildir.{brainstormImageCount > 1 ? ' Kalanlar için galeride ayrıca onay verirsin.' : ''}</p>}
+                          </fieldset>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
-                            disabled={!canBrainstormGenerate}
-                            title={brainstormCostPreview.description}
+                            disabled={!canBrainstormGenerate || brainstormGenerationMode === 'sample_first' && (hasBrainstormSample || isBrainstormPreparing || !providerRoute.provider || !!providerRoute.error)}
+                            title={brainstormCommitCostPreview.description}
                             className="w-full rounded-xl bg-gradient-to-r from-lime-400 to-emerald-400 px-3 py-3 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:from-gray-800 disabled:to-gray-800 disabled:text-gray-500">
-                            <span className="flex items-center justify-center gap-2"><Play className="h-4 w-4 shrink-0" />Brainstorm &amp; generate {brainstormImageCount}</span>
-                            <span className="mt-1 block text-xs font-medium">{brainstormCostPreview.label}</span>
+                            <span className="flex items-center justify-center gap-2"><Play className="h-4 w-4 shrink-0" />{brainstormGenerationMode === 'sample_first' ? brainstormImageCount > 1 ? 'İlk görseli üret' : '1 görsel üret' : `Brainstorm & generate ${brainstormImageCount}`}</span>
+                            <span className="mt-1 block text-xs font-medium">{brainstormCommitCostPreview.label}</span>
                           </button>
                           <p className="text-xs text-gray-400">Close Brainstorm to generate your prompt directly.</p>
                           {brainstormCostPreview.note && <p className="text-center text-[10px] text-gray-400">{brainstormCostPreview.note}</p>}
                           <p className="text-[10px] leading-relaxed text-gray-500">{brainstormCostPreview.basis === 'output' ? 'Output estimate. Prompt, references and Brainstorm text are billed separately.' : 'Image estimate. Brainstorm text usage is billed separately.'}</p>
+                          {hasBrainstormSample && <p role="status" className="text-xs text-amber-200">İlk görsel akışı galeride. Yeni bir deneme için mevcut denemeyi tamamla veya durdur.</p>}
                           {isBrainstormPreparing && <p role="status" className="text-xs text-amber-300">Preparing in the gallery. Generate again to start another batch.</p>}
                           {!hasBrainstormInput && <p className="text-xs text-gray-500">{brainstormCategory === 'simple' ? 'Describe your concept or add reference images.' : 'Add reference images first.'}</p>}
                           {brainstormError && <p role="alert" className="text-xs text-amber-300">{brainstormError}</p>}

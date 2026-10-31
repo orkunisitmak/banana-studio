@@ -52,6 +52,11 @@ const extractFalErrorMessage = (raw: unknown): string => {
   return 'Image generation failed';
 };
 
+// A timeout or rate limit describes this poll, not the generation. Keep those
+// retryable so a finished (already billed) image is not marked failed.
+const isGenerationRejection = (status: number): boolean =>
+  status >= 400 && status < 500 && status !== 408 && status !== 429;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -98,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // unsupported reference image, …) — it will never succeed, so report
       // it as a permanent FAILED rather than letting the client retry the
       // same dead request five times.
-      if (statusRes.status >= 400 && statusRes.status < 500) {
+      if (isGenerationRejection(statusRes.status)) {
         return res.status(200).json({
           status: 'FAILED',
           error: msg,
@@ -129,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // generation actually failed (typical case: Nano Banana refused to
         // produce an image because the prompt tripped its content filter).
         // Surface it as a permanent FAILED so the client stops retrying.
-        if (resultRes.status >= 400 && resultRes.status < 500) {
+        if (isGenerationRejection(resultRes.status)) {
           return res.status(200).json({
             status: 'FAILED',
             error: msg,

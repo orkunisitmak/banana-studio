@@ -159,7 +159,9 @@ export interface ReferenceImage {
   /** Approved base of a local image edit; other attachments are donors. */
   isEditSource?: boolean;
   /** Normalized selection envelope. Layers form a union; gaps stay original. */
-  editRegion?: { x: number; y: number; width: number; height: number; points?: { x: number; y: number }[]; layers?: ImageEditLayer[] };
+  editRegion?: { x: number; y: number; width: number; height: number; points?: { x: number; y: number }[]; layers?: ImageEditLayer[];
+    /** Outpaint: the areas are new canvas around the original, which may reach the canvas edges. */
+    expandsCanvas?: boolean };
   /** Original video thumbnail: episode context, not a layout to copy. */
   isVideoContext?: boolean;
   /** Example cover chosen for thumbnail design language, not episode facts or identity. */

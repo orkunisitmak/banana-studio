@@ -37,14 +37,19 @@ export const compositeEditPixels = (source: Uint8Array | Uint8ClampedArray, outp
     }
   }
   // Two passes measure distance to unselected pixels, including canvas edges.
+  // An expanded canvas has only placeholder fill beyond its edges, so its
+  // new areas blend into the original image, never toward the border.
+  const edge = (atCanvasEdge: boolean) => region.expandsCanvas && atCanvasEdge ? MAX_FEATHER + 1 : 1;
+  const [left, top] = [edge(bounds.left === 0), edge(bounds.top === 0)];
+  const [right, bottom] = [edge(bounds.left + bw === width), edge(bounds.top + bh === height)];
   for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
     const i = y * bw + x;
-    if (distances[i]) distances[i] = Math.min(distances[i], x ? distances[i - 1] + 1 : 1, y ? distances[i - bw] + 1 : 1);
+    if (distances[i]) distances[i] = Math.min(distances[i], x ? distances[i - 1] + 1 : left, y ? distances[i - bw] + 1 : top);
   }
   for (let y = bh - 1; y >= 0; y--) for (let x = bw - 1; x >= 0; x--) {
     const i = y * bw + x;
     if (!distances[i]) continue;
-    distances[i] = Math.min(distances[i], x < bw - 1 ? distances[i + 1] + 1 : 1, y < bh - 1 ? distances[i + bw] + 1 : 1);
+    distances[i] = Math.min(distances[i], x < bw - 1 ? distances[i + 1] + 1 : right, y < bh - 1 ? distances[i + bw] + 1 : bottom);
     const alpha = Math.min(1, distances[i] / caps[i]);
     const index = ((bounds.top + y) * width + bounds.left + x) * 4;
     if (alpha === 1) {

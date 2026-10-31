@@ -6,6 +6,7 @@ import { isReferenceUrl } from './_lib/providerMedia.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
+import { claimVideoSubmission, saveAcceptedVideoTask } from './_lib/videoSubmission.js';
 
 export const config = { maxDuration: 300 };
 const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
@@ -29,7 +30,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (body[field] != null && (!Array.isArray(body[field]) || body[field].some((url: unknown) => !isReferenceUrl(url) && !(provider === 'openrouter' && typeof url === 'string' && /^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(url))))) return res.status(400).json({ error: 'Invalid reference media.' });
       }
       const registry = await prepareTaskRegistry(res); if (!registry) return;
+      const claim = await claimVideoSubmission(registry, res, body.generationId, user.id, provider, body.videoModel, body);
+      if (!claim) return;
       const fal = falSeedanceInput(body);
+      if (claim.kind === 'existing') return res.status(200).json({ taskId: claim.taskId, provider, endpoint: claim.endpoint || (provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}`) });
       const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${providerKey(provider)}`, 'Content-Type':'application/json' },
         body: JSON.stringify(provider === 'fal' ? fal.input : openRouterSeedanceInput(body)),
@@ -39,8 +43,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const id = provider === 'fal' ? data?.request_id : data?.id;
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('The provider did not confirm a task ID.');
       const taskId = `bs_${provider}_${body.videoModel}_${id}`;
-      await registerProviderTask(registry, provider, taskId, user.id);
-      return res.status(200).json({ taskId, provider, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
+      const endpoint = provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}`;
+      try { await registerProviderTask(registry, provider, taskId, user.id); }
+      catch {
+        await saveAcceptedVideoTask(registry, claim.id, user.id, taskId, { falEndpoint: endpoint });
+        return res.status(503).json({ taskId, endpoint, retryable: true, error: 'The provider accepted the video, but task ownership registration failed. Do not resubmit.' });
+      }
+      if (!await saveAcceptedVideoTask(registry, claim.id, user.id, taskId, { falEndpoint: endpoint }))
+        return res.status(503).json({ taskId, endpoint, retryable: true, error: 'The provider accepted the video, but saving its gallery record failed. Do not resubmit.' });
+      return res.status(200).json({ taskId, provider, endpoint });
     }
     const taskId = req.query.taskId as string;
     const match = typeof taskId === 'string' && taskId.match(HANDLE);

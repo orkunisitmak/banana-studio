@@ -14,7 +14,7 @@ const fd = src.indexOf('  const handleDeleteFolder = async');
 const fe = src.indexOf('  const handleRenameFolder', fd);
 const body = src.slice(a, b) + src.slice(hd, he) + src.slice(fd, fe);
 const cls = (src.match(/class DeletedVideoError[^\n]*\n/) || [''])[0];
-const code = transformSync(`${cls}module.exports = (env) => { const { setGeneratedMedia, setActiveRequests, pollVideoTask, saveVideo, deleteImage, updateVideoStatus, getImageById, assertWorkspaceSession, toast, deletedMediaIdsRef, RecoverableVideoTaskError, isRecoverableVideoTaskError, DEFAULT_VIDEO_MODEL, deleteFolder, setTimeout, generatedMedia, workspaceStorage } = env; ${body}; return { resumeVideoPolling, handleDelete, handleDeleteFolder }; };`, { loader: 'ts', format: 'cjs' }).code;
+const code = transformSync(`${cls}module.exports = (env) => { const { setGeneratedMedia, setActiveRequests, pollVideoTask, saveVideo, deleteImage, updateVideoStatus, getImageById, assertWorkspaceSession, toast, deletedMediaIdsRef, resumingVideoIdsRef, RecoverableVideoTaskError, isRecoverableVideoTaskError, DEFAULT_VIDEO_MODEL, deleteFolder, setTimeout, generatedMedia, workspaceStorage } = env; ${body}; return { resumeVideoPolling, handleDelete, handleDeleteFolder }; };`, { loader: 'ts', format: 'cjs' }).code;
 class FolderDeleteError extends Error { constructor(message, keptMediaIds) { super(message); this.keptMediaIds = keptMediaIds; } }
 const run = async deleteWhen => {
   const calls = { saveCalls: 0, saved: 0, deleted: [], completed: 0, toasts: [] };
@@ -30,6 +30,7 @@ const run = async deleteWhen => {
     getImageById: async () => null, assertWorkspaceSession: async () => {},
     toast: { success: t => calls.toasts.push(t), warning: t => calls.toasts.push(t), error: t => calls.toasts.push(t), dismissToast() {} },
     deletedMediaIdsRef: { current: new Set() },
+    resumingVideoIdsRef: { current: new Set() },
     RecoverableVideoTaskError: class extends Error {}, isRecoverableVideoTaskError: () => false, DEFAULT_VIDEO_MODEL: 'm',
     // The ids are reported before the rows are deleted, as the real deleteFolder does.
     deleteFolder: async (_id, onMediaIds) => {

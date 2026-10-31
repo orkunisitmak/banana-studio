@@ -34,6 +34,7 @@ import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './l
 import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
+import { findLateVideoTaskId } from './lib/gallery/lateVideoTaskId';
 import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
@@ -170,6 +171,9 @@ const AuthorizedWorkspace: React.FC<{
   const generatedMediaRef = useRef<GeneratedMedia[]>([]);
   const lastStaleVideoCheckRef = useRef(new Map<string, number>());
   const checkingStaleVideosRef = useRef(new Set<string>());
+  const awaitingSavedVideoTaskIdsRef = useRef(new Set<string>());
+  const checkingSavedVideoTaskIdsRef = useRef(new Set<string>());
+  const resumingVideoIdsRef = useRef(new Set<string>());
   useEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -326,6 +330,15 @@ const AuthorizedWorkspace: React.FC<{
             // generationCost when it later calls saveVideo. Reading those from
             // React state inside resumeVideoPolling is racy.
             resumeVideoPolling(pending.id, pending.taskId, pending);
+          } else if (pending.status === 'processing') {
+            // A server-side task ID may arrive after this history snapshot.
+            // Observe the saved row only; never start another paid submission.
+            awaitingSavedVideoTaskIdsRef.current.add(pending.id);
+            // Provider acceptance is uncertain; never turn this into a paid retry.
+            // The shared stale-lease check below only applies to pending rows.
+            setGeneratedMedia(prev => prev.map(item => item.id === pending.id
+              ? { ...item, isLoading: false, status: 'processing', error: 'Task submission may already have been accepted. Check provider history before retrying.' }
+              : item));
           } else if (isStuckPendingMedia(pending, Date.now())) {
             // A pending row may belong to another active tab/device. Only the
             // database's atomic stale-lease check can fail it.
@@ -628,6 +641,8 @@ const AuthorizedWorkspace: React.FC<{
   };
 
   const resumeVideoPolling = async (videoId: string, taskId: string, baseMedia?: GeneratedMedia) => {
+    if (resumingVideoIdsRef.current.has(videoId)) return;
+    resumingVideoIdsRef.current.add(videoId);
     setActiveRequests(prev => prev + 1);
     setGeneratedMedia(prev => prev.map(item =>
       item.id === videoId ? {
@@ -757,6 +772,7 @@ const AuthorizedWorkspace: React.FC<{
         item.id === videoId ? { ...item, isLoading: false, status: 'failed', error: message, videoProgress: undefined, videoStage: undefined } : item
       ));
     } finally {
+      resumingVideoIdsRef.current.delete(videoId);
       setActiveRequests(prev => Math.max(0, prev - 1));
     }
   };
@@ -768,6 +784,72 @@ const AuthorizedWorkspace: React.FC<{
     }
     resumeVideoPolling(media.id, media.taskId, media);
   };
+
+  // An accepted provider ID may be persisted after the initial history load.
+  // Only previously reloaded, handle-less processing rows are watched here;
+  // this never creates a new provider request or touches in-flight submissions.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      awaitingSavedVideoTaskIdsRef.current.clear();
+      checkingSavedVideoTaskIdsRef.current.clear();
+      return;
+    }
+    let cancelled = false;
+    const checkSavedTasks = async () => {
+      if (document.visibilityState === 'hidden') return;
+      for (const id of [...awaitingSavedVideoTaskIdsRef.current]) {
+        if (cancelled) return;
+        try {
+          const found = await findLateVideoTaskId(
+            id,
+            checkingSavedVideoTaskIdsRef.current,
+            () => generatedMediaRef.current.find(item => item.id === id),
+            () => getImageById(id, undefined, { requireRemote: true }),
+          );
+          if (cancelled || !workspaceActive.current) return;
+          const current = generatedMediaRef.current.find(item => item.id === id);
+          if (!current || current.status !== 'processing' || current.taskId) {
+            awaitingSavedVideoTaskIdsRef.current.delete(id);
+            continue;
+          }
+          if (!found || !awaitingSavedVideoTaskIdsRef.current.delete(id)) continue;
+          const saved = found.media;
+          const recovered = {
+            ...current,
+            ...saved,
+            referenceImages: saved.referenceImages?.length ? saved.referenceImages : current.referenceImages,
+          };
+          if (found.kind === 'terminal') {
+            // Another tab has already finished this request. Reflect its saved
+            // result and stop polling; a new paid request is never needed.
+            setGeneratedMedia(items => items.map(item =>
+              item.id === id && item.status === 'processing' && !item.taskId
+                ? { ...item, ...recovered, status: saved.status === 'completed' ? 'completed' as const : 'failed' as const,
+                    isLoading: false, videoProgress: undefined, videoStage: undefined }
+                : item
+            ));
+            continue;
+          }
+          if (!saved.taskId) continue;
+          setGeneratedMedia(items => items.map(item =>
+            item.id === id && item.status === 'processing' && !item.taskId
+              ? { ...item, ...recovered, status: 'processing' as const }
+              : item
+          ));
+          void resumeVideoPolling(id, saved.taskId, recovered);
+        } catch {
+          // A transient authenticated read failure should not trigger a paid retry.
+        }
+      }
+    };
+    const interval = window.setInterval(() => void checkSavedTasks(), 15_000);
+    window.addEventListener('focus', checkSavedTasks);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', checkSavedTasks);
+    };
+  }, [isAuthenticated, userId]);
 
   const handleRecoverImage = async (media: GeneratedMedia) => {
     try {

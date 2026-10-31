@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createServiceRoleClient, createUserScopedClient } from './auth.js';
+import { persistAcceptedTask } from './persistAcceptedTask.js';
 
 type Provider = 'fal' | 'evolink' | 'openrouter';
 type RegistryWriter = NonNullable<ReturnType<typeof createServiceRoleClient>>;
@@ -22,8 +23,12 @@ export async function prepareTaskRegistry(res: VercelResponse): Promise<Registry
 }
 
 export async function registerProviderTask(writer: RegistryWriter, provider: Provider, taskId: string, userId: string): Promise<void> {
-  const { error } = await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId });
-  if (error) {
+  const recorded = await persistAcceptedTask(
+    async () => await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId }),
+    async () => await writer.from('provider_tasks').select('user_id').eq('provider', provider).eq('task_id', taskId).maybeSingle(),
+    userId,
+  );
+  if (!recorded) {
     // Do not overwrite an existing association or automatically resubmit a
     // billable task. The ID lets an admin inspect the provider after a DB outage.
     throw new Error(`Generation was submitted but its private task could not be recorded (Task: ${taskId}). Contact an administrator before retrying.`);

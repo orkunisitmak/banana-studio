@@ -78,13 +78,28 @@ try {
   assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(JSON.parse(result.body.text).length,5);
  }
  const analysis=await post('/api/openrouter-text-generate',{model:'gemini-3.8-flash',reasoningEffort:'low',contents:{parts:[{fileData:{fileUri:'https://www.youtube.com/watch?v=abcdefghijk'}},{text:'Analyze the actual supplied video.'}]},usageContext:{action:'enhance',prompt:'[youtube-video-brief]'},outputFormat:'youtube_analysis'});assert.equal(analysis.status,200,JSON.stringify(analysis.body));
+ // Paid video tasks require an owned pending generation before provider dispatch.
+ // Verify the old untracked request is rejected without reaching the mock provider.
+ const noSavedVideo=await post('/api/seedance-video',{videoModel:'seedance-2.5',mode:'image_to_video',prompt:'Untracked video must not be charged.',duration:8,quality:'720p',aspectRatio:'16:9',imageUrls:['https://example.invalid/first.png']});
+ assert.equal(noSavedVideo.status,400);
  for(const [provider,key] of [['fal','FAL_KEY'],['openrouter','OPENROUTER_API_KEY']]){
   await setKeys({[key]:'integration-test-only-value'});
-  const result=await post('/api/seedance-video',{videoModel:'seedance-2.5',mode:'image_to_video',prompt:'A transition between first and last frames.',duration:8,quality:'720p',aspectRatio:provider==='openrouter'?'16:9':'adaptive',imageUrls:['https://example.invalid/first.png','https://example.invalid/last.png']});assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.provider,provider);
+  const generationId='synthetic-video-'+provider;
+  const pending=await post('/local/query',{table:'generations',operation:'insert',value:{id:generationId,user_id:config.userId,type:'video',image_model:'seedance-2.5',status:'pending',task_id:'',metadata:{},created_at:Date.now()}});
+  assert.equal(pending.status,200);
+  assert.equal(pending.body.error,null,JSON.stringify(pending.body));
+  const request={generationId,videoModel:'seedance-2.5',mode:'image_to_video',prompt:'A transition between first and last frames.',duration:8,quality:'720p',aspectRatio:provider==='openrouter'?'16:9':'adaptive',imageUrls:['https://example.invalid/first.png','https://example.invalid/last.png']};
+  const result=await post('/api/seedance-video',request);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.provider,provider);
+  const saved=await post('/local/query',{table:'generations',operation:'select',columns:'*',filters:[{column:'id',operator:'eq',value:generationId}],single:true});
+  assert.equal(saved.body.data.task_id,result.body.taskId);
+  const repeated=await post('/api/seedance-video',request);assert.equal(repeated.status,200,JSON.stringify(repeated.body));assert.equal(repeated.body.taskId,result.body.taskId);
   const status=await(await fetch(origin+'/api/seedance-video?taskId='+encodeURIComponent(result.body.taskId),{headers:{Cookie:cookie}})).json();assert.equal(status.status,'SUCCEEDED');
   const foreign=await fetch(origin+'/api/seedance-video?taskId='+encodeURIComponent(result.body.taskId.replace('synthetic-video','unowned-task')),{headers:{Cookie:cookie}});assert.equal(foreign.status,404);
  }
- const calls=fs.readFileSync(path.join(root,'provider-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse),imageCalls=calls.filter(call=>call.kind==='image');assert.equal(imageCalls.length,19);assert.ok(imageCalls.filter(call=>!String(call.input.prompt).includes('[simulate-uncertain]')).every(call=>call.hasDataURL));assert.ok(calls.every(call=>!call.hasCookie));
+ const calls=fs.readFileSync(path.join(root,'provider-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse),imageCalls=calls.filter(call=>call.kind==='image');assert.equal(imageCalls.length,19);
+ const chargedVideoCalls=calls.filter(call=>call.kind==='video'&&call.method==='POST');
+ assert.equal(chargedVideoCalls.length,2,'Each owned video must reach its mocked provider exactly once despite the repeated API request');
+ assert.ok(imageCalls.filter(call=>!String(call.input.prompt).includes('[simulate-uncertain]')).every(call=>call.hasDataURL));assert.ok(calls.every(call=>!call.hasCookie));
  const textCalls=calls.filter(call=>call.kind==='text');assert.deepEqual(textCalls.slice(0,3).map(call=>call.input.model),['anthropic/claude-opus-5.5','openai/gpt-6.1-sol','google/gemini-3.8-flash']);assert.deepEqual(textCalls[3].input.provider.only,['google-ai-studio']);assert.ok(textCalls[3].input.messages[1].content.some(part=>part.type==='video_url'));assert.ok(textCalls.every(call=>call.input.provider.allow_fallbacks===false));
  assert.ok(!calls.some(call=>call.target?.includes('evolink')));console.log('Single-key routes, exact five-idea batches, footage input, task ownership and no paid fallback passed.');
  console.log('Packaged app → local queue → mock provider → local gallery flow passed. No paid provider was contacted.');

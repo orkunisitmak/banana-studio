@@ -73,6 +73,7 @@ interface GalleryProps {
   onEditGenerate?: (config: GenerationConfig) => Promise<string[]>;
   imageEditTextModel?: TextModelId;
   onCancelBrainstorm?: (batchId: string) => void;
+  brainstormReview?: React.ReactNode;
   onToggleHistory: () => void;
   onDelete: (image: GeneratedMedia) => void;
   onDeleteMultiple?: (ids: string[]) => Promise<void>;
@@ -719,6 +720,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   onEditGenerate,
   imageEditTextModel,
   onCancelBrainstorm,
+  brainstormReview,
   onDelete,
   onDeleteMultiple,
   onMove,
@@ -2601,6 +2603,8 @@ export const Gallery: React.FC<GalleryProps> = ({
       </div>
 
       <div className="p-6 md:p-8">
+
+        {brainstormReview}
 
         {/* Newest batches first, with each brainstorm idea's variants adjacent. */}
         <div className="flex flex-wrap items-start gap-3 after:content-[''] after:flex-grow-[10] after:h-0">

@@ -1,6 +1,6 @@
 import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { Controls } from './components/Controls';
 import { getReferenceImageLimit } from './lib/images/imageReferences';
@@ -15,7 +15,8 @@ import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageMode
 import * as workspaceStorage from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
-import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
+import { createBrainstormBatch, type BrainstormGenerationRequest, type BrainstormBatchState } from './lib/brainstorm/brainstormGeneration';
+import { BrainstormSampleReview } from './components/BrainstormSampleReview';
 import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
@@ -147,6 +148,7 @@ const AuthorizedWorkspace: React.FC<{
   // Track how many requests are currently active
   const [activeRequests, setActiveRequests] = useState<number>(0);
   const [isBrainstormPreparing, setIsBrainstormPreparing] = useState(false);
+  const [brainstormReview, setBrainstormReview] = useState<BrainstormBatchState | null>(null);
   const [promptLoadVersion, setPromptLoadVersion] = useState(0);
   const recreateLoadIdRef = useRef(0);
   const recreateLoadingRef = useRef<number | null>(null);
@@ -159,9 +161,14 @@ const AuthorizedWorkspace: React.FC<{
     const check = () => brainstormBatchesRef.current.forEach(batch => batch.check());
     document.addEventListener('visibilitychange', check);
     window.addEventListener('pageshow', check);
+    const changedProvider = () => brainstormBatchesRef.current.forEach(batch => {
+      if (batch.generationMode === 'sample_first') batch.cancel();
+    });
+    window.addEventListener('banana-provider-routes-changed', changedProvider);
     return () => {
       document.removeEventListener('visibilitychange', check);
       window.removeEventListener('pageshow', check);
+      window.removeEventListener('banana-provider-routes-changed', changedProvider);
       brainstormBatchesRef.current.forEach(batch => batch.cancel());
     };
   }, []);
@@ -170,7 +177,7 @@ const AuthorizedWorkspace: React.FC<{
   const generatedMediaRef = useRef<GeneratedMedia[]>([]);
   const lastStaleVideoCheckRef = useRef(new Map<string, number>());
   const checkingStaleVideosRef = useRef(new Set<string>());
-  useEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
+  useLayoutEffect(() => { generatedMediaRef.current = generatedMedia; }, [generatedMedia]);
   const [imageCostHistory, setImageCostHistory] = useState<{ userId: string; samples: ImageCostSample[] } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);
@@ -243,6 +250,11 @@ const AuthorizedWorkspace: React.FC<{
     audioEnabled: true,
     videoPromptExpansionMode: 'balanced',
   });
+  const brainstormDraftRef = useRef(config);
+  useLayoutEffect(() => {
+    brainstormDraftRef.current = config;
+    brainstormBatchesRef.current.forEach(batch => batch.check());
+  }, [config]);
 
 
   // Keep reference metadata out of the main gallery query; read a bounded,
@@ -1234,13 +1246,23 @@ const AuthorizedWorkspace: React.FC<{
 
   const handleBrainstormGenerate = (request: BrainstormGenerationRequest) => {
     const folderId = currentFolderId;
+    brainstormBatchesRef.current.forEach(batch => batch.check());
+    if (request.generationMode === 'sample_first' && [...brainstormBatchesRef.current.values()].some(batch =>
+      batch.generationMode === 'sample_first' && ['preparing', 'sampling', 'awaiting_approval'].includes(batch.snapshot.phase))) {
+      throw new Error('Önce galerideki denemeyi tamamla veya durdur.');
+    }
+    // Only one unapproved sample owns the review surface. Starting a new
+    // Brainstorm never approves the remainder of an older sample.
+    brainstormBatchesRef.current.forEach(batch => {
+      if (batch.generationMode === 'sample_first') batch.cancel();
+    });
     let settled = 0;
-    const finishPreparing = () => {
-      if (brainstormBatchesRef.current.delete(batch.id)) {
-        setIsBrainstormPreparing(brainstormBatchesRef.current.size > 0);
-      }
+    const refreshPreparing = () => {
+      setIsBrainstormPreparing([...brainstormBatchesRef.current.values()].some(item => item.snapshot.phase === 'preparing'));
     };
-    const batch = createBrainstormBatch(request, folderId, {
+    const batch = createBrainstormBatch({ ...request,
+      isCurrent: () => workspaceActive.current && brainstormDraftRef.current === request.settings && request.isCurrent?.() !== false,
+    }, folderId, {
       prepare: (settings, count, options) => brainstormIdeas(settings.referenceImages, request.category, settings.prompt, undefined, count, settings, options),
       generate: runImageGeneration,
       patch: (ids, patch) => {
@@ -1248,8 +1270,21 @@ const AuthorizedWorkspace: React.FC<{
         setGeneratedMedia(previous => previous.map(media => idSet.has(media.id) ? { ...media, ...patch } : media));
       },
       onPrepared: () => {
-        finishPreparing();
-        toast.updateToast(toastId, { title: `Generating ${batch.placeholders.length} images…`, message: 'Your ideas are ready. Creating images.' });
+        refreshPreparing();
+        toast.updateToast(toastId, { title: request.generationMode === 'sample_first' ? 'İlk görsel üretiliyor…' : `Generating ${batch.placeholders.length} images…`, message: 'Your ideas are ready. Creating images.' });
+      },
+      onRemainingStart: cards => {
+        setGeneratedMedia(previous => [...cards, ...previous]);
+        setActiveRequests(previous => previous + cards.length);
+        toast.updateToast(toastId, { title: `${cards.length} kalan görsel üretiliyor…`, message: 'İlk görsel tekrar üretilmez.' });
+      },
+      onStateChange: state => {
+        if (request.generationMode === 'sample_first' && state.total > 1 && ['preparing', 'sampling', 'awaiting_approval'].includes(state.phase)) {
+          setBrainstormReview(state);
+          if (state.phase === 'awaiting_approval') toast.updateToast(toastId, { title: 'İlk görsel hazır; devam etmek için onay ver.', message: `${state.remaining} görsel henüz başlatılmadı.` });
+        } else {
+          setBrainstormReview(previous => previous?.id === batch.id ? null : previous);
+        }
       },
       onSettled: (completed, failed) => {
         const nextSettled = completed + failed;
@@ -1261,18 +1296,33 @@ const AuthorizedWorkspace: React.FC<{
     });
     brainstormBatchesRef.current.set(batch.id, batch);
     setIsBrainstormPreparing(true);
-    setGeneratedMedia(previous => [...batch.placeholders, ...previous]);
-    setActiveRequests(previous => previous + batch.placeholders.length);
-    const toastId = toast.loading(`Preparing ${batch.placeholders.length} images…`, 'You can follow your batch in the gallery.');
-    void batch.run().then(({ completed, failed }) => {
+    setGeneratedMedia(previous => [...batch.initialPlaceholders, ...previous]);
+    setActiveRequests(previous => previous + batch.initialPlaceholders.length);
+    const toastId = toast.loading(request.generationMode === 'sample_first' ? 'Fikirler ve ilk görsel hazırlanıyor…' : `Preparing ${batch.placeholders.length} images…`, 'You can follow your batch in the gallery.');
+    void batch.run().then(({ completed, failed, skipped, stopped }) => {
       toast.dismissToast(toastId);
-      if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
+      if (stopped) toast.info('Brainstorm durduruldu', `${completed} görsel tamamlandı. Kalan üretim başlatılmayacak.`);
+      else if (skipped) toast.warning('İlk görsel tamamlanamadı', `${skipped} kalan görsel başlatılmadı. İlk görselin durumunu galeriden kontrol et.`);
+      else if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
       else if (completed) toast.warning('Batch partial', `${completed} created, ${failed} failed. Review the failed cards in the gallery.`);
       else toast.error('Brainstorm stopped', 'No images completed. Review the message on the gallery cards.');
-    }).finally(finishPreparing);
+    }).finally(() => {
+      brainstormBatchesRef.current.delete(batch.id);
+      setBrainstormReview(previous => previous?.id === batch.id ? null : previous);
+      refreshPreparing();
+    });
+    return batch.id;
   };
 
   const handleCancelBrainstorm = (id: string) => brainstormBatchesRef.current.get(id)?.cancel();
+  const handleCheckBrainstorm = () => brainstormBatchesRef.current.forEach(batch => batch.check());
+  const handleBrainstormSampleViewed = (id: string, viewed: boolean) => brainstormBatchesRef.current.get(id)?.markSampleViewed(viewed);
+  const handleApproveBrainstorm = (id: string) => {
+    const batch = brainstormBatchesRef.current.get(id);
+    const sample = generatedMediaRef.current.find(media => media.id === batch?.snapshot.sampleId);
+    if (!sample?.url || sample.isLoading || sample.status === 'failed') { batch?.cancel(); return; }
+    batch?.approve();
+  };
 
   const handleClearHistory = async () => {
     try {
@@ -1823,6 +1873,10 @@ const AuthorizedWorkspace: React.FC<{
           return await handleGenerate(editConfig, true) as string[];
         }}
         onCancelBrainstorm={handleCancelBrainstorm}
+        brainstormReview={!adminGalleryUser && brainstormReview ? <BrainstormSampleReview key={brainstormReview.id}
+          state={brainstormReview} sample={generatedMedia.find(media => media.id === brainstormReview.sampleId)}
+          onViewed={viewed => handleBrainstormSampleViewed(brainstormReview.id, viewed)}
+          onApprove={() => handleApproveBrainstorm(brainstormReview.id)} onStop={() => handleCancelBrainstorm(brainstormReview.id)} /> : undefined}
         onDelete={handleDelete}
         onDeleteMultiple={handleDeleteMultiple}
         onToggleFavorite={handleToggleFavorite}
@@ -1854,6 +1908,8 @@ const AuthorizedWorkspace: React.FC<{
           onGenerate={handleGenerate}
           onBrainstormGenerate={handleBrainstormGenerate}
           isBrainstormPreparing={isBrainstormPreparing}
+          hasBrainstormSample={!!brainstormReview}
+          onBrainstormContextChange={handleCheckBrainstorm}
           activeRequests={activeRequests}
           generationProgress={generationProgress}
           templates={templates}

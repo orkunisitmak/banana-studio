@@ -24,6 +24,8 @@ Uygulama [MIT lisansıyla](../../LICENSE) ücretsizdir. Yapay zekâ servisleri A
 
 Tek brief'ten **birbirinden farklı fikirler**, her fikir için de birden fazla görsel oluştur. Genel fikirler için **Simple**, kapak konseptleri için **YouTube** modunu seç. Fikir sayısı ve fikir başına görsel sayısı ayrıdır: beş fikir × dört görsel, yirmi sonuç üretir.
 
+**Önce 1 görsel**, istenen ilk görseli üretir ve kalanları göndermeden önce galeride onayını bekler. Bu görsel toplam adede dahildir; seçili sağlayıcının normal ücretine veya plan kotasına tabidir. Brainstorm metin kullanımı ayrıca ücretlendirilir. Durdurmak, prompt/ayar değiştirmek veya sayfayı yenilemek henüz gönderilmemiş kalanları iptal eder. Önceki gibi bütün partiyi göndermek için **Hepsini üret** seçeneğini kullan.
+
 Brainstorm; brief'ini, seçtiğin People kayıtlarını ve referansların rollerini kullanır. YouTube kapaklarında okunabilir kompozisyon, kameraya bakan kişiler ve brief'te sabit kıyafet istemediysen fikirler arasında farklı kombinler için talimat verir. Kendi yaratıcı yönlendirmelerin de isteğin parçasıdır.
 
 <p align="center"><img src="../assets/brainstorm-real.jpg" width="1000" alt="Gerçek kapakların üzerinde Brainstorm paneli: YouTube modu, beş fikir, aynı kişiye ait fotoğraf grubu ve üretilecek görsel toplamı" /></p>

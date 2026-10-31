@@ -33,15 +33,16 @@ internal static class Program
                 var window = other.MainWindowHandle;
                 if (other.Id == current.Id || window == IntPtr.Zero) continue;
                 // SW_RESTORE keeps the window's maximized state.
-                if (IsIconic(window)) ShowWindow(window, 9);
-                return SetForegroundWindow(window);
+                if (IsIconic(window)) ShowWindowAsync(window, 9);
+                return SetForegroundWindow(GetLastActivePopup(window));
             }
         }
         return false;
     }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsIconic(IntPtr window);
-    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr window);
 }
 
 internal sealed class StudioWindow : Form

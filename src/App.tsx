@@ -1782,6 +1782,7 @@ const AuthorizedWorkspace: React.FC<{
         imageModel,
         count: config.count
       });
+      setPromptLoadVersion(version => version + 1);
       toast.info('Template Applied', `"${template.name}" settings loaded.`);
     } catch (error) {
       toast.error('Template could not be applied', error instanceof Error ? error.message : 'Check the template references.');

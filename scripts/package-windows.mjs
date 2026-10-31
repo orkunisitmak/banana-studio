@@ -44,6 +44,7 @@ const copyPackage=(name,from,optional=false)=>{
  for(const dependency of Object.keys(pkg.optionalDependencies||{}))copyPackage(dependency,source,true);
 };
 copyPackage('sharp',root);
+copyPackage('@anthropic-ai/claude-agent-sdk-win32-x64',root);
 if(!copied.has('@img/sharp-win32-x64'))throw new Error('The Windows image codec is missing.');
 const webviewLicense=path.join(process.env.NUGET_PACKAGES||path.join(os.homedir(),'.nuget/packages'),'microsoft.web.webview2/1.0.4258.31/LICENSE.txt');
 if(!fs.existsSync(webviewLicense))throw new Error('The WebView2 license must accompany the distribution.');

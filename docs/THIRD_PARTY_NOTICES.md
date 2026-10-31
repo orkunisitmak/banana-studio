@@ -2,6 +2,12 @@
 
 Banana Studio source is MIT licensed. Bundled dependencies retain their own licenses. This inventory is generated from modules actually included in the web and macOS builds, rather than unbundled development or server packages.
 
+## @anthropic-ai/claude-agent-sdk@0.3.312
+
+Declared license: SEE LICENSE IN README.md
+
+© Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
 ## @fal-ai/client@1.10.1
 
 Declared license: MIT

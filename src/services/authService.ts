@@ -187,6 +187,8 @@ type UsageMetadataLike = {
   cachedContentTokenCount?: number;
   openaiUsage?: unknown;
   openrouterUsage?: unknown;
+  claudeUsage?: unknown;
+  provider?: string;
   usageLogged?: boolean;
   usageLoggingPending?: boolean;
   promptTokensDetails?: TokenDetail[];
@@ -243,6 +245,8 @@ const estimateUsageCost = (
     return perImage * normalizedImageCount;
   }
 
+  // A Claude plan request has no per-request API charge.
+  if (metadata?.provider === 'claude') return 0;
   if (metadata?.openrouterUsage) return calculateOpenRouterTextCost(metadata.openrouterUsage, model);
   if (model === OPENAI_TEXT_MODEL) return calculateOpenAITextCost(metadata?.openaiUsage);
   if (model === OPENROUTER_TEXT_MODEL) return calculateOpenRouterTextCost(metadata?.openrouterUsage);

@@ -15,6 +15,7 @@
     "test:macos": "swift test --package-path desktop/macos"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.312",
     "@fal-ai/client": "1.10.1",
     "@google/genai": "1.37.0",
     "@supabase/supabase-js": "2.39.3",

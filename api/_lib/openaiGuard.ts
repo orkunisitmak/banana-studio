@@ -15,10 +15,11 @@ export const getOpenAISessionId = (req: VercelRequest): string | null => {
 
 // The historical server-only ledger now also admits OpenRouter requests, so
 // provider switching cannot bypass the existing session/spend limits.
-export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' = 'OpenAI') {
-  const prefix = provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
-  const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
-  if (enabled === 'false' || (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')) {
+export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' | 'Claude' = 'OpenAI') {
+  const prefix = provider === 'OpenRouter' ? 'openrouter-request' : provider === 'Claude' ? 'claude-request' : 'openai-request';
+  const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : provider === 'Claude' ? process.env.CLAUDE_ENABLED : process.env.OPENAI_ENABLED;
+  // Claude is already limited to the desktop runtime by claudeAvailable().
+  if (enabled === 'false' || (provider !== 'Claude' && process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')) {
     res.status(503).json({ error: `${provider} generation is temporarily disabled.` });
     return null;
   }

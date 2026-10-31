@@ -12,9 +12,11 @@ The macOS app stores provider keys in macOS Keychain. Its SQLite database and me
 
 The Windows app stores provider keys in Windows Credential Manager and keeps its SQLite/media workspace under the current user's Local AppData. It uses the same loopback authentication and shared server. Its WebView2 profile is separate from the system browser. Native messages accept only local-origin key-dialog/quit commands; external pages are opened in the user's browser. The Windows community archive is unsigned and updates are manual; SHA-256 verification detects a mismatched archive but is not an Authenticode publisher signature. Do not disable SmartScreen or other system-wide protection.
 
+The Linux app uses GTK/WebKitGTK with an ephemeral browser session, the same loopback authentication and a bundled Node server. Provider keys stay in Linux Secret Service (GNOME Keyring or KWallet); no plaintext fallback is provided. Data lives under `$XDG_DATA_HOME/banana-studio`, normally `~/.local/share/banana-studio`, with private creation permissions. Native commands are restricted to the local top frame through an isolated JavaScript world. External HTTPS links open in the system browser. Linux archives are unsigned community packages with manual updates and SHA-256 verification. Python, GTK, WebKitGTK and libsecret are system dependencies; the WebKit sandbox stays enabled.
+
 AI features require network access. Prompts and selected references are sent to the provider chosen for that task. Local images are encoded for OpenAI requests. fal.ai and EvoLink video/image references may be uploaded to those providers' temporary file services; these can return bearer-like public URLs. Provider retention and billing policies apply. YouTube features contact Google. Sparkle checks for updates on GitHub. There is no analytics or first-party gallery sync in the desktop app.
 
-Local files are not database-encrypted; protect your OS account and backups with FileVault or Windows device encryption/BitLocker. Deleting a local file does not recall copies already sent to a provider or downloaded elsewhere.
+Local files are not database-encrypted; protect your OS account and backups with FileVault, Windows device encryption/BitLocker or Linux disk encryption. Deleting a local file does not recall copies already sent to a provider or downloaded elsewhere.
 
 ## Releases
 

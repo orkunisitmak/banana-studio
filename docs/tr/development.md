@@ -35,6 +35,8 @@ Yerel sunucu rastgele loopback portunda çalışır; tek kullanımlık bootstrap
 | `api/` | Vercel uçları ve sunucu yardımcıları; rota algılaması için kökte kalır |
 | `desktop/server/` | Yerel HTTP sunucusu, SQLite, yükleme, kuyruk ve raster adaptörü |
 | `desktop/shared/` | Sorgu uyumluluk katmanı ve tarayıcının yerel istemcisi |
+| `desktop/linux/` | GTK/WebKitGTK kabuğu, Secret Service ve yerel açılış testleri |
+| `desktop/windows/` | WinForms/WebView2 kabuğu ve Credential Manager |
 | `desktop/macos/` | Yerel kabuk, Anahtar Zinciri, süreç, raster codec ve Sparkle |
 | `supabase/migrations/`, `supabase/tests/` | Yeni kurulum şeması ve izole erişim testleri |
 | `scripts/`, `tests/` | Derleme, paketleme, imza, gizlilik taraması ve testler |
@@ -139,3 +141,30 @@ node scripts/test-local-generation.mjs
 ```
 
 Paket `.build/staging-windows/Banana Studio/` altında oluşur. Dosyaları bütün olarak tut. [Platform davranışları](desktop-parity.md) ve [yayın prosedürü](../RELEASING.md).
+
+## Linux uygulamasını derle
+
+Glibc tabanlı Linux x86-64, Node 24 ve [Linux bağımlılıkları](../../desktop/linux/README.md)
+gerekir. CI tabanı Ubuntu 24.04'tür. Yukarıdaki ortak kontrollerden sonra:
+
+```sh
+node scripts/fetch-node-runtime.mjs
+npm run package:linux
+npm run test:linux
+python3 desktop/linux/test_shell.py --vault
+python3 desktop/linux/test_shell.py --smoke '.build/staging-linux/Banana Studio'
+node scripts/test-local-generation.mjs
+node scripts/audit-distribution.mjs '.build/staging-linux/Banana Studio'
+'.build/staging-linux/Banana Studio/banana-studio'
+```
+
+Kasa testi benzersiz bir test alanında sahte anahtar oluşturur ve siler. UI testi
+boş kasa ve geçici SQLite/medya kullanarak gerçek WebKit açılışını, yerel köprüyü
+ve sunucunun kapanmasını doğrular; ücretli istek göndermez. Grafik oturumu gerekir;
+CI'da `xvfb-run -a` kullanılabilir. Yayından önce dosya seçme, pano, video codec,
+HiDPI ve Wayland/X11 davranışlarını hedef dağıtımda elle de kontrol et.
+
+Paket `.build/Banana-Studio-<version>-linux-x64.tar.gz`, doğrulama kaydı
+`verification-linux-x64.json` olur. Node ve sharp paketle gelir; Python, GTK,
+WebKitGTK ve libsecret sistemden kullanılır. WebKit sandbox'ı kapatılmaz.
+Linux güncellemeleri elle yapılır. Çıkarılan klasördeki tüm dosyaları birlikte tut.

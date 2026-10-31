@@ -35,3 +35,7 @@ Shared tests exercise clipboard fallback/duplicate handling, shell messages, Lib
 Compilation and these integration checks do not substitute for interactive clipboard, file-picker, keyboard, media playback and display-scaling tests on a physical Windows session. The release verification file records this limitation. Test these workflows with your own non-sensitive samples before adopting a new community build.
 
 Both shells remember the normal window position and size. Saved bounds are clamped to a connected display after a monitor is removed. Fullscreen and maximized modes are not restored. macOS startup has the same 30-second readiness deadline as Windows; failure stops the child server and leaves saved files intact.
+
+## Linux
+
+Linux uses the same UI and Ctrl shortcuts as Windows, with GTK/WebKitGTK, Secret Service and manual updates. Ctrl+, opens provider keys and F11 toggles fullscreen. The normal window size is saved and fitted to the current display; the window manager places the window on Wayland/X11. Python/GTK/WebKitGTK/libsecret are system dependencies, while Node and sharp are bundled. CI covers isolated keyring operations, real WebKit startup/native bridge and packaged mock generation. File dialogs, clipboard and video codec support still need desktop acceptance checks. [Build and dependencies](development.md#build-the-linux-app).

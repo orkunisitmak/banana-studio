@@ -35,6 +35,8 @@ The local server binds a random loopback port and uses a one-time bootstrap plus
 | `api/` | Hosted Vercel routes and server helpers; keep this at the root for route detection |
 | `desktop/server/` | Local HTTP server, SQLite store, uploads, queue and native raster adapter |
 | `desktop/shared/` | Query compatibility layer and browser-side local client |
+| `desktop/linux/` | GTK/WebKitGTK shell, Secret Service and native smoke tests |
+| `desktop/windows/` | WinForms/WebView2 shell and Credential Manager |
 | `desktop/macos/` | Native shell, Keychain, bundled process, raster codec and Sparkle |
 | `supabase/migrations/`, `supabase/tests/` | Fresh-install schema and isolated access tests |
 | `scripts/`, `tests/` | Build, package, signature verification, privacy audits and tests |
@@ -139,3 +141,32 @@ node scripts/test-local-generation.mjs
 ```
 
 The app is assembled under `.build/staging-windows/Banana Studio/`. Keep all files together. See [platform behavior](desktop-parity.md) and the [release procedure](../RELEASING.md).
+
+## Build the Linux app
+
+Use glibc Linux x86-64, Node 24, and the [Linux desktop dependencies](../../desktop/linux/README.md).
+Ubuntu 24.04 is the CI baseline. After the shared checks above:
+
+```sh
+node scripts/fetch-node-runtime.mjs
+npm run package:linux
+npm run test:linux
+python3 desktop/linux/test_shell.py --vault
+python3 desktop/linux/test_shell.py --smoke '.build/staging-linux/Banana Studio'
+node scripts/test-local-generation.mjs
+node scripts/audit-distribution.mjs '.build/staging-linux/Banana Studio'
+'.build/staging-linux/Banana Studio/banana-studio'
+```
+
+The vault test creates and deletes a synthetic key in a unique test namespace.
+The UI smoke test uses an empty vault and disposable SQLite/media, exercises the
+real WebKit bootstrap and isolated native bridge, then stops the child server.
+It requires a graphical session; use `xvfb-run -a` in headless CI. It makes no paid
+requests. A full release still needs manual file-picker, clipboard, video codec,
+HiDPI and Wayland/X11 checks on the target distribution.
+
+The archive is `.build/Banana-Studio-<version>-linux-x64.tar.gz`, accompanied by
+`verification-linux-x64.json`. Node archives, binaries and licenses are checksum
+pinned. Only sharp's installed runtime closure is copied, with its license files.
+GTK/WebKitGTK, Python and libsecret remain system dependencies; no WebKit sandbox
+is disabled. Keep the whole extracted folder together. Linux updates are manual.

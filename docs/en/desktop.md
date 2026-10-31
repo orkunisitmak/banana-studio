@@ -72,3 +72,25 @@ Mac and Windows use the same React interface and SQLite workspace code. Native m
 | You downloaded the source zip | Use the architecture-specific application zip on the [release page](https://github.com/orkunisitmak/banana-studio/releases/latest). |
 
 Developers: [build a development app](development.md#build-the-mac-app). Maintainers: [signed release procedure](../RELEASING.md).
+
+## Linux: build and open
+
+The Linux x86-64 port uses GTK 3 and WebKitGTK 4.1. A prebuilt release is not yet
+published: [build the portable archive](development.md#build-the-linux-app), then
+extract it and run `./banana-studio` inside the extracted `Banana Studio` folder.
+Node and the local database runtime are bundled. Python/PyGObject, GTK, WebKitGTK
+and libsecret are system dependencies. See the [dependency commands](../../desktop/linux/README.md).
+
+Run in your normal graphical desktop session with an unlocked Secret Service
+keyring (GNOME Keyring or KWallet). Keys stay there; there is no plaintext
+fallback. Use **Provider keys** or **Ctrl+,** to save/remove keys. **F11** toggles
+fullscreen. Downloads use a GTK save dialog. External HTTPS links open in your
+system browser.
+
+Local data is under `$XDG_DATA_HOME/banana-studio` (normally
+`~/.local/share/banana-studio`). **File → Open Local Data Folder** opens it. Quit
+before backing up the whole directory. Updates are manual through **File → Check
+for Updates…**. Extract the next version separately; gallery and keyring entries
+remain outside the application folder. The archive is unsigned; compare its
+SHA-256 with the verification record. Video codecs depend on your distribution's
+WebKitGTK/GStreamer packages. ARM and musl/Alpine packages are not provided.

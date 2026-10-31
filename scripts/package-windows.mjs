@@ -4,6 +4,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { auditDistribution } from './audit-distribution.mjs';
+import { copyRuntimePackages } from './copy-runtime-packages.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 if(process.platform!=='win32'||process.arch!=='x64')throw new Error('Package and test on Windows x64.');
@@ -26,24 +27,7 @@ fs.cpSync(path.join(root,'dist'),path.join(workspace,'web'),{recursive:true});
 
 // Copy only sharp's installed runtime closure. Do not ship the full development
 // node_modules directory, npm caches, user profiles or source/build paths.
-const copied=new Map();
-const resolvePackage=(name,from)=>{
- for(let directory=from;;directory=path.dirname(directory)){
-  const candidate=path.join(directory,'node_modules',name);
-  if(fs.existsSync(path.join(candidate,'package.json')))return candidate;
-  if(directory===path.dirname(directory))return null;
- }
-};
-const copyPackage=(name,from,optional=false)=>{
- const source=resolvePackage(name,from);if(!source){if(optional)return;throw new Error('Missing runtime dependency: '+name);}
- const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json')));
- if(copied.has(name)){if(copied.get(name)!==pkg.version)throw new Error('Conflicting runtime dependency: '+name);return;}
- copied.set(name,pkg.version);
- fs.cpSync(source,path.join(workspace,'node_modules',name),{recursive:true,dereference:true,filter:file=>!['node_modules','.git'].includes(path.basename(file))});
- for(const dependency of Object.keys(pkg.dependencies||{}))copyPackage(dependency,source);
- for(const dependency of Object.keys(pkg.optionalDependencies||{}))copyPackage(dependency,source,true);
-};
-copyPackage('sharp',root);
+const copied=copyRuntimePackages('sharp',root,path.join(workspace,'node_modules'));
 if(!copied.has('@img/sharp-win32-x64'))throw new Error('The Windows image codec is missing.');
 const webviewLicense=path.join(process.env.NUGET_PACKAGES||path.join(os.homedir(),'.nuget/packages'),'microsoft.web.webview2/1.0.4258.31/LICENSE.txt');
 if(!fs.existsSync(webviewLicense))throw new Error('The WebView2 license must accompany the distribution.');

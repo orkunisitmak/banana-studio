@@ -1,5 +1,23 @@
 # Desktop release procedure
 
+## Linux community archive
+
+The `linux` verification job builds on Ubuntu 24.04 x86-64. It checks the pinned
+Node runtime, shared web/server build, native boundary tests, an isolated Secret
+Service entry, actual GTK/WebKit startup under Xvfb and packaged mock generation
+with exact protected-edit pixels. It audits the assembled directory, then uploads
+`prepared-linux-x64`: `Banana-Studio-<version>-linux-x64.tar.gz` and
+`verification-linux-x64.json`. System Python/GTK/WebKitGTK/libsecret dependencies
+are documented in `desktop/linux/README.md`; Node and sharp are bundled.
+
+Use a clean committed source revision. Confirm the archive hash and source commit
+match the verification record. Test file dialogs, clipboard, keyboard, video
+codecs, HiDPI and Wayland/X11 on a target desktop before release. CI startup is
+not full interactive acceptance. Publish the matching archive and verification
+record together. Do not claim a publisher signature, automatic updates or a
+Linux release until it has actually been published. Keep the existing Mac assets
+and signed feeds available on the latest release.
+
 ## Windows community archive
 
 The verification workflow builds Windows x64 on `windows-2022`, tests the shared workspace and an isolated Credential Manager entry, runs the packaged mocked generation/protected edit, then uploads `prepared-windows-x64`. The archive includes the self-contained .NET application, pinned Node runtime, shared web/server build and sharp's installed runtime dependencies with licenses. No user data or provider key is included. The archive is unsigned; do not claim Authenticode validation or automatic updates.

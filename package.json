@@ -12,6 +12,8 @@
     "audit": "node scripts/audit-public-release.mjs --history",
     "build:desktop": "node scripts/build-desktop.mjs",
     "test:database": "node scripts/test-fresh-database.mjs",
+    "package:linux": "node scripts/package-linux.mjs",
+    "test:linux": "python3 desktop/linux/test_shell.py",
     "test:macos": "swift test --package-path desktop/macos"
   },
   "dependencies": {

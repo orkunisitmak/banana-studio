@@ -34,3 +34,7 @@ Ortak testler pano görselinin iki koleksiyondan okunmasını, çift eklenmemesi
 Bu kontroller fiziksel Windows oturumundaki etkileşimli pano, dosya seçici, kısayol, oynatma ve ekran ölçeği testlerinin yerini tutmaz. Yayının doğrulama dosyası bu sınırı belirtir. Yeni topluluk sürümüne geçerken bu akışları hassas olmayan kendi örneklerinle kontrol et.
 
 Görsel açıkken + / − yakınlaştırma, 0 ekrana sığdırma kısayollarıdır. İki masaüstü sürümü normal pencere konumunu ve boyutunu hatırlar; çıkarılmış monitörün koordinatları yerine görünür ekrana sığdırır. Tam ekran/büyütülmüş mod geri yüklenmez. macOS açılışı Windows gibi 30 saniyeyle sınırlandırılır; başarısız açılışta alt sunucu durdurulur, kayıtlı dosyalar korunur.
+
+## Linux
+
+Linux aynı arayüzü ve Windows ile aynı Ctrl kısayollarını kullanır; yerel katmanı GTK/WebKitGTK, anahtar kasası Secret Service, güncellemesi elledir. Ctrl+, anahtarları, F11 tam ekranı açar. Normal pencere boyutu kaydedilir ve mevcut ekrana sığdırılır; konumu Wayland/X11 pencere yöneticisi belirler. Node ve sharp paketlidir; Python/GTK/WebKitGTK/libsecret sistemden gelir. CI ayrı deneme kasasını, gerçek WebKit açılışını/yerel köprüyü ve paketli sahte üretimi kontrol eder. Dosya pencereleri, pano ve video codec desteği masaüstünde de doğrulanmalıdır. [Derleme ve bağımlılıklar](development.md#linux-uygulamasını-derle).

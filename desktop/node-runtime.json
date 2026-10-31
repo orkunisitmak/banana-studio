@@ -1,6 +1,12 @@
 {
   "version": "24.19.0",
   "releases": {
+    "linux-x64": {
+      "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.gz",
+      "archiveSha256": "f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4",
+      "binarySha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12",
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5"
+    },
     "darwin-arm64": {
       "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-arm64.tar.gz",
       "archiveSha256": "8294b7aa9b03997481c06babf1e8b270c859358f27da57a11509afe537ac381d",

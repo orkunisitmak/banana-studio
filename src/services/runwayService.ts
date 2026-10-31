@@ -1,6 +1,7 @@
 import { selectProvider } from './providerRouting';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
+import { getQuotedPromptPattern } from '../lib/references/referenceTokens';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
 import { logUsage, supabase } from './authService';
 import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublicUrl, refreshMediaAccessUrl } from './storageService';
@@ -641,10 +642,15 @@ export const prepareSeedanceReferenceGenerationPrompt = (
     ? `${referenceTags.slice(0, -1).join(', ')} and ${referenceTags[referenceTags.length - 1]}`
     : referenceTags[0] || 'the attached material';
 
-  const rephrased = prompt
+  // Keep literal copy opaque while matching whole commands around quoted nouns.
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  const protectedPrompt = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const rephrased = protectedPrompt
     .replace(/\[(?:EDIT|EXTEND)(?:\s+DIRECTION)?\]/gi, '[NEW SHOT DIRECTION]')
     .replace(
-      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n]*[:.]\s*/gi,
+      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n\uE000]*[:.]\s*/gi,
       (_match, tag: string) => `Use ${tag} as visual reference material. `,
     )
     .replace(
@@ -716,7 +722,8 @@ export const prepareSeedanceReferenceGenerationPrompt = (
   const direction = continuationSource
     ? `Create a new ${aspectRatio} shot that chronologically follows ${continuationSource}'s final visible moment. Match the opening pose, identity, environment, camera framing, and motion to that terminal state; portray only subsequent action. Use other attached material as supplementary visual guidance.`
     : `Create a new standalone ${aspectRatio} composition. Use ${referenceList} only as visual reference material for the people, setting, lighting, camera language, and motion. The result is a newly generated shot with independent framing.`;
-  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`);
+  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`)
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
 };
 
 // Convert app-internal @ tags (and user-entered @/# aliases) to each
@@ -728,7 +735,12 @@ const cleanPromptForVideoModel = (
   refs: ReferenceImage[],
   videoOperation: VideoOperation,
 ): string => {
-  let cleaned = prompt;
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  let cleaned = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const restoreLiterals = (value: string): string => value
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
   if (videoModel === 'minimax-h3') {
     const frameLabel = (rawIndex: string): string => {
       const index = Number(rawIndex);
@@ -750,7 +762,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/\[EDIT DIRECTION\]/gi, '[VIDEO DIRECTION]');
     cleaned = cleaned.replace(/[@#]VIDEO(?:[_ ]?\d+)?\b/gi, 'the described motion');
     cleaned = cleaned.replace(/[@#]AUDIO(?:[_ ]?\d+)?\b/gi, 'the requested sound');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   const personBinding = (personId: number, fallback: string): string => {
@@ -784,7 +796,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/@VIDEO_(\d+)/gi, (_m, n) => Number(n) === 1 ? '@VIDEO' : `reference video ${n}`);
     cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
     cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   // Seedance 2.5 is stricter than 2.0 here: a bare @VIDEO can be interpreted
@@ -801,7 +813,7 @@ const cleanPromptForVideoModel = (
   cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
   cleaned = cleaned.replace(/@VIDEO\b/gi, '@video1');
   cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-  return normalizeVideoPromptWhitespace(cleaned);
+  return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
 };
 
 /** Every Max route uses its own media contract; no Seedance extraction or

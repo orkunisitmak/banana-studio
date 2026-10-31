@@ -7,7 +7,7 @@ import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 const EVENT = 'banana-provider-routes-changed';
 const MODELS: Record<string,string> = {
   'gpt-image-2.5-sunburst':'GPT Image 2.5', 'gemini-3-pro-image-preview':'Nano Banana Pro', 'gemini-nano-banana-2.1':'Nano Banana 2.1',
-  'anthropic/claude-opus-5.5':'Claude Opus 5.5', 'gpt-6.1-sol':'GPT-6.1 Sol', 'gemini-3.8-flash':'Gemini 3.8 Flash · text / video analysis',
+  'anthropic/claude-opus-5.5':'Claude Opus 5.5', 'openrouter/free':'Free Models Router', 'gpt-6.1-sol':'GPT-6.1 Sol', 'gemini-3.8-flash':'Gemini 3.8 Flash · text / video analysis',
   'seedance-2.0':'Seedance 2.0', 'seedance-2.5':'Seedance 2.5', 'minimax-h3':'MiniMax H3 Max',
 };
 export function useProviderRoute(model: string) {

@@ -16,7 +16,7 @@ import { refreshMediaAccessUrl } from './storageService';
 import { getSeedanceFrameError, normalizeSeedanceFrameTags } from '../lib/video/seedanceFrames';
 import { resolveH3MaxMode } from '../lib/video/h3Max';
 import { buildH3MaxPromptGuide, getH3MaxPromptImages, h3MaxAcceptsPrompt, normalizeH3MaxPromptLanguage, type H3MaxEnhancementContext } from '../lib/video/h3MaxPromptGuide';
-import { OPENAI_TEXT_MODEL, OPENROUTER_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThinkingLevel, resolveTextModelPreferences } from "../lib/prompts/textModels";
+import { OPENAI_TEXT_MODEL, OPENROUTER_TEXT_MODEL, OPENROUTER_FREE_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThinkingLevel, resolveTextModelPreferences } from "../lib/prompts/textModels";
 export { getTextModel, setTextModel } from "../lib/prompts/textModels";
 
 type GeminiClient = ReturnType<typeof getGeminiClient>;
@@ -201,7 +201,7 @@ const generateTextContent = async (
   // draft language cannot override the shared production-language policy.
   const productionParts = [...parts, { text: PRODUCTION_PROMPT_LANGUAGE }];
   options.onStage?.('connecting');
-  if (model === OPENAI_TEXT_MODEL || model === OPENROUTER_TEXT_MODEL) {
+  if (model === OPENAI_TEXT_MODEL || model === OPENROUTER_TEXT_MODEL || model === OPENROUTER_FREE_TEXT_MODEL) {
     const response = await getOpenAITextClient().models.generateContent({ model, reasoningEffort, contents: { parts: productionParts }, usageContext: { action, prompt }, ...(brainstormFormat ? { brainstormFormat } : {}), ...(brainstormCount != null ? { brainstormCount } : {}) }, options);
     return { ...response, model };
   }

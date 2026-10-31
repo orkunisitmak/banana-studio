@@ -1,9 +1,9 @@
 import { DEFAULT_TEXT_MODEL, TEXT_MODEL_OPTIONS, type TextModelId } from '../../types';
 import { DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort, type OpenAIReasoningEffort } from './openaiText.js';
-import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL } from './openrouterText.js';
+import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, OPENROUTER_FREE_TEXT_MODEL } from './openrouterText.js';
 
 export { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from './openaiText.js';
-export { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from './openrouterText.js';
+export { OPENROUTER_TEXT_MODEL, OPENROUTER_FREE_TEXT_MODEL, calculateOpenRouterTextCost } from './openrouterText.js';
 export const GEMINI_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH'] as const;
 export type GeminiThinkingLevel = typeof GEMINI_THINKING_LEVELS[number];
 export const DEFAULT_GEMINI_THINKING: GeminiThinkingLevel = 'MEDIUM';
@@ -65,7 +65,7 @@ export const getOpenAIReasoningEffort = (): OpenAIReasoningEffort => {
     const value = localStorage.getItem(OPENAI_REASONING_STORAGE_KEY);
     if (isOpenAIReasoningEffort(value)) return value;
   } catch { /* Storage may be unavailable. */ }
-  return getTextModel() === OPENROUTER_TEXT_MODEL ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING;
+  return (getTextModel() === OPENROUTER_TEXT_MODEL || getTextModel() === OPENROUTER_FREE_TEXT_MODEL) ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING;
 };
 export const setOpenAIReasoningEffort = (value: OpenAIReasoningEffort): void => {
   if (!isOpenAIReasoningEffort(value)) return;

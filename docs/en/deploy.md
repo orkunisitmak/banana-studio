@@ -68,7 +68,8 @@ An environment variable is a named setting supplied to the application by Vercel
 | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase backend credential: a server secret key or legacy `service_role` key; this is the app's existing variable name | Yes, for server-owned jobs and tasks |
 | `CRON_SECRET` | A fresh random secret, preferably at least 32 characters, generated with your password manager | Yes |
 | `OPENAI_API_KEY` | OpenAI key | For GPT Image 2.5 and/or GPT-6.1 Sol |
-| `OPENROUTER_API_KEY` | OpenRouter key | For Opus 5.5, the initial creative default |
+| `OPENROUTER_API_KEY` | OpenRouter key | Optional route for Opus 5.5 and other supported models |
+| `ANTHROPIC_API_KEY` | Anthropic Console key | Direct Opus 5.5 text generation; Auto prefers it over OpenRouter when both are configured |
 | `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |
 | `FAL_KEY` | fal.ai key | For Nano Banana, H3 Max and supported video preprocessing |
 | `EVOLINK_API_KEY` | EvoLink key | For Seedance |
@@ -118,7 +119,7 @@ The script deliberately refuses its placeholder and unverified/nonexistent accou
 
 ## 8. Check the complete workspace
 
-1. Open **AI settings**. Select a text provider whose key you configured. The default is Opus 5.5 / Medium and requires OpenRouter.
+1. Open **AI settings**. Select a text provider whose key you configured. The default is Opus 5.5 / Medium; either `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` is enough. Auto prefers Anthropic if both are set.
 2. Select a configured image model. For example, choose GPT Image 2.5 with your OpenAI key.
 3. Submit one test image with your own prompt. This is a real provider request and uses your provider's balance.
 4. Verify that the result finishes, stays in the gallery after refresh and can be downloaded.

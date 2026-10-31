@@ -169,7 +169,7 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  return generateContent(normalized, provider === 'anthropic' ? '/api/anthropic-text-generate' : provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({
   models: {

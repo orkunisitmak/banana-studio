@@ -7,7 +7,7 @@ namespace BananaStudio;
 internal static class KeyVault
 {
     internal static readonly (string Name, string Label)[] Providers = [
-        ("OPENAI_API_KEY", "OpenAI"), ("OPENROUTER_API_KEY", "OpenRouter"),
+        ("OPENAI_API_KEY", "OpenAI"), ("OPENROUTER_API_KEY", "OpenRouter"), ("ANTHROPIC_API_KEY", "Anthropic"),
         ("GEMINI_API_KEY", "Google Gemini"), ("FAL_KEY", "fal.ai"),
         ("EVOLINK_API_KEY", "EvoLink"), ("YOUTUBE_API_KEY", "YouTube Data API")
     ];

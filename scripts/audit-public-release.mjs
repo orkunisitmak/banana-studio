@@ -40,6 +40,18 @@ async function sourceFiles(root, relative = '') {
   for (const entry of await fs.readdir(path.join(root, relative), { withFileTypes: true })) {
     const name = path.posix.join(relative, entry.name);
     if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+    // A linked worktree stores Git metadata in a regular .git pointer file.
+    // Exempt only a valid, single-line Git pointer at the scan root; tracked
+    // paths are still independently included below, and symlinks are rejected.
+    if (!relative && entry.name === '.git' && entry.isFile()) {
+      const pointer = await fs.readFile(path.join(root, name), 'utf8');
+      if (/^gitdir: [^\r\n]+\r?\n?$/.test(pointer)) {
+        try {
+          execFileSync('git', ['rev-parse', '--resolve-git-dir', '.git'], { cwd: root, stdio: 'ignore' });
+          continue;
+        } catch { /* Invalid metadata remains subject to the full scan. */ }
+      }
+    }
     if (entry.isDirectory()) files.push(...await sourceFiles(root, name));
     else files.push(name);
   }

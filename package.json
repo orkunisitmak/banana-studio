@@ -12,7 +12,13 @@
     "audit": "node scripts/audit-public-release.mjs --history",
     "build:desktop": "node scripts/build-desktop.mjs",
     "test:database": "node scripts/test-fresh-database.mjs",
-    "test:macos": "swift test --package-path desktop/macos"
+    "test:macos": "swift test --package-path desktop/macos",
+    "start:linux": "node scripts/start-linux.mjs",
+    "test:linux": "node --test tests/linux-*.test.mjs",
+    "package:linux": "node scripts/package-linux.mjs",
+    "package:linux:deb": "node scripts/package-linux-deb.mjs",
+    "test:linux:bundle": "node scripts/test-linux-bundle.mjs",
+    "test:linux:deb": "node scripts/test-linux-deb.mjs"
   },
   "dependencies": {
     "@fal-ai/client": "1.10.1",

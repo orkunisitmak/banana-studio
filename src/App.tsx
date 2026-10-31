@@ -8,7 +8,7 @@ import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AuthBoundary } from './components/AuthBoundary';
 import { startTextPreferencesSync } from './services/textPreferencesService';
-import { AdminPanel } from './components/AdminPanel';
+import { DeferredAdminPanel } from './components/DeferredAdminPanel';
 import { useToast } from './components/Toast';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
 import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
@@ -1796,7 +1796,7 @@ const AuthorizedWorkspace: React.FC<{
 
       <WorkspaceBar profile={userProfile} onOpenAdmin={() => setIsAdminPanelOpen(true)} onSignOut={handleSignOut} />
       {/* Admin Panel */}
-      {!isLocalWorkspace() && userProfile?.role === 'admin' && <AdminPanel
+      {!isLocalWorkspace() && userProfile?.role === 'admin' && <DeferredAdminPanel
         isOpen={isAdminPanelOpen}
         onClose={() => setIsAdminPanelOpen(false)}
         onViewUserGallery={handleViewUserGallery}

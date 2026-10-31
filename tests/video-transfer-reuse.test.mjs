@@ -9,7 +9,7 @@ const stubs = {
   authService: `export const SUPABASE_URL='https://x.supabase.co';export const getCurrentUserId=async()=>'u1';
     const from=()=>{const op={op:'select'};const q={select(){return q},upsert(v){op.op='upsert';op.value=v;return q},eq(){return q},maybeSingle(){return q},
       then(ok,fail){globalThis.__ops.push(op);return Promise.resolve(globalThis.__db(op)).then(ok,fail)}};return q;};
-    export const supabase={from,auth:{getSession:async()=>({data:{session:{user:{id:'u1'}}}})},storage:{from:()=>({
+    export const supabase={from,auth:{getSession:async()=>{globalThis.__sessionReads=(globalThis.__sessionReads||0)+1;return{data:{session:{user:{id:'u1'}}}}}},storage:{from:()=>({
       upload:async(path,blob)=>{(globalThis.__uploads||=[]).push(path);globalThis.__objects.set(path,globalThis.__blobSource?await blob.text():globalThis.__source);return{error:null};},
       createSignedUrl:async path=>(await globalThis.__signGate?.(path),globalThis.__signFails?.(path))?{data:null,error:{message:'sign failed',statusCode:'500'}}:{data:{signedUrl:'https://x.supabase.co/storage/v1/object/sign/media/'+path},error:null}})}};`,
   runtimeConfig: 'export const isLocalWorkspace=()=>false;',
@@ -41,6 +41,76 @@ test('a retried video never saves a stored file that another source overwrote', 
     assert.ok(await save('https://p/A.mp4', false));
     assert.equal(globalThis.__objects.get('u1/v1.mp4'), 'https://p/A.mp4');
   } finally { Object.assign(console, { warn, error }); globalThis.fetch = fetchImpl; }
+});
+
+test('a cached retry and a different source save for one video are serialized', async () => {
+  const { warn, error } = console; console.warn = console.error = () => {};
+  const fetchImpl = globalThis.fetch;
+  globalThis.__objects = new Map(); globalThis.__uploads = []; globalThis.__blobSource = true;
+  globalThis.__sessionReads = 0; globalThis.__ops = []; globalThis.__rows = [];
+  globalThis.__signFails = null; globalThis.__signGate = null;
+  globalThis.fetch = async url => new Response(String(url), { status: 200, headers: { 'content-type': 'video/mp4' } });
+  let failFirstUpsert = true;
+  globalThis.__db = op => {
+    if (op.op === 'upsert') {
+      if (failFirstUpsert) { failFirstUpsert = false; return { error: { message: 'timeout' } }; }
+      globalThis.__rows.push(op.value);
+    }
+    return { data: null, error: null };
+  };
+  const media = (url, prompt, id = 'v5') => ({ id, url, prompt, mediaType: 'video', createdAt: 1, videoModel: 'seedance-2.5', referenceImages: [] });
+  let releaseRetry;
+  const retryGate = new Promise(resolve => { releaseRetry = resolve; });
+  let gateEnabled = false;
+  let retryGated = false;
+  globalThis.__signGate = path => {
+    if (gateEnabled && path === 'u1/v5.mp4' && !retryGated) { retryGated = true; return retryGate; }
+  };
+  let retryA;
+  let saveB;
+  let independentSave;
+  try {
+    await saveVideo(media('https://p/A.mp4', 'source A'));
+    gateEnabled = true;
+    let retrySettled = false;
+    retryA = saveVideo(media('https://p/A.mp4', 'source A'));
+    retryA.then(() => { retrySettled = true; }, () => { retrySettled = true; });
+    while (!retryGated && !retrySettled) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(retryGated, 'cached retry reached the video URL signing gate');
+
+    const sessionReadsBeforeB = globalThis.__sessionReads;
+    saveB = saveVideo(media('https://p/B.mp4', 'source B'));
+    await new Promise(resolve => setImmediate(resolve));
+    const bWaitedBehindA = globalThis.__sessionReads === sessionReadsBeforeB;
+    // On the unfixed code B runs while A is paused; finish B first to make the stale-row race deterministic.
+    if (!bWaitedBehindA) await saveB;
+
+    let independentSettled = false;
+    let independentError;
+    independentSave = saveVideo(media('https://p/C.mp4', 'source C', 'v6')).then(
+      () => { independentSettled = true; },
+      error => { independentError = error; independentSettled = true; },
+    );
+    const independentDeadline = Date.now() + 5000;
+    while (!independentSettled && Date.now() < independentDeadline) await new Promise(resolve => setTimeout(resolve, 1));
+    assert.ok(independentSettled, 'a different generation can save while A is paused');
+    assert.equal(independentError, undefined);
+    assert.ok(globalThis.__rows.some(row => row.id === 'v6'), 'the independent generation row was persisted');
+
+    releaseRetry();
+    await Promise.all([retryA, saveB]);
+
+    const finalRow = globalThis.__rows.at(-1);
+    assert.ok(finalRow, 'the same-generation save persisted a final row');
+    assert.equal(globalThis.__objects.get(finalRow.storage_path), `https://p/${finalRow.prompt === 'source A' ? 'A' : 'B'}.mp4`);
+    assert.equal(finalRow.prompt, 'source B');
+    assert.ok(bWaitedBehindA, 'the second source waited until the cached retry finished');
+  } finally {
+    releaseRetry();
+    await Promise.allSettled([retryA, saveB, independentSave].filter(Boolean));
+    globalThis.__signGate = null; globalThis.__blobSource = false; globalThis.__signFails = null;
+    Object.assign(console, { warn, error }); globalThis.fetch = fetchImpl;
+  }
 });
 
 test('a failed row save is retried without moving the video again, and a later save transfers afresh', async () => {
@@ -100,10 +170,15 @@ test('saves of one video that overlap do not let a retry reuse a file the other 
     first.then(() => { firstSettled = true; }, () => { firstSettled = true; });
     while (!gated && !firstSettled) await new Promise(resolve => setImmediate(resolve));
     assert.ok(gated, 'A finished before it reached the URL signing gate');
-    // A has stored its file and waits for its URL; B overwrites the same path meanwhile.
-    await save('https://p/B.mp4', true);
+    // B uses the same ID and waits for A's durable URL and row write to finish.
+    const sessionsBeforeB = globalThis.__sessionReads;
+    const second = save('https://p/B.mp4', true);
+    await new Promise(resolve => setImmediate(resolve));
+    const bWaitedBehindA = globalThis.__sessionReads === sessionsBeforeB;
+    if (!bWaitedBehindA) await second;
+    releaseA(); await Promise.all([first, second]);
+    assert.ok(bWaitedBehindA, 'B waits until A releases the generation save slot');
     assert.equal(globalThis.__objects.get('u1/v4.mp4'), 'https://p/B.mp4');
-    releaseA(); await first;
     globalThis.__ops = [];
     await save('https://p/A.mp4', false);
     assert.ok(globalThis.__ops.find(op => op.op === 'upsert'));

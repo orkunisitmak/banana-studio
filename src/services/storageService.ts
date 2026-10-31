@@ -1209,8 +1209,26 @@ const mergeVideoMetadata = (existing: Record<string, any>, incoming: Record<stri
 const completedVideoTransfers = new Map<string, { source: string; storagePath: string; thumbnailPath: string | null; pendingThumbnail?: Blob }>();
 // Overlapping transfers of one generation can leave either source in the stored file, so none of them records it.
 const activeVideoTransfers = new Map<string, Set<{ overlapped: boolean }>>();
+// Acquire this before session lookup: the generation ID is globally unique and userId is asynchronous.
+const videoSaveQueues = new Map<string, Promise<void>>();
+const acquireVideoSave = async (mediaId: string): Promise<() => void> => {
+  const previous = videoSaveQueues.get(mediaId) || Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>(resolve => { releaseCurrent = resolve; });
+  const tail = previous.then(() => current);
+  videoSaveQueues.set(mediaId, tail);
+  await previous;
 
-export const saveVideo = async (
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseCurrent();
+    if (videoSaveQueues.get(mediaId) === tail) videoSaveQueues.delete(mediaId);
+  };
+};
+
+const saveVideoWithoutQueue = async (
   media: GeneratedMedia,
   expectedUserId?: string,
 ): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
@@ -1523,6 +1541,19 @@ export const saveVideo = async (
   } catch (e: any) {
     console.error("saveVideo exception:", e.message || e);
     return undefined;
+  }
+};
+
+export const saveVideo = async (
+  media: GeneratedMedia,
+  expectedUserId?: string,
+): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
+  if (!supabase) return undefined;
+  const release = await acquireVideoSave(media.id);
+  try {
+    return await saveVideoWithoutQueue(media, expectedUserId);
+  } finally {
+    release();
   }
 };
 

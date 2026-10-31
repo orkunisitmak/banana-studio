@@ -10,7 +10,7 @@ import { estimateImageProgress } from '../lib/images/imageProgress';
 import { createReferenceUploader } from '../lib/references/referenceUploadCache';
 import type { Session } from '@supabase/supabase-js';
 import { validateImageGenerationReferences } from '../lib/images/imagePrompting';
-import { imageGenerationQueue, type ImageSubmissionStage } from '../lib/images/imageGenerationQueue';
+import { imageGenerationQueue, createImageStageNotifier, type ImageSubmissionStage } from '../lib/images/imageGenerationQueue';
 
 export type ImageGenerationContext = { id: string; folderId?: string | null; onStage?: (stage: ImageSubmissionStage, waitReason?: 'rate'|'quota') => void };
 
@@ -128,6 +128,7 @@ export const generateOpenAIImage = async (
   const jobKey = JSON.stringify([owner || initialSession.access_token, id]);
   const existingJob = activeImageJobs.get(jobKey);
   if (existingJob) return existingJob;
+  const notifyStage = createImageStageNotifier(context?.onStage);
   const work = (async () => {
     const pending: GeneratedMedia = { id, url: '', prompt: config.prompt, originalPrompt: config.originalPrompt,
       createdAt: Date.now(), imageQueue: { version: 1, queuedAt: Date.now() }, imageStage: 'queued', status: 'pending',
@@ -166,9 +167,9 @@ export const generateOpenAIImage = async (
       // A 202 whose body could not be read (e.g. the timeout fired mid-body) was still accepted.
       if ((!data && (response.status === 202 || response.status >= 500)) || data?.code === 'QUEUE_STATE_UNKNOWN' || (response.status === 409 && data?.code === 'GENERATION_EXISTS')) return pending;
       throw new Error(data?.error || `Image queue request failed (${response.status}). Check the gallery before submitting again.`);
-    }, () => context?.onStage?.('preparing'));
-    context?.onStage?.('queued');
-    return resumeOpenAIImage(accepted, onProgress, context?.onStage);
+    }, () => notifyStage('preparing'));
+    notifyStage('queued');
+    return resumeOpenAIImage(accepted, onProgress, notifyStage);
   })();
   activeImageJobs.set(jobKey, work);
   try { return await work; } finally { activeImageJobs.delete(jobKey); }

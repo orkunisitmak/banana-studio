@@ -1,5 +1,5 @@
 import { supabase } from './authService';
-import { resolveProvider, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
+import { resolveProvider, sanitizeProviderAvailability, sanitizeProviderPreferences, type ProviderAvailability, type ProviderChoice } from '../lib/providers';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 
 // Preferences contain only route names. Credentials stay in the native vault/server.
@@ -13,9 +13,9 @@ export async function getProviderPreferences(): Promise<Record<string, ProviderC
   if (isLocalWorkspace()) {
     const result = await supabase.rpc('get_provider_preferences');
     if (result.error) throw new Error('Provider preferences could not be loaded.');
-    return result.data || {};
+    return sanitizeProviderPreferences(result.data);
   }
-  return readStoredPreferences(data.session.user.id);
+  return sanitizeProviderPreferences(readStoredPreferences(data.session.user.id));
 }
 export async function saveProviderPreference(model: string, value: ProviderChoice) {
   const { data } = await supabase.auth.getSession();
@@ -34,7 +34,8 @@ export async function getProviderAvailability(signal?: AbortSignal): Promise<Pro
   const response = await fetch('/api/gemini-status', { cache: 'no-store', signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     headers: { Authorization: `Bearer ${data.session?.access_token || ''}` } });
   if (!response.ok) throw new Error('Provider availability could not be checked. No generation was submitted.');
-  return (await response.json()).providers || {};
+  const payload = await response.json();
+  return sanitizeProviderAvailability(payload?.providers);
 }
 export async function selectProvider(model: string, signal?: AbortSignal) {
   const [preferences, available] = await Promise.all([getProviderPreferences(), getProviderAvailability(signal)]);

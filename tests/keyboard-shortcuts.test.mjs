@@ -16,8 +16,9 @@ async function handler(file,name,parameters,after='') {
   const {code}=await transform(`export const create=(${parameters})=>{${after}return ${initializer};};`,{loader:'ts',format:'esm'});
   return (await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'))).create;
 }
-const createGlobal=await handler('../src/components/Controls.tsx','handleKeyDown','state',`const {canGenerate=true,isBrainstormActive=false,isBrainstormPanelOpen=false,handleGenerate,handleBrainstorm,setIsBrainstormPanelOpen,document}=state;`);
-const createTextarea=await handler('../src/components/Controls.tsx','handleTextareaKeyDown','canGenerate,handleGenerate,document','const h3PromptSupported=false;');
+const shortcutHelper=`const isGenerationShortcut=(e)=>((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&!e.repeat&&!e.isComposing&&!(e.nativeEvent?.isComposing));`;
+const createGlobal=await handler('../src/components/Controls.tsx','handleKeyDown','state',`const {canGenerate=true,isBrainstormActive=false,isBrainstormPanelOpen=false,handleGenerate,handleBrainstorm,setIsBrainstormPanelOpen,document}=state;${shortcutHelper}`);
+const createTextarea=await handler('../src/components/Controls.tsx','handleTextareaKeyDown','canGenerate,handleGenerate,document',`const h3PromptSupported=false;${shortcutHelper}`);
 const createHistory=await handler('../src/components/HistoryPanel.tsx','handleKeyDown','onClose,document');
 const createAdmin=await handler('../src/components/AdminPanel.tsx','handleKeyDown','onClose');
 const event=(key='Enter',extra={})=>({key,ctrlKey:true,metaKey:false,repeat:false,isComposing:false,nativeEvent:{isComposing:false},defaultPrevented:false,preventDefault(){this.defaultPrevented=true;},...extra});

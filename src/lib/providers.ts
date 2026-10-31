@@ -25,6 +25,16 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'minimax-h3': ['fal'],
 };
 export type ProviderAvailability = Partial<Record<AIProvider, boolean>>;
+export function sanitizeProviderAvailability(value: unknown): ProviderAvailability {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized: ProviderAvailability = {};
+  for (const provider of Object.keys(PROVIDER_KEYS) as AIProvider[]) {
+    if (typeof (value as Record<string, unknown>)[provider] === 'boolean') {
+      sanitized[provider] = (value as Record<string, boolean>)[provider];
+    }
+  }
+  return sanitized;
+}
 export function resolveProvider(model: string, choice: unknown, available: ProviderAvailability): AIProvider {
   const routes = MODEL_ROUTES[model];
   if (!Array.isArray(routes)) throw new Error('Unsupported model.');
@@ -36,6 +46,21 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
   const selected = routes.find(provider => available[provider]);
   if (!selected) throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. Add one key in Provider keys${routes.includes('codex') ? ' or sign in to Codex with ChatGPT' : ''}; the other keys are optional.`);
   return selected;
+}
+
+export function sanitizeProviderPreferences(value: unknown): Record<string, ProviderChoice> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized: Record<string, ProviderChoice> = {};
+  for (const [model, choice] of Object.entries(value)) {
+    const routes = MODEL_ROUTES[model];
+    if (!Array.isArray(routes)) continue;
+    if (choice === 'auto') {
+      sanitized[model] = 'auto';
+    } else if (Array.isArray(routes) && routes.includes(choice as AIProvider)) {
+      sanitized[model] = choice as ProviderChoice;
+    }
+  }
+  return sanitized;
 }
 
 export const OPENROUTER_MODELS: Record<string, string> = {

@@ -1,5 +1,6 @@
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
+import { YouTubeThumbnailPresets } from './YouTubeThumbnailPresets';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
 import { getClipboardImages } from '../lib/references/clipboardImages';
@@ -21,6 +22,7 @@ import { ImageReferenceSummary } from './ImageReferenceSummary';
 import { ImageEditArea } from './ImageEditArea';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
+import { isGenerationShortcut } from '../lib/keyboardShortcuts';
 import { createPortal, flushSync } from 'react-dom';
 import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle } from 'lucide-react';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
@@ -394,6 +396,7 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [config.prompt, config.originalPrompt, config.referenceImages, config.imageModel, config.mode, config.videoModel, config.videoOperation, config.h3MaxMode]);
   const latestConfigRef = useRef(config);
   latestConfigRef.current = config;
+  const videoModeSwitchEpochRef = useRef(0);
   const h3DimensionAttemptsRef = useRef(new Map<string, string>());
   const h3DimensionsMountedRef = useRef(true);
   useEffect(() => {
@@ -748,6 +751,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
     if (files.length === 0) return;
+    const modeSwitchEpoch = typeof videoModeSwitchEpochRef === 'undefined' ? null : videoModeSwitchEpochRef.current;
     setAttachmentError(null);
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
     const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
@@ -804,7 +808,7 @@ export const Controls: React.FC<ControlsProps> = ({
           return {
             ...previous,
             referenceVideos: [...(previous.referenceVideos || []), ...kept],
-            ...(switchToVideo ? { mode: 'video' as const } : {}),
+            ...(switchToVideo && modeSwitchEpoch === (typeof videoModeSwitchEpochRef === 'undefined' ? null : videoModeSwitchEpochRef.current) ? { mode: 'video' as const } : {}),
           };
         }));
       }
@@ -1616,7 +1620,7 @@ export const Controls: React.FC<ControlsProps> = ({
       const isMod = e.metaKey || e.ctrlKey;
 
       // The open Brainstorm panel owns submission, including the shortcut.
-      if (isMod && e.key === 'Enter') {
+      if (isGenerationShortcut(e)) {
         if (document.querySelector?.('[data-gallery-image-editor]')) return;
         e.preventDefault();
         if (isBrainstormActive) {
@@ -2657,6 +2661,31 @@ export const Controls: React.FC<ControlsProps> = ({
                 aria-label="Generation settings"
             >
                 
+                {/* YouTube Thumbnail Presets */}
+                <YouTubeThumbnailPresets
+                    onSelectPreset={presetPrompt => {
+                        videoModeSwitchEpochRef.current++;
+                        onChange({
+                        ...config,
+                        prompt: presetPrompt,
+                        originalPrompt: undefined,
+                        promptPreparation: undefined,
+                        youtubeSource: undefined,
+                        enhancedForMode: undefined,
+                        enhancedForImageModel: undefined,
+                        enhancedForImageContextKey: undefined,
+                        enhancedForVideoModel: undefined,
+                        enhancedForVideoOperation: undefined,
+                        enhancedForVideoReferenceKey: undefined,
+                        enhancedForH3MaxMode: undefined,
+                        enhancedForH3MaxOptionsKey: undefined,
+                        openaiImageOptions: { ...getOpenAIImageOptions(config.openaiImageOptions), size: 'preset' },
+                        aspectRatio: '16:9',
+                        mode: 'image'
+                        })
+                    }}
+                />
+
                 {/* Template Button - Icon only */}
                 <button
                     ref={templateButtonRef}

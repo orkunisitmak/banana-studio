@@ -1,3 +1,4 @@
+import { getLocalProviderConfig } from './localProvider.js';
 import { chooseProvider } from './providerConfiguration.js';
 import { isSecureReferenceUrl } from './providerMedia.js';
 import type { ReferenceImage } from '../../src/types.js';
@@ -72,14 +73,15 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
     }
     return path;
   }));
-  const payload = { id: body.id, model: body.model as string, provider, prompt: body.prompt,
+  const local = provider === 'local' ? getLocalProviderConfig() : null;
+  const payload = { ...(local ? { localProvider: { baseUrl: local.baseUrl, imageModel: local.imageModel } } : {}), id: body.id, model: body.model as string, provider, prompt: body.prompt,
     displayPrompt: typeof body.displayPrompt === 'string' && body.displayPrompt.length <= 32000 ? body.displayPrompt : body.prompt,
     originalPrompt: body.originalPrompt, aspectRatio: body.aspectRatio, resolution: body.resolution,
     options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
     imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource) };
   const prepared = prepareSunburstGeneration(payload.prompt, refs, { ...payload, imageModel: body.model, openaiImageOptions: options });
   if (prepared.prompt.length > 32000) invalid('Shorten the prompt to leave room for reference instructions.');
-  const metadata = { generationProvider: provider, providerModel: payload.model, originalPrompt: payload.originalPrompt, youtubeSource: payload.youtubeSource, promptPreparation: payload.promptPreparation,
+  const metadata = { generationProvider: provider, providerModel: local?.imageModel || payload.model, originalPrompt: payload.originalPrompt, youtubeSource: payload.youtubeSource, promptPreparation: payload.promptPreparation,
     openaiImageOptions: payload.model === SUNBURST_MODEL ? options : undefined, imagePromptCategory: payload.imagePromptCategory,
     imageGenerationPrompt: prepared.prompt, imageGenerationReferenceIds: prepared.referenceImages.map(ref=>ref.id),
     imageRequestedSize: payload.model === SUNBURST_MODEL ? getOpenAIImageSize({ ...payload, openaiImageOptions: options }) : `${payload.resolution} · ${payload.aspectRatio}` };

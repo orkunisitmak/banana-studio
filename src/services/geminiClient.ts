@@ -2,6 +2,7 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import type { ProviderAvailability } from '../lib/providers';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -52,6 +53,18 @@ export interface GenerateContentResponse {
 
 const GEMINI_ENDPOINT = '/api/gemini-generate';
 const STATUS_ENDPOINT = '/api/gemini-status';
+
+/** Only public server settings are exposed here; credentials stay on the server. */
+export interface LocalProviderSettings {
+  baseUrl?: string;
+  textModel?: string;
+  imageModel?: string;
+}
+export interface ProviderStatus {
+  configured: boolean;
+  providers: ProviderAvailability;
+  local?: LocalProviderSettings;
+}
 
 const getAuthHeaders = async (signal: AbortSignal, onIdentity?: (userId: string | undefined) => void): Promise<Record<string, string>> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -163,13 +176,17 @@ const generateContent = async (
 const routeTextContent = async (request: GenerateContentRequest, options?: TextTaskOptions) => {
   const provider = await selectProvider(request.model, options?.signal);
   const config = request.config as any;
-  const video = (request.contents as any)?.parts?.some((part: any) => part.fileData);
+  const contents = (Array.isArray(request.contents) ? request.contents : [request.contents]) as any[];
+  const video = contents.some(content => Array.isArray(content?.parts) && content.parts.some((part: any) => part?.fileData));
+  if (video && provider === 'local') {
+    throw new Error('YouTube footage requires Gemini. Choose Google Gemini or OpenRouter for the Gemini text preset in Provider routing. Local API can prepare the final brief from verified observations.');
+  }
   const normalized = { ...request,
     reasoningEffort: request.reasoningEffort || ({ LOW: 'low', MEDIUM: 'medium', HIGH: 'high' } as const)[config?.thinkingConfig?.thinkingLevel as 'LOW' | 'MEDIUM' | 'HIGH'],
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  return generateContent(normalized, provider === 'local' ? '/api/local-text-generate' : provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({
   models: {
@@ -177,18 +194,34 @@ export const getGeminiClient = () => ({
   },
 });
 
-/** Legacy export name: both compatible providers use the same normalized
+/** Legacy export name: compatible providers use the same normalized
  * text/reference contract and authenticated streaming client. */
 export const getOpenAITextClient = () => ({
   models: { generateContent: routeTextContent },
 });
 
+export const getProviderStatus = async (signal?: AbortSignal, model?: string): Promise<ProviderStatus> => {
+  const task = createTaskDeadline(15_000, signal, 'Provider availability could not be checked. No generation was submitted.');
+  try {
+    const headers = await getAuthHeaders(task.signal);
+    const endpoint = `${STATUS_ENDPOINT}${model ? `?${new URLSearchParams({ model })}` : ''}`;
+    const res = await waitForTask(fetch(endpoint, { cache: 'no-store', signal: task.signal, headers }), task.signal);
+    if (!res.ok) throw new Error('Provider availability could not be checked. No generation was submitted.');
+    const data = await waitForTask(res.json(), task.signal);
+    const setting = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    return {
+      configured: Boolean(data?.configured),
+      providers: data?.providers || {},
+      ...(data?.local ? { local: {
+        baseUrl: setting(data.local.baseUrl), textModel: setting(data.local.textModel), imageModel: setting(data.local.imageModel),
+      } } : {}),
+    };
+  } finally { task.dispose(); }
+};
+
 export const isGeminiConfigured = async (): Promise<boolean> => {
   try {
-    const res = await fetch(STATUS_ENDPOINT, { cache: 'no-store', headers: await getAuthHeaders(new AbortController().signal) });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return Boolean(data?.configured);
+    return (await getProviderStatus()).configured;
   } catch {
     return false;
   }

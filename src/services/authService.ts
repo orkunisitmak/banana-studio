@@ -187,6 +187,8 @@ type UsageMetadataLike = {
   cachedContentTokenCount?: number;
   openaiUsage?: unknown;
   openrouterUsage?: unknown;
+  provider?: string;
+  localUsage?: { cost?: number };
   usageLogged?: boolean;
   usageLoggingPending?: boolean;
   promptTokensDetails?: TokenDetail[];
@@ -220,6 +222,10 @@ const estimateUsageCost = (
 ): number | null => {
   const metadata = options.usageMetadata;
   const normalizedImageCount = Math.max(0, imageCount);
+  if (metadata?.provider === 'local') {
+    const cost = metadata.localUsage?.cost;
+    return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : null;
+  }
   if (options.estimatedCost === null) return null;
   const providedEstimatedCost = toNumber(options.estimatedCost);
   if (providedEstimatedCost > 0) return providedEstimatedCost;

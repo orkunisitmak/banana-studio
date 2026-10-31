@@ -15,9 +15,9 @@ export const getOpenAISessionId = (req: VercelRequest): string | null => {
 
 // The historical server-only ledger now also admits OpenRouter requests, so
 // provider switching cannot bypass the existing session/spend limits.
-export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' = 'OpenAI') {
-  const prefix = provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
-  const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
+export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: 'OpenAI' | 'OpenRouter' | 'Local API' = 'OpenAI') {
+  const prefix = provider === 'Local API' ? 'local-request' : provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
+  const enabled = provider === 'Local API' ? process.env.LOCAL_ENABLED : provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
   if (enabled === 'false' || (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')) {
     res.status(503).json({ error: `${provider} generation is temporarily disabled.` });
     return null;

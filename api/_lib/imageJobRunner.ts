@@ -81,7 +81,7 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
       return;
     }
     await executeOpenAIImage({method:'POST',headers:{},body:{...claim.payload,referenceImages:references}} as VercelRequest,response,{
-      user:{id:job.userId},db,guard,
+      user:{id:job.userId},db,guard,localProviderSnapshot:claim.payload.localProvider,
       dispatch:async metadata => {
         const allowed=await rpc(db,'dispatch_image_job',{p_id:job.id,p_claim:token,p_metadata:metadata});
         dispatched=allowed===true;

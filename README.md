@@ -131,6 +131,8 @@ OpenRouter Seedance currently supports text, first/last frames and image referen
 
 ## How it is built
 
+**OpenAI-compatible servers:** connect your own text and image endpoint through [Local API](docs/en/local-api.md).
+
 The shared interface is **React + TypeScript + Vite**. The native Mac shell uses **AppKit + WKWebView**, bundles a **Node.js** server, saves to **SQLite + local files**, keeps credentials in **Keychain** and updates through **Sparkle**. Windows uses **WinForms + WebView2**, the same Node/SQLite workspace and **Windows Credential Manager**. The hosted web version uses **Vercel Functions / Queues / Cron** and **Supabase Postgres / Auth / private Storage**, with Google sign-in.
 
 Selected prompts and references go to the provider handling the task. Desktop and web galleries are separate; the desktop apps have no automatic cloud sync. [Data boundaries](SECURITY.md) · [Architecture and developer setup](docs/en/development.md) · [Release procedure](docs/RELEASING.md)

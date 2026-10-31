@@ -6,6 +6,7 @@ import { OPENAI_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThi
 import { DEFAULT_OPENAI_REASONING, OPENAI_REASONING_EFFORTS, type OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, OPENROUTER_REASONING_EFFORTS } from '../lib/prompts/openrouterText';
 import { loadTextPreferences, saveTextPreferences, type SavedTextPreferences, type TextPreferenceScope } from '../services/textPreferencesService';
+import { useProviderRoute } from './ProviderRoutingSettings';
 
 export const TextModelSettings: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState(getTextModel);
@@ -16,6 +17,8 @@ export const TextModelSettings: React.FC = () => {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [reload, setReload] = useState(0);
+  const route = useProviderRoute(selectedModel);
+  const usesLocal = route.provider === 'local';
   const apply = (value: SavedTextPreferences) => {
     setSaved(value); setSelectedModel(value.preferredModel || value.model); setThinkingLevel(value.thinkingLevel); setReasoningEffort(value.reasoningEffort);
   };
@@ -44,8 +47,11 @@ export const TextModelSettings: React.FC = () => {
         AI Text Model
       </legend>
       <p className="text-xs text-gray-500 mb-4">
-        Used for Enhance, Brainstorm, variations and the final YouTube video brief. Gemini reads the footage first. Changes apply after saving; running requests keep their settings.
+        Used for Enhance, Brainstorm, variations and the final YouTube video brief. Gemini reads the footage first, directly or through OpenRouter. Changes apply after saving; running requests keep their settings.
       </p>
+      {usesLocal && <p className="mb-4 break-words text-xs leading-relaxed text-gray-400">
+        Local API upstream: <code>{route.local?.textModel || 'text model not configured'}</code>{route.local?.baseUrl && <> · <span>{route.local.baseUrl}</span></>}. These choices are presets; Local API uses the text model configured {isLocalWorkspace() ? 'in Provider keys' : 'by the workspace owner through LOCAL_TEXT_MODEL on the server'} and its own reasoning defaults. YouTube footage still requires Gemini.
+      </p>}
       <div className="space-y-2">
         {TEXT_MODEL_OPTIONS.map(option => (
           <label key={option.value} className={`flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors focus-within:ring-2 focus-within:ring-violet-400 ${
@@ -61,12 +67,12 @@ export const TextModelSettings: React.FC = () => {
             />
             <span className="min-w-0">
               <span className="block text-sm font-medium">{option.label}</span>
-              <span className="mt-1 block text-xs leading-relaxed text-gray-400">{option.description}</span>
+              <span className="mt-1 block text-xs leading-relaxed text-gray-400">{usesLocal && selectedModel === option.value ? 'Local API preset · uses the server-configured text model.' : option.description}</span>
             </span>
           </label>
         ))}
       </div>
-      {selectedModel !== OPENAI_TEXT_MODEL && selectedModel !== OPENROUTER_TEXT_MODEL && (
+      {!usesLocal && selectedModel !== OPENAI_TEXT_MODEL && selectedModel !== OPENROUTER_TEXT_MODEL && (
         <label className="mt-4 block text-sm text-gray-300">
           Gemini thinking
           <select aria-label="Gemini thinking" value={thinkingLevel}
@@ -77,7 +83,7 @@ export const TextModelSettings: React.FC = () => {
           <span className="mt-2 block text-xs leading-relaxed text-gray-500">Higher thinking gives complex briefs more reasoning time.</span>
         </label>
       )}
-      {(selectedModel === OPENAI_TEXT_MODEL || selectedModel === OPENROUTER_TEXT_MODEL) && (
+      {!usesLocal && (selectedModel === OPENAI_TEXT_MODEL || selectedModel === OPENROUTER_TEXT_MODEL) && (
         <label className="mt-4 block text-sm text-gray-300">
           {selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'}
           <select aria-label={selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'} value={reasoningEffort}

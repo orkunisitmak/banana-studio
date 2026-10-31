@@ -13,6 +13,7 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private let placement = WindowPlacementStore(url: WorkspaceProcess.dataDirectory.appendingPathComponent("window-placement.json"))
     private var normalWindowFrame: NSRect?
     private var fullscreenTransition = false
+    private var keysOpen = false
 
     static func main() {
         if CommandLine.arguments.contains("--raster-codec") { exit(RasterCodec.run()) }
@@ -68,30 +69,68 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updater.checkForUpdates(self)
     }
     @objc func showKeys() {
-        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
-        alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
-        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        guard !keysOpen else { return }; keysOpen = true
+        defer { keysOpen = false }
         var rows: [(ProviderKey, NSSecureTextField, NSButton)] = []
-        for key in ProviderKey.allCases {
-            let row = NSStackView(); row.orientation = .horizontal; row.spacing = 10
-            let label = NSTextField(labelWithString: key.label); label.widthAnchor.constraint(equalToConstant: 124).isActive = true
-            let field = NSSecureTextField(); field.widthAnchor.constraint(equalToConstant: 290).isActive = true
-            field.placeholderString = ((try? KeyVault.read(key)) ?? nil) != nil ? "Saved in Keychain" : "Paste your API key"
-            let remove = NSButton(checkboxWithTitle: "Remove", target: nil, action: nil)
-            row.addArrangedSubview(label); row.addArrangedSubview(field); row.addArrangedSubview(remove); stack.addArrangedSubview(row); rows.append((key, field, remove))
+        defer { for (_, field, _) in rows { field.stringValue = "" } }
+        func showError(_ text: String) {
+            let failure = NSAlert(); failure.messageText = "Provider API Keys"; failure.informativeText = text; failure.runModal()
         }
-        stack.frame = NSRect(x: 0, y: 0, width: 560, height: 224)
-        stack.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        alert.accessoryView = stack
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            for (key, field, remove) in rows {
-                if remove.state == .on { try KeyVault.save(key, value: nil) }
-                else if !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try KeyVault.save(key, value: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
-                field.stringValue = ""
+            let alert = NSAlert(); alert.messageText = "Provider API Keys"
+            alert.informativeText = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in macOS Keychain. Blank key fields keep saved keys; Remove clears a key. The Local API key is optional for servers without authentication. Blank local configuration fields restore defaults. Model IDs can be any IDs supported by your backend."
+            alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
+            let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+            func makeRow(_ title: String, field: NSTextField) -> NSStackView {
+                let row = NSStackView(); row.orientation = .horizontal; row.spacing = 10
+                let label = NSTextField(labelWithString: title); label.widthAnchor.constraint(equalToConstant: 180).isActive = true
+                field.widthAnchor.constraint(equalToConstant: 340).isActive = true
+                field.setAccessibilityLabel(title)
+                row.addArrangedSubview(label); row.addArrangedSubview(field); stack.addArrangedSubview(row)
+                return row
             }
-            try workspace.refreshKeys()
-        } catch { let failure = NSAlert(); failure.messageText = "The keys could not be saved or activated."; failure.informativeText = "Unlock your login Keychain and try again. No key value is included in this message."; failure.runModal() }
+            for key in ProviderKey.allCases {
+                if key == .localAPI {
+                    let heading = NSTextField(labelWithString: "Local provider (OpenAI-compatible)"); heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+                    stack.addArrangedSubview(heading)
+                }
+                let field = NSSecureTextField()
+                field.placeholderString = try KeyVault.read(key) != nil ? "Saved in Keychain" : key == .localAPI ? "Optional API key; blank if not required" : "Paste your API key"
+                let row = makeRow(key.label, field: field)
+                let remove = NSButton(checkboxWithTitle: "Remove", target: nil, action: nil)
+                row.addArrangedSubview(remove); rows.append((key, field, remove))
+            }
+            var settings: [(LocalProviderSetting, NSTextField)] = []
+            for setting in LocalProviderSetting.allCases {
+                let field = NSTextField(string: try KeyVault.read(setting) ?? setting.defaultValue)
+                field.placeholderString = setting.defaultValue
+                _ = makeRow(setting.label, field: field); settings.append((setting, field))
+            }
+            stack.widthAnchor.constraint(equalToConstant: 620).isActive = true
+            stack.frame = NSRect(x: 0, y: 0, width: 620, height: stack.fittingSize.height)
+            alert.accessoryView = stack
+            while alert.runModal() == .alertFirstButtonReturn {
+                do {
+                    // Validate the entire form before changing any saved credential or setting.
+                    let configuration = try settings.map { (setting, field) in (setting, try setting.validatedValue(field.stringValue) ?? setting.defaultValue) }
+                    var changes: [(ProviderKey, String?)] = []
+                    for (key, field, remove) in rows {
+                        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if remove.state == .on { changes.append((key, nil)) }
+                        else if !value.isEmpty { try KeyVault.validate(value: value); changes.append((key, value)) }
+                    }
+                    for (key, value) in changes { try KeyVault.save(key, value: value) }
+                    for (setting, value) in configuration { try KeyVault.save(setting, value: value) }
+                    try workspace.refreshKeys(); return
+                } catch KeyVault.VaultError.invalidLocalBaseURL {
+                    showError("Local base URL must be an absolute http:// or https:// URL with a host and no credentials, query or fragment.")
+                } catch KeyVault.VaultError.invalidLocalModel {
+                    showError("Local text and image model IDs must be at most 200 characters and contain no whitespace or control characters.")
+                } catch KeyVault.VaultError.invalid {
+                    showError("A key or configuration value is too long or contains a line break. Correct the value and try again.")
+                }
+            }
+        } catch { showError("The keys or local settings could not be saved or activated. Unlock your login Keychain and try again. No key value is included in this message.") }
     }
     func showFailure() { launchMessage.isHidden = false; launchMessage.stringValue = "The local workspace could not start. Reopen Banana Studio. Your data is kept on this Mac." }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

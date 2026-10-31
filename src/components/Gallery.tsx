@@ -22,6 +22,8 @@ import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
+import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { useMountedRef } from './useMountedRef';
 import { FolderPreview } from './FolderPreview';
 import { buildFolderPreviewIndex } from './folderPreviews';
 import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
@@ -813,6 +815,9 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  const galleryAccountRef = useRef('');
+  const galleryMountedRef = useMountedRef();
+  galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
@@ -1116,6 +1121,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => {
     setComparisonIds(null);
     setComparisonNotice(null);
+    setBatchDownloadError(null);
     setIsSelectionMode(false);
     setSelectedIds(new Set());
     setIsSearchOpen(false);
@@ -1657,12 +1663,28 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsDownloadingBatch(true);
     setBatchDownloadError(null);
     try {
-      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
+      const ids: string[] = Array.from(selectedIds);
+      // The manifest carries prompts and references, so a ZIP built for one
+      // account or gallery must never be saved after a switch to another. The
+      // key is pinned at the click, synchronously, from the state the gallery
+      // itself resets on a switch; no network lookup can race or fail here.
+      const startedFor = galleryAccountRef.current;
+      const { files, failed } = await collectBatchDownload(ids, images);
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
+      // Grid records omit reference_images; the manifest needs the full row.
+      // requireRemote: a record missing remotely must not be read from this browser's
+      // own cache, which may hold another account's row; the index record is the fallback.
+      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id, { requireRemote: true }));
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
+      zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
       const content = await zip.generateAsync({ type: "blob" });
+      // The account switch already reset the gallery and its selection bar, so
+      // there is nowhere to report this; the new account's gallery is the feedback.
+      // An account switch remounts the whole workspace, so this handler may belong to
+      // an unmounted Gallery whose account ref is never updated again.
+      if (!galleryMountedRef.current || galleryAccountRef.current !== startedFor) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
@@ -2464,7 +2486,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <button
                   onClick={handleBatchDownload}
                   disabled={isDownloadingBatch || isMoving}
-                  aria-label="Download selected media as ZIP"
+                  aria-label="Download selected media as ZIP, including a manifest with prompts and references"
+                  title="Includes manifest.json with prompts, settings and reference names"
                   className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
                 >
                   {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -2593,7 +2616,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>
                 {(photoShareError || photoShareMessage) && <p role={photoShareError ? 'alert' : 'status'} className={`mt-2 text-xs ${photoShareError ? 'text-red-300' : 'text-gray-400'}`}>{photoShareError || photoShareMessage}</p>}
                 <button type="button" onClick={handleBatchDownload} disabled={isDownloadingBatch || isPreparingPhotos || isSharingPhotos || isMoving}
-                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50">Download ZIP to Files instead</button>
+                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50" title="Includes manifest.json with prompts, settings and reference names">Download ZIP to Files instead</button>
               </div>
             )}
           </div>

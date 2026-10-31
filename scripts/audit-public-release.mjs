@@ -4,13 +4,17 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const rules = [
-  ['provider-credential', /(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{30,}|AIza[A-Za-z0-9_-]{30,}|sb_(?:secret|publishable)_[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{24,})/],
+  // Only "sk-" needs a left boundary: "task-…", "disk-…" or "dark-sk-…" names contain it.
+  ['provider-credential', /(?:(?<![A-Za-z0-9_-])sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{30,}|AIza[A-Za-z0-9_-]{30,}|sb_(?:secret|publishable)_[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{24,})/],
+  // fal.ai keys are "<uuid>:<32 hex>".
+  ['provider-credential', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/i],
   ['private-key', /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/],
   ['live-project-address', /https:\/\/[a-z]{20}\.supabase\.co\b/],
-  ['machine-path', /\/(?:Users|home)\/(?!runner\b|user\b|example\b)[A-Za-z0-9_.-]+\//],
+  // macOS/Linux and Windows (also JSON-escaped) profile paths; the allow-list must end at a separator.
+  ['machine-path', /(?:\/(?:Users|home)\/|[A-Za-z]:\\{1,2}Users\\{1,2})(?!(?:runner|user|example)(?:\/|\\))[A-Za-z0-9_.-]+(?:\/|\\)/],
   ['signed-media-link', /https?:\/\/[^\s"'<>]+\/storage\/v1\/(?:object|render\/image)\/sign\/[^\s"'<>]+[?&]token=[A-Za-z0-9_.-]{25,}/],
 ];
-const forbiddenPath = /(?:^|\/)(?:\.env(?:\..*)?|outputs?|\.local-runtime|\.local-data|\.vercel|\.DS_Store)(?:\/|$)|\.(?:p12|pfx|p8|pem|key|csr|cer|crt|provisionprofile|sqlite(?:3)?|db|log|dmg|zip)$/i;
+const forbiddenPath = /(?:^|\/)(?:\.env(?:\..*)?|outputs?|\.local-runtime|\.local-data|\.vercel|\.DS_Store)(?:\/|$)|\.(?:p12|pfx|p8|pem|key|csr|cer|crt|provisionprofile|sqlite3?(?:-wal|-shm|-journal)?|db(?:-wal|-shm|-journal)?|log|dmg|zip)$/i;
 const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', '.build', 'DerivedData', 'release-artifacts', 'bin', 'obj']);
 
 /** Reports rule IDs and paths only. Never print matching credential values. */
@@ -35,12 +39,18 @@ export function inspectContent(name, bytes) {
   return findings;
 }
 
-async function sourceFiles(root, relative = '') {
+// Without Git there is no tracked-file list to restore skipped folders, so a
+// pre-Git copy skips only the root build outputs, not every "bin"/"dist" folder.
+// Folders that are never source are skipped at any depth.
+const preGitIgnored = name => /(?:^|\/)(?:\.git|node_modules|\.build|DerivedData)$/.test(name)
+  || ['dist', 'release-artifacts', 'desktop/windows/bin', 'desktop/windows/obj'].includes(name);
+
+async function sourceFiles(root, relative = '', skip = (name, entry) => ignoredDirectories.has(entry.name)) {
   const files = [];
   for (const entry of await fs.readdir(path.join(root, relative), { withFileTypes: true })) {
     const name = path.posix.join(relative, entry.name);
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-    if (entry.isDirectory()) files.push(...await sourceFiles(root, name));
+    if (entry.isDirectory() && skip(name, entry)) continue;
+    if (entry.isDirectory()) files.push(...await sourceFiles(root, name, skip));
     else files.push(name);
   }
   return files;
@@ -49,9 +59,9 @@ async function sourceFiles(root, relative = '') {
 export async function auditPublicRelease(root, { history = false } = {}) {
   root = path.resolve(root);
   const findings = [];
-  const discovered = await sourceFiles(root);
-  let tracked=[];
-  try { tracked=execFileSync('git',['ls-files','-z'],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','ignore']}).split('\0').filter(Boolean); } catch { /* A pre-Git source copy is still audited. */ }
+  let tracked=[], git=true;
+  try { tracked=execFileSync('git',['ls-files','-z'],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','ignore']}).split('\0').filter(Boolean); } catch { git=false; /* A pre-Git source copy is still audited. */ }
+  const discovered = await sourceFiles(root, '', git ? undefined : name => preGitIgnored(name));
   const files=[...new Set([...discovered,...tracked])];
   for (const name of files) {
     const stat = await fs.lstat(path.join(root, name));

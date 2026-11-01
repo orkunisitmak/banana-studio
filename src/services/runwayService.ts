@@ -302,6 +302,11 @@ const normalizeVideoForEdit = async (
       if (transient && ++transientErrors < 5) continue;
       throw new Error(statusData?.error || 'Source-video compatibility preprocessing failed.');
     }
+    // An unreadable 200 body is a failed poll too; reset only after a readable status.
+    if (!statusData) {
+      if (++transientErrors >= 5) throw new Error('Source-video compatibility preprocessing status could not be read.');
+      continue;
+    }
     transientErrors = 0;
     if (statusData?.status === 'SUCCEEDED' && typeof statusData.videoUrl === 'string') {
       return statusData.videoUrl;

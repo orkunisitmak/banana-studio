@@ -264,6 +264,13 @@ const AuthorizedWorkspace: React.FC<{
     if (!isAuthenticated) return;
     let cancelled = false;
     const historyLoadStartedAt = Date.now();
+    // IDs from earlier pages, passed as an immutable snapshot to each merge.
+    let deliveredHistoryIds: ReadonlySet<string> = new Set();
+    const mergeHistoryPage = (page: GeneratedMedia[]) => {
+      const delivered = deliveredHistoryIds;
+      deliveredHistoryIds = new Set([...delivered, ...page.map(item => item.id)]);
+      setGeneratedMedia(current => mergeLoadedGalleryHistory(current, page, historyLoadStartedAt, delivered));
+    };
     setIsInitialGalleryLoading(true);
     setIsGalleryIndexLoading(true);
     setGalleryHistoryError(null);
@@ -275,7 +282,7 @@ const AuthorizedWorkspace: React.FC<{
             if (cancelled) return;
             // First callback contains exactly the newest 48 rows. Render it
             // immediately while storageService continues hydrating older pages.
-            setGeneratedMedia(current => mergeLoadedGalleryHistory(current, partialHistory.map(normalizeStoredMedia), historyLoadStartedAt));
+            mergeHistoryPage(partialHistory.map(normalizeStoredMedia));
             setIsInitialGalleryLoading(false);
           }, (error) => {
             if (!cancelled) setGalleryHistoryError(error.message);
@@ -302,7 +309,7 @@ const AuthorizedWorkspace: React.FC<{
         // Migrate legacy data
         const migratedHistory = history.map(normalizeStoredMedia);
 
-        setGeneratedMedia(current => mergeLoadedGalleryHistory(current, migratedHistory, historyLoadStartedAt));
+        mergeHistoryPage(migratedHistory);
         if (savedTemplates) setTemplates(normalizedTemplates);
         
         // Resume pending/processing videos and recover rows that were marked

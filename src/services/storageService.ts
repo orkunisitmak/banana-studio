@@ -2063,7 +2063,8 @@ export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
 
 export const renameFolder = async (folderId: string, newName: string): Promise<void> => {
   if (supabase) {
-    await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    const { error } = await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    if (error) throw new Error(`Folder could not be renamed: ${error.message}`);
   }
   try {
     const db = await openDB();
@@ -2433,7 +2434,10 @@ export const getTemplates = async (): Promise<Template[]> => {
 };
 
 export const deleteTemplate = async (id: string): Promise<void> => {
-  if (supabase) await supabase.from('templates').delete().eq('id', id);
+  if (supabase) {
+    const { error } = await supabase.from('templates').delete().eq('id', id);
+    if (error) throw new Error(`Template could not be deleted: ${error.message}`);
+  }
   try {
     const db = await openDB();
     db.transaction(TEMPLATE_STORE_NAME, 'readwrite').objectStore(TEMPLATE_STORE_NAME).delete(id);

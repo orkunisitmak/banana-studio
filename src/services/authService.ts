@@ -7,6 +7,7 @@ import { AdminUsageRange, validateAdminUsageRange } from '../lib/admin/adminUsag
 import { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from '../lib/prompts/textModels';
 import { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from '../lib/prompts/openrouterText';
 import { UserProfile, AdminUserSummary, Resolution, AspectRatio, VideoModelId, VideoOperation, VideoQuality, estimateImageCost, estimateVideoCost } from '../types';
+import { notifySpendingChanged } from '../lib/admin/spendingEvents';
 
 const runtime = getWorkspaceConfig();
 const workspaceConfig = runtime.mode === 'cloud' ? getCloudPublicConfig() : null;
@@ -335,6 +336,7 @@ export const logUsage = async (
       image_count: normalizedImageCount,
       estimated_cost: estimatedCost
     });
+    notifySpendingChanged();
   } catch (e) {
     console.warn('Failed to log usage:', e);
   }

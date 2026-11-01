@@ -100,4 +100,10 @@ Görselleri doğal oranında aç. Tekerlek/pinch ile yakınlaştır, sürükleye
 
 Herkese açık klasör bağlantıları ve çok kullanıcılı yönetim web sürümüne aittir. Yerel Mac klasörleri için herkese açık bağlantı oluşturulmaz.
 
+## Aylık harcama limiti koy
+
+Bu ayın tahmini harcamasını **AI settings** içinde görürsün (takvim ayı, UTC). Masaüstü uygulamasında aylık bütçeyi buradan belirlersin; boş bırakırsan limit olmaz. Web sürümünde yöneticiler üyeler için varsayılanı **Workspace admin → Settings → Monthly spending** bölümünden ayarlar; bir hesaba ayrı limit verebilir ya da onu limitten muaf tutabilir. Yöneticiler, kendi hesaplarına limit koymadıkça varsayılandan etkilenmez.
+
+Limite ulaşıldığında yeni görsel, edit, video, Enhance ve Brainstorm istekleri *Spending Limit Reached* mesajıyla durur. Kabul edilmiş işler yine tamamlanır; bu yüzden son istek harcamayı limitin biraz üzerine çıkarabilir. Limit, Banana Studio'nun maliyet tahminlerine dayanır; sağlayıcın ayrıca faturalandırır.
+
 Devam et: [Masaüstü](desktop.md) · [Anahtarlar](models.md) · [Web kurulumu](deploy.md) · [Geliştirme](development.md) · [Güvenlik](../../SECURITY.md)

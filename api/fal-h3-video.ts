@@ -6,6 +6,7 @@ import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
 import { recordH3Usage } from './_lib/h3Usage.js';
 import { estimateH3MaxCost } from '../src/lib/video/h3MaxPricing.js';
 import type { GenerationConfig } from '../src/types.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 const LEGACY_H3_QUEUE_APP = 'minimax/h3';
@@ -133,6 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const user = await requireUser(req, res);
   if (!user) return;
+  if (req.method === 'POST' && !await requireSpendingAllowance(req, res)) return;
 
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });

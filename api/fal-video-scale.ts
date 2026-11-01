@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 const SCALE_ENDPOINT = 'fal-ai/workflow-utilities/scale-video';
@@ -49,6 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const user = await requireUser(req, res);
   if (!user) return;
+  if (req.method === 'POST' && !await requireSpendingAllowance(req, res)) return;
 
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });

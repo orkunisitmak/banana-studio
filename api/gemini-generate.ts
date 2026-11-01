@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
+import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 interface GeminiGenerateRequest {
   model: string;
@@ -40,6 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = createTaskDeadline(15_000);
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
+  if (!await requireSpendingAllowance(req, res)) return;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {

@@ -127,9 +127,24 @@ export class LocalWorkspace {
       if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
       return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
     }
+    // A local workspace has one person, so its monthly budget applies to them
+    // directly; unlike the hosted workspace there is no admin exemption.
+    if(name==='get_spending_status')return this.spendingStatus();
+    if(name==='set_spending_limit'){
+      const limit=args.p_limit_usd==null?null:Number(args.p_limit_usd);
+      if(args.p_scope!=='workspace'||!['limit','none'].includes(args.p_mode)||(args.p_mode==='limit'&&(limit==null||!Number.isFinite(limit)||limit<0||limit>1000000)))throw new Error('Invalid spending limit.');
+      this.setting('spendingLimit',{monthlyLimitUsd:args.p_mode==='limit'?limit:null});return this.spendingStatus();
+    }
     if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');
     return this.workerRpc(name,args);
+  }
+  spendingStatus(now=new Date()) {
+    const periodStart=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1);
+    const time=value=>typeof value==='number'?value:Date.parse(value);
+    const spent=this.all('usage_logs').filter(row=>time(row.created_at)>=periodStart).reduce((sum,row)=>sum+Math.max(0,Number(row.estimated_cost)||0),0);
+    const limit=this.setting('spendingLimit')?.monthlyLimitUsd??null;
+    return {userId:this.user.id,limitUsd:limit,spentUsd:spent,source:limit==null?'none':'workspace',workspaceLimitUsd:limit,periodStart:new Date(periodStart).toISOString(),blocked:limit!=null&&spent>=limit};
   }
   job(id,value) {if(value!==undefined)this.db.prepare('INSERT OR REPLACE INTO jobs VALUES (?,?)').run(id,JSON.stringify(value));const row=this.db.prepare('SELECT payload FROM jobs WHERE id=?').get(id);return row?JSON.parse(row.payload):null;}
   pendingJobs() {return this.db.prepare('SELECT payload FROM jobs').all().map(r=>JSON.parse(r.payload)).filter(j=>!['completed','failed'].includes(j.state));}

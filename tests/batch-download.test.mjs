@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const compiled = await build({ entryPoints: ['src/lib/gallery/batchDownload.ts'], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)), bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent' });
@@ -50,4 +51,31 @@ test('the notice says how many items are missing', () => {
   assert.equal(describeBatchDownloadFailure(1, 3), '1 of 3 items could not be downloaded. The ZIP contains the other 2. Your selection is kept so you can try again.');
   assert.equal(describeBatchDownloadFailure(3, 3), 'None of the 3 selected items could be downloaded. Try again.');
   assert.equal(describeBatchDownloadFailure(1, 1), 'The selected item could not be downloaded. Try again.');
+});
+
+test('expired image URLs are renewed before the ZIP fetch, as single downloads do', async () => {
+  const signed = [
+    { id: 'a', url: 'https://s/a.png?token=expired', mediaType: 'image' },
+    { id: 'v', url: 'https://s/v.mp4?token=current', mediaType: 'video' },
+  ];
+  const fetched = [], refreshed = [];
+  const fetchSigned = async url => { fetched.push(url); return url.includes('token=expired')
+    ? new Response('expired', { status: 400 })
+    : new Response(new Blob(['x'], { type: url.includes('.mp4') ? 'video/mp4' : 'image/png' })); };
+  const { files, failed } = await collectBatchDownload(['a', 'v'], signed, fetchSigned,
+    async url => { refreshed.push(url); return url.replace('token=expired', 'token=renewed'); });
+  assert.deepEqual(files.map(file => file.name), ['banana-a.png', 'banana-v.mp4']);
+  assert.equal(failed, 0);
+  assert.deepEqual(refreshed, ['https://s/a.png?token=expired']);
+  assert.deepEqual(fetched.sort(), ['https://s/a.png?token=renewed', 'https://s/v.mp4?token=current']);
+
+  // If renewal fails, the loaded URL is still tried.
+  fetched.length = 0;
+  const fallback = await collectBatchDownload(['a'], signed, fetchSigned, async () => { throw new Error('offline'); });
+  assert.deepEqual([fetched, fallback.failed], [['https://s/a.png?token=expired'], 1]);
+});
+
+test('the gallery batch download passes the signed URL renewer', () => {
+  const gallery = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
+  assert.match(gallery, /collectBatchDownload\(Array\.from\(selectedIds\), images, undefined, url => refreshMediaAccessUrl\(url, false\)\)/);
 });

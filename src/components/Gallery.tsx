@@ -1657,7 +1657,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsDownloadingBatch(true);
     setBatchDownloadError(null);
     try {
-      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
+      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images, undefined, url => refreshMediaAccessUrl(url, false));
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
       const zip = new JSZip();

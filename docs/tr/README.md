@@ -129,6 +129,8 @@ OpenRouter Seedance bu uygulamada metin, first/last frame ve görsel referanslar
 
 ## Hangi sistemlerle çalışıyor?
 
+**OpenAI uyumlu sunucular:** kendi metin ve görsel uçlarını [Local API](local-api.md) ile bağlayabilirsin.
+
 Ortak arayüz **React + TypeScript + Vite** ile hazırlanır. Mac kabuğu **AppKit + WKWebView** kullanır; kendi **Node.js** sunucusunu taşır, verileri **SQLite + yerel dosyalara**, anahtarları **Anahtar Zinciri'ne** kaydeder, **Sparkle** ile güncellenir. Windows kabuğu **WinForms + WebView2**, aynı Node/SQLite çalışma alanı ve **Windows Credential Manager** kullanır. Web sürümü **Vercel Functions / Queues / Cron** ve **Supabase Postgres / Auth / özel Storage** kullanır; Google ile giriş yapılır.
 
 İşlemde kullanılan prompt ve referanslar ilgili sağlayıcıya gönderilir. Masaüstü ve web galerileri ayrıdır; Masaüstü uygulamaları otomatik bulut senkronizasyonu yapmaz. [Veri sınırları](../../SECURITY.md) · [Mimari ve geliştirici kurulumu](development.md) · [Yayın prosedürü](../RELEASING.md)

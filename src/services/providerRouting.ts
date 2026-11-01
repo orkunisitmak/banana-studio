@@ -29,14 +29,15 @@ export async function saveProviderPreference(model: string, value: ProviderChoic
   const preferences = readStoredPreferences(data.session.user.id);
   localStorage.setItem(storageKey(data.session.user.id), JSON.stringify({ ...preferences, [model]: value }));
 }
-export async function getProviderAvailability(signal?: AbortSignal): Promise<ProviderAvailability> {
+export async function getProviderAvailability(signal?: AbortSignal, model?: string): Promise<ProviderAvailability> {
   const { data } = await supabase.auth.getSession();
-  const response = await fetch('/api/gemini-status', { cache: 'no-store', signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+  const endpoint = `/api/gemini-status${model ? `?${new URLSearchParams({ model })}` : ''}`;
+  const response = await fetch(endpoint, { cache: 'no-store', signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     headers: { Authorization: `Bearer ${data.session?.access_token || ''}` } });
   if (!response.ok) throw new Error('Provider availability could not be checked. No generation was submitted.');
   return (await response.json()).providers || {};
 }
 export async function selectProvider(model: string, signal?: AbortSignal) {
-  const [preferences, available] = await Promise.all([getProviderPreferences(), getProviderAvailability(signal)]);
+  const [preferences, available] = await Promise.all([getProviderPreferences(), getProviderAvailability(signal, model)]);
   return resolveProvider(model, preferences[model], available);
 }

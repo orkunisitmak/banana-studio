@@ -1,25 +1,27 @@
 /** Application routes, verified against the providers' catalogues on 2026-10-20.
  * Auto selects an available route BEFORE submission, never after a paid call. */
-export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'codex';
-/** Codex uses the desktop user's own ChatGPT sign-in instead of an API key. */
+export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'codex' | 'local';
+/** Codex uses ChatGPT sign-in. Local API only uses a key if its server requires one. */
 export type KeyedProvider = Exclude<AIProvider, 'codex'>;
 export type ProviderChoice = AIProvider | 'auto';
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)',
+  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)', local: 'Local API',
 };
 export const PROVIDER_KEYS: Record<KeyedProvider, string> = {
-  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
+  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY', local: 'LOCAL_API_KEY',
 };
 export const providerSetup = (provider: AIProvider): string => provider === 'codex'
   ? 'install the Codex CLI and run `codex login` with your ChatGPT account (desktop app only)'
-  : `add your ${PROVIDER_LABELS[provider]} key in Provider keys`;
+  : provider === 'local'
+    ? 'configure the Local API address and upstream models in Provider keys (desktop) or the server environment (hosted); an API key is optional for providers without authentication'
+    : `add your ${PROVIDER_LABELS[provider]} key in Provider keys`;
 export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
-  'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'codex'],
-  'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
-  'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
-  'anthropic/claude-opus-5.5': ['openrouter'],
-  'gpt-6.1-sol': ['openai', 'openrouter'],
-  'gemini-3.8-flash': ['gemini', 'openrouter'],
+  'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'local', 'codex'],
+  'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter', 'local'],
+  'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter', 'local'],
+  'anthropic/claude-opus-5.5': ['openrouter', 'local'],
+  'gpt-6.1-sol': ['openai', 'openrouter', 'local'],
+  'gemini-3.8-flash': ['gemini', 'openrouter', 'local'],
   'seedance-2.0': ['evolink', 'fal', 'openrouter'],
   'seedance-2.5': ['evolink', 'fal', 'openrouter'],
   'minimax-h3': ['fal'],
@@ -34,7 +36,12 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
     return choice as AIProvider;
   }
   const selected = routes.find(provider => available[provider]);
-  if (!selected) throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. Add one key in Provider keys${routes.includes('codex') ? ' or sign in to Codex with ChatGPT' : ''}; the other keys are optional.`);
+  if (!selected) {
+    const setup = routes.includes('local')
+      ? 'Configure Local API in Provider keys (desktop) or the server environment (hosted), or add a key for another supported provider'
+      : 'Add one key in Provider keys';
+    throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. ${setup}${routes.includes('codex') ? ' or sign in to Codex with ChatGPT' : ''}; the other keys are optional.`);
+  }
   return selected;
 }
 

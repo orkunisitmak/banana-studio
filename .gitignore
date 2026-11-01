@@ -55,5 +55,3 @@ supabase/.temp/
 *.cer
 *.crt
 *.provisionprofile
-
-.temp_files/

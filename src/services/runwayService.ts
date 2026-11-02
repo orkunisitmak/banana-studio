@@ -253,7 +253,7 @@ export const validateEditSourceMetadata = (
 ): void => {
   const { duration, width, height } = metadata;
   if (duration == null || !Number.isFinite(duration) || duration < 4 || duration > 30) {
-    throw new Error(`${label} must be 4-30 seconds for Video Edit.${duration != null && Number.isFinite(duration) ? ` Current duration is ${duration.toFixed(1)}s.` : ' Could not detect its duration.'}`);
+    throw new Error(`${label} must be 4-30 seconds for Video Edit.${duration != null && Number.isFinite(duration) ? ` Current duration is ${duration.toFixed(2)}s.` : ' Could not detect its duration.'}`);
   }
   const aspect = width / height;
   if (!Number.isFinite(aspect) || width < 300 || height < 300 || aspect < 0.4 || aspect > 2.5 || width * height < 409600) {
@@ -366,7 +366,7 @@ const validateLocalReferenceMedia = async (
 
   const duration = await getMediaDuration(url, kind);
   if (duration != null && (duration < minDuration || duration > maxDuration)) {
-    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds. Current duration is ${duration.toFixed(1)}s.`);
+    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds. Current duration is ${duration.toFixed(2)}s.`);
   }
 };
 

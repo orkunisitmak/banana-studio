@@ -1351,13 +1351,16 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   const detailViewerOpen = Boolean(selectedMedia && !comparisonIds && !isSearchOpen && !isSelectionMode && !selectedMedia.isLoading);
   const detailDialogRef = useRef<HTMLDivElement>(null);
+  // A dialog opened from the viewer sits outside it and manages its own Tab order.
+  const dialogOverViewerRef = useRef(false);
+  dialogOverViewerRef.current = isYouTubePreviewOpen || isHelpCenterOpen || Boolean(previewRefImage);
   useEffect(() => {
     const dialog = detailDialogRef.current;
     if (!detailViewerOpen || !dialog) return;
     const opener = document.activeElement as HTMLElement | null;
     if (!dialog.contains(opener)) dialog.focus({ preventScroll: true });
     const trapTab = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || event.defaultPrevented) return;
+      if (event.key !== 'Tab' || event.defaultPrevented || dialogOverViewerRef.current) return;
       const focusable = (Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')) as HTMLElement[])
         .filter(element => element.offsetParent !== null);
       if (!dialog.contains(document.activeElement)) { event.preventDefault(); (focusable[0] || dialog).focus(); return; }

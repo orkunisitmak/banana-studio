@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // Render the real Gallery with a selected image (selectedImageId is a prop) and the real Compare dialog as control.
@@ -50,4 +51,11 @@ test('control: Compare dialog is a labelled modal dialog', () => {
   assert.match(tag, /role="dialog"/);
   assert.match(tag, /aria-modal="true"/);
   assert.match(tag, /aria-labelledby="compare-title"/);
+});
+
+test('the viewer Tab trap steps aside while a dialog opened from the viewer is on top', () => {
+  const src = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
+  const trap = src.slice(src.indexOf('const trapTab ='), src.indexOf("window.addEventListener('keydown', trapTab)"));
+  assert.match(trap, /dialogOverViewerRef\.current\) return/);
+  assert.match(src, /dialogOverViewerRef\.current = isYouTubePreviewOpen \|\| isHelpCenterOpen \|\| Boolean\(previewRefImage\)/);
 });

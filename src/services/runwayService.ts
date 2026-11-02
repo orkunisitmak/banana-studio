@@ -926,6 +926,13 @@ export const createVideoTask = async (
     for (const [, id] of (prompt || '').matchAll(/@PERSON_(\d+)\b/gi)) findPersonGroup(referenceImages, Number(id));
   }
 
+  // Audio size, format and length checks are cheap; run them before the paid
+  // fal.ai source-video scaling that prepareReferenceVideos can submit.
+  const maximumReferenceDuration = videoModel === 'seedance-2.5' ? 30 : 15;
+  const audioUrls = await Promise.all(refAudios.map((a, i) =>
+    resolveReferenceMediaUrl(a.url, a.mimeType, `reference audio ${i + 1}`, 'vref_audio', 'mp3', 'audio', 2, maximumReferenceDuration)
+  ));
+
   const preparedVideos = await prepareReferenceVideos(
     refVids,
     videoAspectRatio,
@@ -945,10 +952,6 @@ export const createVideoTask = async (
       if (frameRouteError) throw new Error(`Continue turns the previous video into a first-frame image, which needs one more image slot than is free. Remove a reference image or disable Continue.`);
     },
   );
-  const maximumReferenceDuration = videoModel === 'seedance-2.5' ? 30 : 15;
-  const audioUrls = await Promise.all(refAudios.map((a, i) =>
-    resolveReferenceMediaUrl(a.url, a.mimeType, `reference audio ${i + 1}`, 'vref_audio', 'mp3', 'audio', 2, maximumReferenceDuration)
-  ));
   const effectiveReferenceImages = [...referenceImages, ...preparedVideos.generatedFirstFrames];
   const requestReferenceImages=effectiveReferenceImages;
   const mode=determineMode(requestReferenceImages,preparedVideos.requestVideos,refAudios,videoOperation);

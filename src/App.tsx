@@ -1410,14 +1410,6 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
-  const handleHistorySelect = (media: GeneratedMedia) => {
-    recreateLoadIdRef.current += 1;
-    recreateLoadingRef.current = null;
-    setIsRecreateLoading(false);
-    setConfig(createRecreateConfig(media, resolveImageModel(media.imageModel ?? config.imageModel)));
-    setPromptLoadVersion(version => version + 1);
-  };
-
   const handleRecreate = async (media: GeneratedMedia) => {
     const loadId = ++recreateLoadIdRef.current;
     recreateLoadingRef.current = null;
@@ -1433,6 +1425,7 @@ const AuthorizedWorkspace: React.FC<{
     // Re-create button skips that step. Re-fetch on demand so both buttons
     // load the prompt AND the original reference media consistently.
     let resolved = media;
+    let detailReadFailed = false;
     const refsMissing = !media.referenceImages || media.referenceImages.length === 0;
     const refsUnresolved = (media.referenceImages || []).some(ref => !ref?.data || !String(ref.data).trim());
     const savedReferenceIds = Array.isArray(media.imageGenerationReferenceIds)
@@ -1463,8 +1456,11 @@ const AuthorizedWorkspace: React.FC<{
             referenceVideos: full.referenceVideos || media.referenceVideos || [],
             referenceAudios: full.referenceAudios || media.referenceAudios || [],
           };
+        } else {
+          detailReadFailed = true;
         }
       } catch (e) {
+        detailReadFailed = true;
         console.warn('Recreate: failed to fetch full media row', e);
       } finally {
         if (recreateLoadingRef.current === loadId) {
@@ -1485,12 +1481,17 @@ const AuthorizedWorkspace: React.FC<{
     // wrong identity, so make the recovery action explicit instead.
     const resolvedImageRefs = resolved.referenceImages || [];
     const unresolvedImageRefs = resolvedImageRefs.some(ref => !ref?.data || !String(ref.data).trim());
-    const referencesUnavailable = unresolvedImageRefs
-      || ((savedReferenceIds.length > 0 || (resolved.imageGenerationReferenceIds?.length || 0) > 0 || refsUnresolved)
-        && resolvedImageRefs.length === 0);
 
     const recreatedMode = resolved.mediaType === 'video' ? 'video' : 'image';
     const recreatedConfig = createRecreateConfig(resolved, resolveImageModel(resolved.imageModel ?? initialDraft.imageModel));
+    // createRecreateConfig adds an empty slot for every saved reference id the
+    // detail row did not return, so a partly restored set shows up here too.
+    const missingReferenceSlots = recreatedConfig.referenceImages.some(ref => !ref?.data || !String(ref.data).trim());
+    const referencesUnavailable = detailReadFailed
+      || missingReferenceSlots
+      || unresolvedImageRefs
+      || ((savedReferenceIds.length > 0 || (resolved.imageGenerationReferenceIds?.length || 0) > 0 || refsUnresolved)
+        && resolvedImageRefs.length === 0);
     setConfig(current => mergeRecreateHydration(current, initialDraft, recreatedConfig));
     if (referencesUnavailable) {
       toast.error('References unavailable', 'The saved prompt and settings are loaded. Saved reference images could not be restored; attach them again before generating.');
@@ -1505,6 +1506,9 @@ const AuthorizedWorkspace: React.FC<{
         : `Ready to recreate this ${resolved.mediaType === 'video' ? 'video' : 'image'}.`
     );
   };
+
+  // History rows are gallery-list rows without reference photos, so they load like Re-create.
+  const handleHistorySelect = handleRecreate;
 
   const handleGenerateVariation = async (media: GeneratedMedia) => {
     const imageModel = resolveImageModel(media.imageModel ?? config.imageModel);

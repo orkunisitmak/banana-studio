@@ -27,7 +27,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle } from 'lucide-react';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
 import { enhancePrompt, enhanceVideoPrompt } from '../services/geminiService';
-import { compressImage, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
+import { compressImage, refreshMediaAccessUrl, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
 import { YouTubeChannelRef } from './YouTubeChannelRef';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { getTextModelLabel } from '../types';
@@ -1309,7 +1309,7 @@ export const Controls: React.FC<ControlsProps> = ({
       try {
         const media = JSON.parse(mediaData);
         // Fetch the image and convert to base64
-        const response = await fetch(media.url);
+        const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));
         if (!response.ok) throw new Error(`Gallery image download failed (${response.status})`);
         const blob = await response.blob();
         if (!blob.size || /^(?:text\/|application\/json)/i.test(blob.type)) throw new Error('Gallery image download did not return an image.');
@@ -1545,7 +1545,7 @@ export const Controls: React.FC<ControlsProps> = ({
               });
               return;
             }
-            const response = await fetch(media.url);
+            const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));
             if (!response.ok) throw new Error(`Gallery image download failed (${response.status})`);
             const blob = await response.blob();
             if (!blob.size || /^(?:text\/|application\/json)/i.test(blob.type)) throw new Error('Gallery image download did not return an image.');

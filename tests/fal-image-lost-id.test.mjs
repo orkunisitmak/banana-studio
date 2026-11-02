@@ -68,6 +68,7 @@ const submit = async (fetchImpl, { registerFail = false } = {}) => {
       { method: 'POST', body: { endpoint: 'fal-ai/nano-banana-pro', prompt: 'hi' } },
       res,
     );
+    res.registered = globalThis.__registered;
     return res;
   } finally {
     globalThis.fetch = previous.fetch;
@@ -93,7 +94,7 @@ test('a fal HTTP error does not return a task id', async () => {
   const res = await submit(jsonResponse(400, { message: 'bad prompt' }));
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.taskId, undefined);
-  assert.equal(globalThis.__registered ?? 0, 0);
+  assert.equal(res.registered, 0);
 });
 
 test('a fal response without request_id does not return a task id', async () => {

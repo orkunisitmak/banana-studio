@@ -730,6 +730,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                               <button
                                 key={video.id}
                                 onClick={() => toggleVideoSelection(video.id)}
+                                aria-pressed={isSelected}
                                 disabled={isDisabled}
                                 className={`w-full flex items-center gap-2.5 p-1.5 rounded-lg transition-all text-left group ${
                                   isSelected

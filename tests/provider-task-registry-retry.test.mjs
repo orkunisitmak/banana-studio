@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const stubs = {
   auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});
 export const createServiceRoleClient=()=>({from:()=>({
-  select:()=>({limit:async()=>({error:null})}),
+  select:()=>({limit:async()=>({error:null}),eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})}),
   insert:async row=>{const t=globalThis.__table;t.attempts++;if(t.rows.some(r=>r.task_id===row.task_id))return{error:{code:"23505"}};if(t.ghost&&t.attempts===1){t.rows.push(row);throw new Error("timeout")}if(t.failures>0){t.failures--;if(t.throws)throw new Error("db down");return{error:{code:"500"}}}t.rows.push(row);return{error:null}},
 })});
 export const createUserScopedClient=()=>({from:()=>({select:()=>({eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})})})});`,
@@ -31,8 +31,8 @@ const response = () => { const res = { statusCode: 0, status(c) { res.statusCode
 const reply = body => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 // ghost: the first insert saves the row and then throws (a timeout), so the retry meets a duplicate.
 // failures: how many registry inserts fail before one works; throws: fail by throwing instead of returning an error.
-const run = async ({ failures, throws = false, ghost = false }) => {
-  globalThis.__table = { rows: [], attempts: 0, failures, throws, ghost };
+const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
+  globalThis.__table = { rows: [...rows], attempts: 0, failures, throws, ghost };
   const saved = { fetch: globalThis.fetch, key: process.env.EVOLINK_API_KEY };
   process.env.EVOLINK_API_KEY = 'k';
   globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? { id: 'evo-r1' } : { status: 'processing', progress: 10 });
@@ -43,7 +43,7 @@ const run = async ({ failures, throws = false, ghost = false }) => {
     const status = response();
     if (id) await poll({ method: 'GET', headers: {}, query: { taskId: id } }, status);
     return { submit, status, attempts: globalThis.__table.attempts };
-  } finally { globalThis.fetch = saved.fetch; process.env.EVOLINK_API_KEY = saved.key; }
+  } finally { globalThis.fetch = saved.fetch; if (saved.key === undefined) delete process.env.EVOLINK_API_KEY; else process.env.EVOLINK_API_KEY = saved.key; }
 };
 
 test('a registry insert that fails once is retried, the submit succeeds and the id polls', async () => {
@@ -73,4 +73,12 @@ test('an insert that saved the row before timing out counts as registered when t
   assert.equal(submit.statusCode, 200);
   assert.equal(attempts, 2);
   assert.equal(status.statusCode, 200);
+});
+
+test('a duplicate that belongs to another user is not counted as registered', async () => {
+  const taken = { provider: 'evolink', task_id: 'evo-r1', user_id: 'someone-else' };
+  const { submit, attempts } = await run({ failures: 0, rows: [taken] });
+  assert.notEqual(submit.statusCode, 200);
+  assert.match(submit.body.error, /could not be recorded/);
+  assert.equal(attempts, 3);
 });

@@ -30,8 +30,13 @@ export async function registerProviderTask(writer: RegistryWriter, provider: Pro
     if (attempt > 0) await new Promise(resolve => setTimeout(resolve, retryDelayMs * attempt));
     try {
       const { error } = await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId });
-      // A duplicate on a retry means an earlier attempt was saved but its reply was lost.
-      if (!error || (attempt > 0 && error.code === '23505')) return;
+      if (!error) return;
+      // A duplicate on a retry means an earlier attempt was saved but its reply was lost,
+      // but only when the saved row is this user's; another user's row cannot be polled.
+      if (attempt > 0 && error.code === '23505') {
+        const { data: saved } = await writer.from('provider_tasks').select('user_id').eq('provider', provider).eq('task_id', taskId).maybeSingle();
+        if (saved?.user_id === userId) return;
+      }
     } catch {
       // Treated like a returned error: try again.
     }

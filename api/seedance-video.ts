@@ -14,6 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!['GET','POST'].includes(req.method || '')) return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireUser(req,res); if (!user) return;
+  let acceptedTaskId = false;
   try {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -39,6 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const id = provider === 'fal' ? data?.request_id : data?.id;
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('The provider did not confirm a task ID.');
       const taskId = `bs_${provider}_${body.videoModel}_${id}`;
+      acceptedTaskId = true;
       await registerProviderTask(registry, provider, taskId, user.id);
       return res.status(200).json({ taskId, provider, endpoint: provider === 'fal' ? fal.endpoint : `openrouter/bytedance/${body.videoModel}` });
     }
@@ -80,7 +82,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const saved = await bucket.upload(path,bytes,{contentType:'video/mp4',upsert:true});
     if (saved.error) throw new Error('The generated video could not be saved.');
     return res.status(200).json({ status:'SUCCEEDED', output:[await signedMediaUrl(bucket,path)], actualCostUsd });
-  } catch {
+  } catch (error) {
+    // The provider already accepted the job: keep the registry message, which carries the task id and warns against retrying.
+    if (acceptedTaskId) return res.status(502).json({ error: (error as Error).message, retryable:false });
     return res.status(502).json({ error: req.method === 'POST' ? 'The video request could not be confirmed. Check provider task history before submitting again; it was not retried.' : 'The video result is temporarily unavailable. The original task is retained.', retryable:req.method === 'GET' });
   }
 }

@@ -655,7 +655,7 @@ export const Controls: React.FC<ControlsProps> = ({
         : isSeedanceQuality ? config.videoQuality : '720p',
       videoAspectRatio: isH3
         ? config.referenceImages.length > 0 ? 'adaptive' : config.videoAspectRatio === 'adaptive' ? '16:9' : config.videoAspectRatio
-        : config.videoAspectRatio,
+        : nextOperation === 'edit' || nextOperation === 'extend' ? 'adaptive' : config.videoAspectRatio,
       audioEnabled: isH3 ? true : config.audioEnabled,
       videoPromptExpansionMode: isH3 ? config.h3MaxOptions?.promptExpansionMode || 'balanced' : config.videoPromptExpansionMode,
     };

@@ -53,6 +53,8 @@ test('gallery search dialog does not open a result on the Enter that confirms an
   assert.ok(listeners.length, 'keydown listener registered');
   listeners.at(-1)(safariConfirmEnter());
   assert.deepEqual(selected, [], 'composing Enter must not choose a result');
+  listeners.at(-1)(safariConfirmEnter({ keyCode: 13 }));
+  assert.equal(selected.length, 1, 'a normal Enter still chooses the result');
 });
 
 test('gallery edit prompt @ mention list does not insert a reference on the Enter that confirms an input-method candidate', async () => {
@@ -69,6 +71,8 @@ test('gallery edit prompt @ mention list does not insert a reference on the Ente
   assert.ok(tas.length, 'prompt rendered');
   tas.at(-1).onKeyDown(safariConfirmEnter());
   assert.deepEqual(changed, [], 'composing Enter must not insert a mention');
+  tas.at(-1).onKeyDown(safariConfirmEnter({ keyCode: 13 }));
+  assert.equal(changed.length, 1, 'a normal Enter still inserts the mention');
 });
 
 test('main prompt @ mention list does not insert a reference on the Enter that confirms an input-method candidate', async () => {
@@ -83,4 +87,6 @@ test('main prompt @ mention list does not insert a reference on the Enter that c
   assert.ok(tas.length, 'prompt rendered');
   tas.at(-1).onKeyDown(safariConfirmEnter());
   assert.deepEqual(updates, [], 'composing Enter must not insert a mention');
+  tas.at(-1).onKeyDown(safariConfirmEnter({ keyCode: 13 }));
+  assert.equal(updates.length, 1, 'a normal Enter still inserts the mention');
 });

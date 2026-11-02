@@ -139,3 +139,18 @@ test('single-image downloads keep the download error when both renewal and the o
   assert.ok(ui.errors.every(error => error.message === 'Download failed (400). Reload the gallery and try again.'));
   assert.deepEqual(ui.downloads, []);
 });
+
+test('single video download refreshes an expired signed URL first', async t => {
+  const videoUrl = 'https://project.example/storage/v1/object/sign/media/user/clip.mp4?token=expired';
+  t.mock.method(globalThis, 'fetch', async url => String(url) === videoUrl.replace('expired', 'renewed')
+    ? new Response(new Blob(['mp4'], { type: 'video/mp4' }))
+    : new Response('expired', { status: 400 }));
+  const ui = createDownloads();
+
+  await ui.handleDownloadPNG({ id: 'clip', url: videoUrl, mediaType: 'video' });
+
+  assert.deepEqual(ui.refreshed, [videoUrl]);
+  assert.deepEqual(ui.fetched, [videoUrl.replace('expired', 'renewed')]);
+  assert.deepEqual(ui.errors, []);
+  assert.deepEqual(ui.downloads.map(download => download.name), ['banana-clip.mp4']);
+});

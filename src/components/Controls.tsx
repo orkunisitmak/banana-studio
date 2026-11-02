@@ -1079,6 +1079,10 @@ export const Controls: React.FC<ControlsProps> = ({
       }
       setAttachmentError(null);
     }
+    if (!lastEntry.clearedConfig && updatedConfig.referenceImages.length > getReferenceImageLimit(updatedConfig)) {
+      setAttachmentError('Could not undo: the composer has no room for the removed reference image. Remove a reference, then try Undo again.');
+      return;
+    }
     setUndoStack(prev => prev.slice(0, -1));
     onChange(updatedConfig);
   };

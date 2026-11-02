@@ -284,3 +284,20 @@ test('valid H3 Auto and selected keyframes retain their restored image capacity'
     assert.equal(f.entries().length, 0);
   }
 });
+
+test('Undo of a removed image refuses when a later attachment filled the image limit, then works after room is made', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  const limit = helpers.getReferenceImageLimit(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  assert.equal(f.state().referenceImages.length, limit);
+  f.undo();
+  assert.equal(f.state().referenceImages.length, limit);
+  assert.equal(f.entries().length, 1);
+  assert.equal(f.errors.length, 1);
+  f.change(config => ({ ...config, referenceImages: config.referenceImages.slice(1) }));
+  f.undo();
+  assert.equal(f.state().referenceImages.length, limit);
+  assert.equal(f.entries().length, 0);
+});

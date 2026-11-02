@@ -22,6 +22,8 @@ const handler = (await import('data:text/javascript;base64,' + Buffer.from(out.o
 for (const key of ['OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'FAL_KEY']) process.env[key] = 'k';
 process.env.OPENAI_ENABLED = 'true';
 process.env.OPENROUTER_ENABLED = 'true';
+process.env.FAL_ENABLED = 'true';
+process.env.GEMINI_ENABLED = 'true';
 process.env.VERCEL_ENV = 'production';
 const jwt = 'h.' + Buffer.from(JSON.stringify({ session_id: '11111111-2222-3333-4444-555555555555' })).toString('base64url') + '.s';
 const call = async (model, provider) => {

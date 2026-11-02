@@ -18,9 +18,9 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT plan (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY`, or [Codex sign-in](#use-gpt-image-with-a-chatgpt-plan) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
+| Opus 5.5 — default creative model, Medium | OpenRouter → Liquid Inference | `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
-| Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
+| Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter → Liquid Inference (text only) | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
@@ -35,6 +35,8 @@ Images count toward your ChatGPT plan's Codex usage limits instead of API billin
 All three image providers support reference-based generation. Uploading references does not enable protected editing automatically: explicitly select **Edit area** for that. The final selected area is composited onto the source; outside pixels stay original regardless of provider. Tier-based Nano outputs may be resized to the source canvas before compositing, only when their proportions match. A different canvas ratio is rejected. A provider's reference-image API may be named “edit”; the app's reference-generation prompt does not carry an area edit's source-preservation instructions.
 
 Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable Enhance or Brainstorm: fal's deprecated Any LLM endpoint is not used. An Anthropic key is not an OpenRouter key. A saved key still needs model access and sufficient API credit.
+
+[Liquid Inference](https://inference.ai.exchange) is an OpenAI-compatible text route for Opus 5.5 and Gemini 3.8 Flash. It uses the exchange's own model names, never substitutes a different model, and records the exchange's reported charge as the request cost. YouTube footage analysis is not sent to it; keep Google Gemini or OpenRouter for that step.
 
 ## Video differences
 
@@ -66,6 +68,7 @@ Create an account with the provider, open its key dashboard, create a key and co
 | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) | [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key) |
 | fal.ai | [Key dashboard](https://fal.ai/dashboard/keys) | [fal quickstart](https://fal.ai/docs/documentation/quickstart) |
 | EvoLink | [EvoLink account](https://evolink.ai) | [API documentation](https://docs.evolink.ai) |
+| Liquid Inference | [Liquid Inference](https://inference.ai.exchange) → API keys | [Quickstart](https://inference.ai.exchange/docs/quickstart.md) |
 | YouTube Data API | [Google Cloud credentials](https://console.cloud.google.com/apis/credentials) | [Enable YouTube Data API v3 and create credentials](https://developers.google.com/youtube/data/getting-started) |
 
 For YouTube, create/select your own Google Cloud project, enable **YouTube Data API v3**, then create an API key for that project. A Gemini key is not a replacement for this enabled API and its quota. API billing and consumer chat subscriptions are separate products; check the provider's API account rather than assuming a chat subscription covers requests.

@@ -72,6 +72,7 @@ An environment variable is a named setting supplied to the application by Vercel
 | `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |
 | `FAL_KEY` | fal.ai key | For Nano Banana, H3 Max and supported video preprocessing |
 | `EVOLINK_API_KEY` | EvoLink key | For Seedance |
+| `LIQUID_API_KEY` | Liquid Inference key | Optional text route for Opus 5.5 and Gemini 3.8 Flash |
 | `YOUTUBE_API_KEY` | Key from a Google Cloud project with YouTube Data API v3 enabled | For YouTube lookup |
 
 The Supabase Connect dialog and **Settings → API Keys** provide the project credentials. Keep the backend secret/service-role credential server-only. The app deliberately returns only the project origin and publishable key to its frontend. See [Supabase key types](https://supabase.com/docs/guides/getting-started/api-keys).

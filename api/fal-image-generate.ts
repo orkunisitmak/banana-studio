@@ -118,6 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  let acceptedTaskId: string | undefined;
   try {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
@@ -157,6 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: 'fal.ai response missing request_id', raw: data });
     }
 
+    acceptedTaskId = data.request_id;
     await registerProviderTask(registry, 'fal', data.request_id, user.id);
 
     console.log(
@@ -166,6 +168,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ requestId: data.request_id, endpoint });
   } catch (error: any) {
     console.error('fal image generate error:', error.message);
-    return res.status(500).json({ error: error.message || 'Image generation failed' });
+    return res.status(500).json({ error: error.message || 'Image generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }
 }

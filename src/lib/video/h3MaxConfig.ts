@@ -1,4 +1,5 @@
 import type { GenerationConfig, ReferenceImage } from '../../types.js';
+import { normalizeH3MaxPromptLanguage } from './h3MaxPromptGuide.js';
 import { buildH3MaxInput, H3_MAX_CAPABILITIES, isH3MaxModeAvailable, resolveH3MaxMode, type H3MaxOptions } from './h3Max.js';
 
 export const getH3MaxMode = (config: Pick<GenerationConfig,'h3MaxMode'|'referenceImages'|'referenceVideos'|'referenceAudios'>) => resolveH3MaxMode(config.h3MaxMode,{
@@ -189,7 +190,9 @@ export const getKnownVideoDuration = (duration?:number):number|undefined => dura
 
 export const getH3MaxRequestBody = (config:GenerationConfig,media?:{images:Map<string,string>;videos:string[];audios:string[]}) => {
   const mode=getH3MaxMode(config),options=getH3MaxSubmissionOptions(config,media?.images);
-  return {mode,prompt:H3_MAX_CAPABILITIES[mode].prompt==='unsupported'?undefined:config.prompt,
+  // Validate the prompt as it is submitted: tags like @VIDEO expand into longer words.
+  const prompt=H3_MAX_CAPABILITIES[mode].prompt==='unsupported'?undefined:normalizeH3MaxPromptLanguage(config.prompt,{mode,options:config.h3MaxOptions},{images:config.referenceImages,videos:config.referenceVideos||[],audios:config.referenceAudios||[]});
+  return {mode,prompt,
     duration:config.videoDuration,resolution:config.videoQuality.toUpperCase(),aspectRatio:config.videoAspectRatio,
     imageUrls:getH3MaxReferenceImages(config).map(image=>media?.images.get(image.id)||`https://pending.invalid/${encodeURIComponent(image.id)}.png`),
     videoUrls:media?.videos||(config.referenceVideos||[]).map((_,index)=>`https://pending.invalid/video-${index}.mp4`),

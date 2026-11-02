@@ -1,7 +1,7 @@
 import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
-import { seedanceProviderError } from '../lib/video/seedanceProviders';
+import { LIQUID_VIDEO_MAX_SECONDS, seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
 import { getClipboardImages } from '../lib/references/clipboardImages';
 import { displayReferencePrompt, storeReferencePrompt } from '../lib/references/dynamicReferences';
@@ -1871,13 +1871,15 @@ export const Controls: React.FC<ControlsProps> = ({
   const selectedVideoIntent = getVideoPromptIntent(config);
   const videoModelOptions = VIDEO_MODEL_OPTIONS.map(option => option.value === 'seedance-2.5' && providerRoute.provider !== 'evolink' ? { ...option, label: 'Seedance 2.5' } : option);
   const isH3ImageToVideo = h3UsesImageFrames && config.referenceImages.length > 0;
+  // OpenRouter and Liquid Inference take an explicit size, so frames keep a fixed ratio.
+  const fixedRatioRoute = providerRoute.provider === 'openrouter' || providerRoute.provider === 'liquid';
   const isSeedance25FrameToVideo = selectedVideoModel === 'seedance-2.5'
     && selectedVideoOperation === 'generate'
     && config.referenceImages.length > 0
     && config.referenceImages.every(image => image.isFirstFrame || image.isLastFrame)
     && currentReferenceVideos.length === 0
     && (config.referenceAudios?.length || 0) === 0;
-  const usesSourceFrameAspectRatio = isH3ImageToVideo || (isH3VideoConfig && h3State.mode === 'reference_to_video' && !!config.h3MaxOptions?.startImageId) || (isSeedance25FrameToVideo && providerRoute.provider !== 'openrouter');
+  const usesSourceFrameAspectRatio = isH3ImageToVideo || (isH3VideoConfig && h3State.mode === 'reference_to_video' && !!config.h3MaxOptions?.startImageId) || (isSeedance25FrameToVideo && !fixedRatioRoute);
   const hasSeedanceFrameRoles = config.referenceImages.some(image => image.isFirstFrame || image.isLastFrame);
   const canAssignSeedanceFrames = config.referenceImages.length > 0 && config.referenceImages.length <= 2
     && currentReferenceVideos.length === 0 && currentReferenceAudios.length === 0
@@ -1889,7 +1891,7 @@ export const Controls: React.FC<ControlsProps> = ({
       referenceImages: input === 'frames'
         ? assignSeedanceFrames(current.referenceImages)
         : current.referenceImages.map(image => ({ ...image, isFirstFrame: false, isLastFrame: false })),
-      videoAspectRatio: input === 'frames' && providerRoute.provider !== 'openrouter' ? 'adaptive' : current.videoAspectRatio,
+      videoAspectRatio: input === 'frames' && !fixedRatioRoute ? 'adaptive' : current.videoAspectRatio,
     }));
   };
   const videoOperationOptions = (selectedVideoModel === 'seedance-2.0'
@@ -1903,7 +1905,7 @@ export const Controls: React.FC<ControlsProps> = ({
         { label: 'Edit', value: 'edit' },
         { label: 'Continue', value: 'continue', disabled: !currentReferenceVideos.length },
         { label: 'Extend', value: 'extend' },
-      ]).map(option => providerRoute.provider === 'openrouter' && option.value !== 'generate' ? { ...option, disabled: true } : option);
+      ]).map(option => fixedRatioRoute && option.value !== 'generate' ? { ...option, disabled: true } : option);
   const aspectRatioOptions = [ { label: '1:1', value: '1:1' }, { label: '3:4', value: '3:4' }, { label: '4:3', value: '4:3' }, { label: '9:16', value: '9:16' }, { label: '16:9', value: '16:9' } ];
   const resolutionOptions = [ { label: '1K', value: '1K' }, { label: '2K', value: '2K' }, { label: '4K', value: '4K' } ];
   const videoAspectRatioOptions = usesSourceFrameAspectRatio
@@ -1911,7 +1913,7 @@ export const Controls: React.FC<ControlsProps> = ({
     : selectedVideoModel === 'minimax-h3'
       ? h3State.capabilities.aspectRatios.map(value => ({ label: value === 'adaptive' || value === 'auto' ? 'Source / adaptive' : value, value: value === 'auto' ? 'adaptive' : value }))
       : selectedVideoOperation === 'generate' || selectedVideoOperation === 'reference_edit'
-        ? VIDEO_ASPECT_RATIO_OPTIONS.filter(o => providerRoute.provider !== 'openrouter' || o.value !== 'adaptive').map(o => ({ label: o.label, value: o.value }))
+        ? VIDEO_ASPECT_RATIO_OPTIONS.filter(o => !fixedRatioRoute || o.value !== 'adaptive').map(o => ({ label: o.label, value: o.value }))
         : [{ label: 'Source', value: 'adaptive' }];
   const videoQualityOptions = selectedVideoModel === 'minimax-h3'
     ? h3State.capabilities.resolutions.map(value => ({ label: value, value: value.toLowerCase() === '2k' ? '2K' : value.toLowerCase() }))
@@ -1919,9 +1921,10 @@ export const Controls: React.FC<ControlsProps> = ({
   const videoDurationOptions = selectedVideoOperation === 'edit'
     ? [{ label: 'Auto (source)', value: '-1' }]
     : [
-        ...(selectedVideoModel === 'seedance-2.5' && providerRoute.provider !== 'openrouter' ? [{ label: 'Auto', value: '-1' }] : []),
+        ...(selectedVideoModel === 'seedance-2.5' && !fixedRatioRoute ? [{ label: 'Auto', value: '-1' }] : []),
         ...VIDEO_DURATION_OPTIONS
           .filter(o => (selectedVideoModel === 'seedance-2.5' || o.value <= 15)
+            && (providerRoute.provider !== 'liquid' || o.value <= LIQUID_VIDEO_MAX_SECONDS)
             && (selectedVideoModel !== 'minimax-h3' || o.value >= 5))
           .map(o => ({ label: o.label, value: String(o.value) })),
       ];
@@ -1939,10 +1942,10 @@ export const Controls: React.FC<ControlsProps> = ({
     // Seedance 2.5's image-to-video endpoint derives framing from its input
     // images. Do not persist a fixed ratio the provider cannot honor. Video
     // Continue keeps fixed ratios because they control last-frame adaptation.
-    if (config.mode === 'video' && providerRoute.provider !== 'openrouter' && isSeedance25FrameToVideo && config.videoAspectRatio !== 'adaptive') {
+    if (config.mode === 'video' && !fixedRatioRoute && isSeedance25FrameToVideo && config.videoAspectRatio !== 'adaptive') {
       onChange({ ...config, videoAspectRatio: 'adaptive' });
     }
-  }, [config, isSeedance25FrameToVideo, providerRoute.provider, onChange]);
+  }, [config, isSeedance25FrameToVideo, fixedRatioRoute, onChange]);
 
   const requiresSourceVideo = isVideoMode && selectedVideoModel !== 'minimax-h3' && selectedVideoOperation !== 'generate';
   const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;

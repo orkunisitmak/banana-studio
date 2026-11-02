@@ -1101,8 +1101,8 @@ export const pollVideoTask = async (
     endpoint?.startsWith('minimax/h3-max/') === true
     || effectiveQueueEndpoint === 'minimax/h3-max'
   );
-  const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_');
-  const providerName = isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+  const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_') || taskId.startsWith('bs_liquid_');
+  const providerName = isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : taskId.startsWith('bs_liquid_') ? 'Liquid Inference' : 'EvoLink';
   let consecutiveErrors = 0;
   const MAX_ERRORS = 5;
   let retryableStatusErrors = 0;

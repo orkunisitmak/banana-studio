@@ -687,7 +687,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     : undefined;
   return {
     id: row.id,
-    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel,
+    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_liquid_') ? 'liquid' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel,
     url: resolveOriginalUrl(row),
     // Images can use the legacy derived thumbnail convention. Historical
     // video rows never created that file, so deriving one gives mobile Safari
@@ -1452,7 +1452,7 @@ export const saveVideo = async (
       referenceVideos: finalReferenceVideos.length > 0 ? finalReferenceVideos.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       referenceAudios: finalReferenceAudios.length > 0 ? finalReferenceAudios.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       providerModel: media.providerModel || media.falEndpoint,
-      generationProvider: media.generationProvider || (media.taskId?.startsWith('bs_openrouter_') ? 'openrouter' : media.taskId?.startsWith('bs_fal_') ? 'fal' : undefined),
+      generationProvider: media.generationProvider || (media.taskId?.startsWith('bs_openrouter_') ? 'openrouter' : media.taskId?.startsWith('bs_liquid_') ? 'liquid' : media.taskId?.startsWith('bs_fal_') ? 'fal' : undefined),
       falEndpoint: media.falEndpoint,
       falQueueEndpoint: media.falQueueEndpoint,
     };

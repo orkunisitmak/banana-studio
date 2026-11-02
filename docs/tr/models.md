@@ -21,7 +21,7 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | Opus 5.5 — varsayılan yaratıcı model, Medium | OpenRouter → Liquid Inference | `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, varyasyon | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — metin ve video analizi | Google Gemini → OpenRouter → Liquid Inference (yalnızca metin) | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
-| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
+| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter → Liquid Inference (2.5) | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Gerektiğinde video referansı ön işlemi | fal.ai | `FAL_KEY` |
 | YouTube arama / kanal ve video bilgileri | YouTube Data API v3 | `YOUTUBE_API_KEY` |
@@ -40,18 +40,18 @@ Düşünme seviyesi AI settings'ten seçilir. Yalnızca fal.ai anahtarı Enhance
 
 ## Video farkları
 
-| İşlem | EvoLink | fal.ai | Bu uygulamada OpenRouter |
-| --- | --- | --- | --- |
-| Metinden video | Var | Var | Var |
-| First frame / first + last frame | Var | Var | Var |
-| Görsel referansları | Var | Var | Var, en fazla 9 |
-| Video / ses referansları | Var | Var | Açık değil |
-| Seedance 2.5 Edit / Extend | Var | Var | Açık değil |
-| Seedance 2.5 Auto süre | Var | Var | Sabit 4–30 saniye |
-| Seedance 2.5 çözünürlük | 480p / 720p / 1080p | 480p / 720p / 1080p | 480p / 720p |
-| Seedance 2.0 sabit süre | 4–15 saniye | 4–15 saniye | 4–15 saniye |
+| İşlem | EvoLink | fal.ai | Bu uygulamada OpenRouter | Bu uygulamada Liquid Inference |
+| --- | --- | --- | --- | --- |
+| Metinden video | Var | Var | Var | Var |
+| First frame / first + last frame | Var | Var | Var | Var |
+| Görsel referansları | Var | Var | Var, en fazla 9 | Var, en fazla 9 |
+| Video / ses referansları | Var | Var | Açık değil | Açık değil |
+| Seedance 2.5 Edit / Extend | Var | Var | Açık değil | Açık değil |
+| Seedance 2.5 Auto süre | Var | Var | Sabit 4–30 saniye | Sabit 4–10 saniye |
+| Seedance 2.5 çözünürlük | 480p / 720p / 1080p | 480p / 720p / 1080p | 480p / 720p | 480p / 720p / 1080p, piksel boyutu olarak |
+| Seedance 2.0 sabit süre | 4–15 saniye | 4–15 saniye | 4–15 saniye | Yok |
 
-**Seedance 2.5 Relaxed**, mevcut EvoLink bağlantısının özelliğidir. fal.ai ve OpenRouter standart Seedance 2.5 kullanır; fiyatları, izinleri ve limitleri kendilerine aittir. H3 Max yalnızca fal.ai kullanır; benzer isimli başka MiniMax modeliyle değiştirilmez. Desteklenmeyen seçenekler üretimden önce kontrol edilir; başka modele sessiz geçiş yapılmaz.
+**Seedance 2.5 Relaxed**, mevcut EvoLink bağlantısının özelliğidir. fal.ai, OpenRouter ve Liquid Inference standart Seedance 2.5 kullanır. Liquid'de ses anahtarı yoktur, sağlayıcının varsayılanı geçerlidir; borsa URL tutmadığı için bitmiş dosya senin depona kopyalanır. fiyatları, izinleri ve limitleri kendilerine aittir. H3 Max yalnızca fal.ai kullanır; benzer isimli başka MiniMax modeliyle değiştirilmez. Desteklenmeyen seçenekler üretimden önce kontrol edilir; başka modele sessiz geçiş yapılmaz.
 
 Video analizi gerçek YouTube görüntüsünü doğrudan Gemini veya OpenRouter'ın Google AI Studio bağlantısıyla okur. Opus/GPT bu gözlemlerden yaratıcı brief hazırlayabilir; videoyu kendileri izlemiş gibi gösterilmezler. YouTube arama/bilgileri için ayrı **YouTube Data API v3** anahtarı gerekir. Google OAuth bilgileri farklıdır ve yalnızca web girişinde kullanılır.
 

@@ -39,7 +39,7 @@ test('Liquid Inference is an opt-in text route that Auto never prefers over exis
   assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'auto', { liquid: true }), 'liquid');
   assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'auto', { liquid: true, openrouter: true }), 'openrouter');
   assert.throws(() => resolveProvider('gpt-6.1-sol', 'liquid', { liquid: true }));
-  assert.throws(() => resolveProvider('seedance-2.5', 'liquid', { liquid: true }));
+  assert.throws(() => resolveProvider('gemini-3-pro-image-preview', 'liquid', { liquid: true }));
 });
 
 test('Liquid Inference requests use exchange model ids, no OpenRouter routing block, and the exchange charge', async () => {

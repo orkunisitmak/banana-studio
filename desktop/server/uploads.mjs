@@ -16,8 +16,8 @@ export function createMediaUploader(workspace,{fetchImpl=fetch,falUpload}={}) {
     const key=workspace.mediaKey(value);if(!key)return value;
     const file=workspace.mediaPath(key),stat=fs.statSync(file),ext=path.extname(key).slice(1).toLowerCase(),type=MIME[ext];
     if(!type)throw new ReferenceUploadError('This reference file format is not supported.');
-    if(provider==='openrouter') {
-      if(!['image/png','image/jpeg','image/webp'].includes(type)||stat.size>20*1024*1024)throw new ReferenceUploadError('OpenRouter frame/reference images must be PNG, JPEG or WebP, up to 20 MB.');
+    if(provider==='openrouter'||provider==='liquid') {
+      if(!['image/png','image/jpeg','image/webp'].includes(type)||stat.size>20*1024*1024)throw new ReferenceUploadError(`${provider==='liquid'?'Liquid Inference':'OpenRouter'} frame/reference images must be PNG, JPEG or WebP, up to 20 MB.`);
       return `data:${type};base64,${fs.readFileSync(file).toString('base64')}`;
     }
     const token=process.env[keyName(provider)];if(!token)throw new ReferenceUploadError(`Add your ${provider==='fal'?'fal.ai':'EvoLink'} key in Provider keys before using this reference.`);

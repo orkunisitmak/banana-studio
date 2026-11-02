@@ -1,5 +1,10 @@
 import type { AIProvider } from '../providers.js';
 
+/** Liquid Inference video routes (POST /v1/videos), checked against
+ * GET /v1/exchange/models?kind=video on 2026-11-02. */
+export const LIQUID_VIDEO_MODELS: Record<string, string> = { 'seedance-2.5': 'seedance-2-5' };
+export const LIQUID_VIDEO_MAX_SECONDS = 10;
+
 export type SeedanceRequest = { videoModel: string; mode: string; prompt?: string; duration: number; quality: string; aspectRatio: string;
   generateAudio?: boolean; referenceEditMode?: boolean; editSourcePreparationVersion?: number; imageUrls?: string[]; videoUrls?: string[]; audioUrls?: string[] };
 // The app and EvoLink call a prompt-only task `text_only`; fal names its route text-to-video.
@@ -24,6 +29,13 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
     if (body.aspectRatio === 'adaptive') return 'Choose an aspect ratio for OpenRouter.';
     if (counts[0] > 9) return 'Use up to 9 image references with this OpenRouter route.';
   }
+  if (provider === 'liquid') {
+    if (!Object.hasOwn(LIQUID_VIDEO_MODELS, body.videoModel)) return 'Liquid Inference serves Seedance 2.5 here. Choose another provider for Seedance 2.0.';
+    if (body.mode.startsWith('video_') || counts[1] || counts[2] || body.referenceEditMode) return 'Liquid Inference supports text, first/last frames and image references here. Choose fal.ai or EvoLink in AI settings for video/audio references, Edit or Extend.';
+    if (body.duration === -1 || body.duration > LIQUID_VIDEO_MAX_SECONDS) return `Liquid Inference renders Seedance 2.5 for 4–${LIQUID_VIDEO_MAX_SECONDS} seconds. Choose a shorter fixed duration or another provider.`;
+    if (body.aspectRatio === 'adaptive') return 'Choose an aspect ratio for Liquid Inference.';
+    if (counts[0] > 9) return 'Use up to 9 image references with this Liquid Inference route.';
+  }
 }
 const referencePrompt = (prompt = '') => prompt.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
 export function falSeedanceInput(body: SeedanceRequest) {
@@ -45,5 +57,26 @@ export function openRouterSeedanceInput(body: SeedanceRequest) {
     ...(body.mode === 'image_to_video' ? { frame_images: body.imageUrls!.map((url, i) => ({ type: 'image_url', image_url: { url }, frame_type: i ? 'last_frame' : 'first_frame' })) }
       : body.imageUrls?.length ? { input_references: body.imageUrls.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
     provider: { allow_fallbacks: false },
+  };
+}
+
+const SHORT_SIDE: Record<string, number> = { '480p': 480, '720p': 720, '1080p': 1080 };
+const RATIOS: Record<string, [number, number]> = { '16:9': [16, 9], '9:16': [9, 16], '1:1': [1, 1], '4:3': [4, 3], '3:4': [3, 4], '21:9': [21, 9] };
+/** Liquid takes `size` as `<width>x<height>`. The short side follows the chosen
+ * resolution; the long side is the nearest even number to the exact ratio, so a
+ * first frame with the same ratio stays within the exchange's 1% shape check. */
+export function liquidVideoSize(quality: string, aspectRatio: string): string {
+  const short = SHORT_SIDE[quality], ratio = RATIOS[aspectRatio];
+  if (!short || !ratio) throw new Error('Unsupported video size.');
+  const [w, h] = ratio, long = Math.round(short * Math.max(w, h) / Math.min(w, h) / 2) * 2;
+  return w >= h ? `${long}x${short}` : `${short}x${long}`;
+}
+/** Liquid's POST /v1/videos takes OpenRouter-style frame_images and
+ * input_references (https or data:image URLs) plus `seconds` and `size`. */
+export function liquidSeedanceInput(body: SeedanceRequest) {
+  return { model: LIQUID_VIDEO_MODELS[body.videoModel], prompt: referencePrompt(body.prompt), seconds: String(body.duration),
+    size: liquidVideoSize(body.quality, body.aspectRatio),
+    ...(body.mode === 'image_to_video' ? { frame_images: body.imageUrls!.map((url, i) => ({ type: 'image_url', image_url: { url }, frame_type: i ? 'last_frame' : 'first_frame' })) }
+      : body.imageUrls?.length ? { input_references: body.imageUrls.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
   };
 }

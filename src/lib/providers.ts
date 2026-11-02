@@ -21,7 +21,7 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'gpt-6.1-sol': ['openai', 'openrouter'],
   'gemini-3.8-flash': ['gemini', 'openrouter', 'liquid'],
   'seedance-2.0': ['evolink', 'fal', 'openrouter'],
-  'seedance-2.5': ['evolink', 'fal', 'openrouter'],
+  'seedance-2.5': ['evolink', 'fal', 'openrouter', 'liquid'],
   'minimax-h3': ['fal'],
 };
 export type ProviderAvailability = Partial<Record<AIProvider, boolean>>;

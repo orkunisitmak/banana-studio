@@ -72,7 +72,7 @@ Ortam değişkeni, Vercel'in uygulamaya verdiği isimli bir ayardır. Kurulum ek
 | `GEMINI_API_KEY` | Google Gemini anahtarı | Gemini metin görevleri ve video analizi için |
 | `FAL_KEY` | fal.ai anahtarı | Nano Banana, H3 Max ve desteklenen video ön işlemleri için |
 | `EVOLINK_API_KEY` | EvoLink anahtarı | Seedance için |
-| `LIQUID_API_KEY` | Liquid Inference anahtarı | Opus 5.5 ve Gemini 3.8 Flash için isteğe bağlı metin bağlantısı |
+| `LIQUID_API_KEY` | Liquid Inference anahtarı | Opus 5.5 / Gemini 3.8 Flash metni ve Seedance 2.5 video için isteğe bağlı bağlantı |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 etkin Google Cloud projesinin anahtarı | YouTube araması için |
 
 Supabase Connect penceresi ve **Settings → API Keys** bölümünden bilgileri al. Server secret/service-role anahtarı yalnızca sunucuda kalır. Uygulama arayüze yalnızca proje adresi ve publishable anahtarını verir. [Supabase anahtar türleri](https://supabase.com/docs/guides/getting-started/api-keys).

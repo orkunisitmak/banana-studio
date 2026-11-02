@@ -21,7 +21,7 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | Opus 5.5 — default creative model, Medium | OpenRouter → Liquid Inference | `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter → Liquid Inference (text only) | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
-| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
+| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter → Liquid Inference (2.5) | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` / `LIQUID_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
 | Reference-video preprocessing, when required | fal.ai | `FAL_KEY` |
 | YouTube search / channel and video metadata | YouTube Data API v3 | `YOUTUBE_API_KEY` |
@@ -40,18 +40,18 @@ Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable
 
 ## Video differences
 
-| Operation | EvoLink | fal.ai | OpenRouter in this app |
-| --- | --- | --- | --- |
-| Text to video | Yes | Yes | Yes |
-| First frame / first + last frame | Yes | Yes | Yes |
-| Image references | Yes | Yes | Yes, up to 9 |
-| Video / audio references | Yes | Yes | Not enabled |
-| Seedance 2.5 Edit / Extend | Yes | Yes | Not enabled |
-| Seedance 2.5 Auto duration | Yes | Yes | Fixed 4–30 seconds |
-| Seedance 2.5 resolution | 480p / 720p / 1080p | 480p / 720p / 1080p | 480p / 720p |
-| Seedance 2.0 fixed duration | 4–15 seconds | 4–15 seconds | 4–15 seconds |
+| Operation | EvoLink | fal.ai | OpenRouter in this app | Liquid Inference in this app |
+| --- | --- | --- | --- | --- |
+| Text to video | Yes | Yes | Yes | Yes |
+| First frame / first + last frame | Yes | Yes | Yes | Yes |
+| Image references | Yes | Yes | Yes, up to 9 | Yes, up to 9 |
+| Video / audio references | Yes | Yes | Not enabled | Not enabled |
+| Seedance 2.5 Edit / Extend | Yes | Yes | Not enabled | Not enabled |
+| Seedance 2.5 Auto duration | Yes | Yes | Fixed 4–30 seconds | Fixed 4–10 seconds |
+| Seedance 2.5 resolution | 480p / 720p / 1080p | 480p / 720p / 1080p | 480p / 720p | 480p / 720p / 1080p, sent as a pixel size |
+| Seedance 2.0 fixed duration | 4–15 seconds | 4–15 seconds | 4–15 seconds | Not offered |
 
-**Seedance 2.5 Relaxed** refers specifically to the existing EvoLink route. fal.ai and OpenRouter use standard Seedance 2.5. They have their own prices, permissions and restrictions. H3 Max remains fal.ai-only; another MiniMax model with a similar name is not substituted. Unsupported options are checked before generating; the app never silently changes to a different model.
+**Seedance 2.5 Relaxed** refers specifically to the existing EvoLink route. fal.ai, OpenRouter and Liquid Inference use standard Seedance 2.5. Liquid has no audio switch; the rendering offer's default applies, and the finished file is copied to your storage because the exchange keeps no URL. They have their own prices, permissions and restrictions. H3 Max remains fal.ai-only; another MiniMax model with a similar name is not substituted. Unsupported options are checked before generating; the app never silently changes to a different model.
 
 Video analysis reads the actual YouTube footage with Gemini, directly or through OpenRouter's Google AI Studio endpoint. Opus/GPT can then write the creative brief from those observations; they are not presented as watching the footage. YouTube search/metadata still needs a separate **YouTube Data API v3** key. Google OAuth credentials are separate and needed only for hosted sign-in.
 

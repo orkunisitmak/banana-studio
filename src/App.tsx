@@ -986,7 +986,7 @@ const AuthorizedWorkspace: React.FC<{
         await updateVideoStatus(videoId, 'processing', {
           referenceImages,
           metadata: {
-            generationCost: cost, providerModel: endpoint, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink',
+            generationCost: cost, providerModel: endpoint, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_liquid_') ? 'liquid' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink',
             referenceVideos,
             referenceAudios,
             falEndpoint: endpoint,
@@ -1012,7 +1012,7 @@ const AuthorizedWorkspace: React.FC<{
         if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_liquid_') ? 'liquid' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
         ));
 
         const videoResult = await pollVideoTask(taskId, (progress) => {

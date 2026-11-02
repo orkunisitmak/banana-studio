@@ -30,7 +30,7 @@ const compiled = transformSync(`module.exports = env => {
 };`, { loader: 'ts', format: 'cjs' }).code;
 function setup(t, failPrompt) {
   fixture.rows = new Map(); let media = [], active = 0, toastId = 0;
-  const requests = [], errors = [];
+  const requests = [], errors = [], calls = { loading: 0, prompt: 0, generate: 0 };
   // Privacy settings can coarsen the browser clock; two independent responses may also settle in one millisecond.
   t.mock.method(Date, 'now', () => 1793349000000);
   t.mock.method(console, 'error', () => {});
@@ -43,20 +43,20 @@ function setup(t, failPrompt) {
   });
   const mod = { exports: {} }; new Function('module', compiled)(mod);
   const handler = mod.exports({ config: { imageModel: 'gpt-image-2.5-sunburst' }, currentFolderId: 'folder',
-    toast: { loading: () => ++toastId, updateToast() {}, dismissToast() {}, success() {}, error: (...args) => errors.push(args) },
+    toast: { loading: () => (calls.loading++, ++toastId), updateToast() {}, dismissToast() {}, success() {}, error: (...args) => errors.push(args) },
     resolveImageModel: value => value, getImageById: async () => assert.fail('No missing references'),
-    resolveTextModelPreferences: async () => ({ model: 'gpt-6.1-sol' }), generatePromptVariation: async prompt => `Variation of ${prompt}`,
+    resolveTextModelPreferences: async () => ({ model: 'gpt-6.1-sol' }), generatePromptVariation: async prompt => (calls.prompt++, `Variation of ${prompt}`),
     createPromptPreparation: () => ({ kind: 'variation' }), DEFAULT_VIDEO_MODEL: 'seedance-2.5', SUNBURST_MODEL: 'gpt-image-2.5-sunburst',
     getOpenAIImageOptions: () => ({}), getOpenAIImageSize: () => '1024x1024',
     setGeneratedMedia: update => { media = update(media); }, setActiveRequests: update => { active = update(active); },
     prepareProtectedImageSource: async () => undefined,
-    generateMedia: (config, progress, _created, context) => generateOpenAIImage(config, config.prompt, context, progress),
+    generateMedia: (config, progress, _created, context) => (calls.generate++, generateOpenAIImage(config, config.prompt, context, progress)),
     finishProtectedImageEdit: async generated => generated, assertWorkspaceSession: async () => {},
     saveImage: async () => assert.fail('Durable worker results are already saved'), mergeSavedMedia: value => value,
     parseErrorMessage: error => ({ title: 'Generation failed', message: error.message }),
   });
   const original = prompt => ({ id: prompt, prompt, mediaType: 'image', aspectRatio: '1:1', resolution: '1K', imageModel: 'gpt-image-2.5-sunburst', referenceImages: [] });
-  return { run: prompt => handler(original(prompt)), requests, errors, media: () => media, active: () => active };
+  return { run: prompt => handler(original(prompt)), runVideo: id => handler({ ...original(id), mediaType: 'video', videoModel: 'seedance-2.5' }), calls, requests, errors, media: () => media, active: () => active };
 }
 test('concurrent variations sharing a clock tick enqueue distinct jobs and retain both results', async t => {
   const f = setup(t);
@@ -79,4 +79,16 @@ test('one failed concurrent variation leaves the other result intact and retry g
   assert.equal(new Set(f.requests.map(request => request.id)).size, 3);
   assert.equal(f.media().filter(media => media.status === 'completed').length, 2);
   assert.equal(f.active(), 0);
+});
+test('variation on a video does nothing: no prompt rewrite, no provider request, no image generation', async t => {
+  const f = setup(t);
+  await f.run('image-control');
+  assert.deepEqual(f.calls, { loading: 1, prompt: 1, generate: 1 }, 'the same handler does run for an image');
+  assert.equal(f.requests.length, 1);
+  const before = { calls: { ...f.calls }, requests: f.requests.length, media: f.media().length };
+  await f.runVideo('clip');
+  assert.deepEqual(f.calls, before.calls);
+  assert.equal(f.requests.length, before.requests);
+  assert.equal(f.media().length, before.media);
+  assert.equal(f.active(), 0); assert.deepEqual(f.errors, []);
 });

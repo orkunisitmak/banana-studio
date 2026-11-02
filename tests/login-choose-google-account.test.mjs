@@ -65,6 +65,6 @@ test('from Access Denied, the user can reach Google\'s account chooser to sign i
   }
   const offered = calls.map(call => ({ provider: call.provider, prompt: call.options?.queryParams?.prompt ?? null }));
   assert.ok(calls.length >= 1, 'Continue with Google starts the Google sign-in');
-  assert.ok(offered.some(call => call.provider === 'google' && /select_account/.test(call.prompt || '')),
+  assert.ok(offered.some(call => call.provider === 'google' && (call.prompt || '').split(/\s+/).includes('select_account')),
     `every Google sign-in from Access Denied is sent without prompt=select_account, so Google silently picks the same unauthorized account: ${JSON.stringify(offered)}`);
 });

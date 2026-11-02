@@ -1511,6 +1511,7 @@ const AuthorizedWorkspace: React.FC<{
   const handleHistorySelect = handleRecreate;
 
   const handleGenerateVariation = async (media: GeneratedMedia) => {
+    if (media.mediaType === 'video') return;
     const imageModel = resolveImageModel(media.imageModel ?? config.imageModel);
 
     const toastId = toast.loading('Creating variation...', 'Generating a new prompt variation');

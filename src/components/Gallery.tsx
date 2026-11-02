@@ -19,6 +19,7 @@ import { DetailImage } from './GalleryDetailImage';
 import { buildGalleryFolderStats } from './galleryFolderStats';
 import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
+import { canGenerateVariation } from '../lib/gallery/recreateDraft';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
@@ -3474,9 +3475,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                 className="w-full py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium">
                 <Play className="w-4 h-4 text-red-400" /> YouTube Preview
               </button>}
-              {!isReadOnly && <div className="grid grid-cols-2 gap-3">
+              {!isReadOnly && <div className={`grid gap-3 ${onGenerateVariation && canGenerateVariation(selectedMedia) ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <button onClick={() => { onRecreate(selectedMedia); setSelectedMediaId(null); }} className="py-4 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw className="w-5 h-5" /> Re-create</button>
-                {onGenerateVariation && (
+                {onGenerateVariation && canGenerateVariation(selectedMedia) && (
                   <button
                     onClick={() => { onGenerateVariation(selectedMedia); }}
                     className="py-4 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"

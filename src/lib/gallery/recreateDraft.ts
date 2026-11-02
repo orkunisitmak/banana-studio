@@ -69,3 +69,6 @@ export const mergeRecreateHydration = (
   }
   return next;
 };
+
+/** Variation rewrites the prompt and starts an image generation; there is no video variation path. */
+export const canGenerateVariation = (media: GeneratedMedia): boolean => media.mediaType !== 'video';

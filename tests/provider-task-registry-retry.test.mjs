@@ -82,3 +82,11 @@ test('a duplicate that belongs to another user is not counted as registered', as
   assert.match(submit.body.error, /could not be recorded/);
   assert.equal(attempts, 3);
 });
+
+test('a row this user already had before the submit counts as registered and polls', async () => {
+  const mine = { provider: 'evolink', task_id: 'evo-r1', user_id: 'u1' };
+  const { submit, status, attempts } = await run({ failures: 0, rows: [mine] });
+  assert.equal(submit.statusCode, 200);
+  assert.equal(attempts, 2);
+  assert.equal(status.statusCode, 200);
+});

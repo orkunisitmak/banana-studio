@@ -821,7 +821,8 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   // Several attachment problems in one action are all shown.
-  const addAttachmentError = (message: string) => setAttachmentError(previous => previous?.split('\n').includes(message) ? previous : previous ? `${previous}\n${message}` : message);
+  // A file name can hold a line break; keep each message on one line so the line checks stay exact.
+  const addAttachmentError = (rawMessage: string) => { const message = rawMessage.replace(/[\r\n]+/g, ' '); setAttachmentError(previous => previous?.split('\n').includes(message) ? previous : previous ? `${previous}\n${message}` : message); };
 
   const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;

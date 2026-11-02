@@ -357,3 +357,10 @@ test('an attachment error added after a refused Undo goes on its own line, so a 
   const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
   assert.match(src, /const addAttachmentError = [^\n]*`\$\{previous\}\\n\$\{message\}`/);
 });
+
+test('a file name with a line break cannot split an attachment error into fake lines', () => {
+  const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
+  assert.match(src, /const addAttachmentError = \(rawMessage: string\) => \{ const message = rawMessage\.replace\(\/\[\\r\\n\]\+\/g, ' '\)/);
+  const clean = raw => raw.replace(/[\r\n]+/g, ' ');
+  assert.equal(clean('Could not read clip.\r\nLimit reached: 3 videos max.'), 'Could not read clip. Limit reached: 3 videos max.');
+});

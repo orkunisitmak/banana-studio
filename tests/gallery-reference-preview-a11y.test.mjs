@@ -154,9 +154,18 @@ test('thumbnails of one photo list have different names', async () => {
   assert.match(html, /aria-label="Preview reference photo 2"/);
 });
 
-test('Space on a reference thumbnail does not also play or pause the video player', () => {
-  const src = fs.readFileSync('src/components/Gallery.tsx', 'utf8');
-  const guard = src.match(/const handlePlayerKeyDown[\s\S]*?target\?\.matches\('([^']*)'\)\) return;/);
-  assert.ok(guard, 'player key handler guard not found');
-  assert.match(guard[1], /\[role="button"\]/);
+test('Space on a reference thumbnail does not also play or pause the video player, Space elsewhere still does', async () => {
+  const Gallery = await loadGallery(false);
+  const video = { ...item('v'), mediaType: 'video', url: 'https://example.com/v.mp4' };
+  const realUseEffect = React.useEffect;
+  const handlers = [];
+  React.useEffect = effect => { if (effect.toString().includes('handlePlayerKeyDown')) { listeners.length = 0; effect(); handlers.push(...listeners.filter(([t]) => t === 'keydown').map(([, fn]) => fn)); } };
+  try { renderToStaticMarkup(React.createElement(Gallery, { ...props, images: [video], selectedImageId: 'v' })); }
+  finally { React.useEffect = realUseEffect; }
+  assert.ok(handlers.length, 'video player key handler not registered');
+  // Minimal element: matches() understands the tag and role selectors the handler passes.
+  const el = (tag, role) => ({ matches: sel => sel.split(',').map(x => x.trim()).some(x => x === tag || (role && x === `[role="${role}"]`)) });
+  const space = target => { let prevented = false; handlers.forEach(fn => fn({ key: ' ', target, preventDefault() { prevented = true; } })); return prevented; };
+  assert.equal(space(el('div', 'button')), false);
+  assert.equal(space(el('div')), true);
 });

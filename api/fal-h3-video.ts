@@ -4,6 +4,7 @@ import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from '
 import { buildH3MaxInput, H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
 import { recordH3Usage } from './_lib/h3Usage.js';
+import { recoverSignedVideoTask, saveAcceptedVideoTask, validVideoGenerationId } from './_lib/videoSubmission.js';
 import { estimateH3MaxCost } from '../src/lib/video/h3MaxPricing.js';
 import type { GenerationConfig } from '../src/types.js';
 
@@ -135,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return;
 
   const apiKey = process.env.FAL_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
+  if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server', dispatched: false });
 
   try {
     if (req.method === 'POST') {
@@ -144,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
         prepared = buildH3MaxInput(body);
-        if (body.generationId !== undefined && (typeof body.generationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(body.generationId))) throw new Error('A valid generation ID is required');
+        if (!validVideoGenerationId(body.generationId)) throw new Error('A saved video generation ID is required for paid H3 submissions');
       } catch (error: any) {
         return res.status(400).json({ error: error?.message || 'Invalid MiniMax H3 Max request' });
       }
@@ -164,10 +165,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.generationId) {
         const { data: saved, error: readError } = await registry.from('generations')
           .select('id,user_id,type,status,task_id,metadata').eq('id', body.generationId).eq('user_id', user.id).maybeSingle();
-        if (readError) return res.status(503).json({ error: 'Saved generation access could not be verified. No provider request was sent.' });
+        if (readError) return res.status(503).json({ error: 'Saved generation access could not be verified. No provider request was sent.', dispatched: false });
         if (!saved || saved.user_id !== user.id || saved.type !== 'video') return res.status(404).json({ error: 'Saved video generation not found' });
         const metadata = saved.metadata && typeof saved.metadata === 'object' && !Array.isArray(saved.metadata) ? saved.metadata : {};
+        if (saved.task_id && metadata.h3MaxMode && metadata.h3MaxMode !== mode)
+          return res.status(409).json({ error: 'This saved task was submitted with a different H3 mode. Do not submit again.' });
         if (saved.task_id) {
+          const ownership = await registry.from('provider_tasks').select('user_id').eq('provider', 'fal').eq('task_id', saved.task_id).eq('user_id', user.id).maybeSingle();
+          if (ownership.error || !ownership.data) {
+            if (!await recoverSignedVideoTask(registry, body.generationId, user.id, 'fal', saved.task_id, metadata))
+              return res.status(503).json({ taskId: saved.task_id, retryable: true, error: 'Accepted H3 task registration is unavailable. Do not submit again.' });
+            // Repair billing after recovering a server-signed accepted task.
+            await recordH3Usage(registry, { taskId: saved.task_id, userId: user.id, mode, prompt: typeof body.prompt === 'string' ? body.prompt : '', generationId: body.generationId, estimatedCostUsd });
+          }
           if (!await requireProviderTask(req, res, 'fal', saved.task_id)) return;
           const savedEndpoint = typeof metadata.falEndpoint === 'string' && ALLOWED_QUEUE_ENDPOINTS.has(metadata.falEndpoint) ? metadata.falEndpoint : H3_MAX_QUEUE_APP;
           const savedQueueEndpoint = typeof metadata.falQueueEndpoint === 'string' && ALLOWED_QUEUE_ENDPOINTS.has(metadata.falQueueEndpoint) ? metadata.falQueueEndpoint : savedEndpoint;
@@ -179,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const claimedMetadata = { ...metadata, h3SubmissionStartedAt: Date.now(), h3MaxMode: mode, falEndpoint: endpoint };
         const { data: claimed, error: claimError } = await registry.from('generations')
           .update({ status: 'processing', metadata: claimedMetadata }).eq('id', body.generationId).eq('user_id', user.id).eq('status', 'pending').select('id').maybeSingle();
-        if (claimError) return res.status(503).json({ error: 'The saved video could not be claimed. No provider request was sent.' });
+        if (claimError) return res.status(503).json({ error: 'The saved video could not be claimed. No provider request was sent.', dispatched: false });
         if (!claimed) return res.status(409).json({ code: 'GENERATION_SUBMITTING', error: 'This saved video is already being submitted. Check the existing task instead of submitting again.' });
         galleryClaim = { id: body.generationId, metadata: claimedMetadata };
       }
@@ -203,13 +213,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(response.status).json({ error });
       }
       if (!data?.request_id) return res.status(502).json({ error: 'fal.ai response missing request_id' });
-      await registerProviderTask(registry, 'fal', data.request_id, user.id);
+      const acceptedQueueEndpoint = queueEndpointFromFalUrl(data.status_url, data.request_id, 'status')
+        || queueEndpointFromFalUrl(data.response_url, data.request_id, 'response')
+        || endpoint;
+      try {
+        await registerProviderTask(registry, 'fal', data.request_id, user.id);
+      } catch {
+        if (galleryClaim) await saveAcceptedVideoTask(registry, galleryClaim.id, user.id, data.request_id, {
+          videoSubmissionProvider: 'fal', falEndpoint: endpoint, falQueueEndpoint: acceptedQueueEndpoint, h3MaxMode: mode,
+        });
+        // The provider already accepted the paid task. Preserve its confirmed ID
+        // and try to record billing even when the private ownership registry is down.
+        // Polling remains blocked by requireProviderTask until registry recovery.
+        await recordH3Usage(registry, { taskId: data.request_id, userId: user.id, mode,
+          prompt: typeof body.prompt === 'string' ? body.prompt : '', generationId: galleryClaim?.id, estimatedCostUsd })
+          .catch(() => undefined);
+        return res.status(503).json({
+          error: 'fal.ai accepted this video, but its private task registration is unavailable. Do not submit again; contact an administrator to restore access.',
+          taskId: data.request_id, endpoint, queueEndpoint: acceptedQueueEndpoint, retryable: true,
+        });
+      }
       // The REST submit response is authoritative for lifecycle routing. Some
       // model IDs submit at a sub-route while fal serves status/result from the
       // parent queue app, so do not reconstruct this path from the model ID.
-      const queueEndpoint = queueEndpointFromFalUrl(data.status_url, data.request_id, 'status')
-        || queueEndpointFromFalUrl(data.response_url, data.request_id, 'response')
-        || endpoint;
+      const queueEndpoint = acceptedQueueEndpoint;
       if (galleryClaim) {
         const { data: saved, error: saveError } = await registry.from('generations')
           .update({ task_id: data.request_id, status: 'processing', metadata: { ...galleryClaim.metadata, falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, h3MaxMode: mode } })

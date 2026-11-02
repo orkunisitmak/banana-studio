@@ -3,6 +3,7 @@ import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
+import { claimVideoSubmission, saveAcceptedVideoTask } from './_lib/videoSubmission.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 
@@ -19,6 +20,7 @@ interface GenerateRequest {
   generateAudio: boolean;
   referenceEditMode?: boolean;
   editSourcePreparationVersion?: number;
+  generationId?: string;
 }
 
 export const hasInvalidMediaUrls = (urls: unknown): boolean => urls != null && (
@@ -62,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return;
 
   const apiKey = process.env.EVOLINK_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured' });
+  if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured', dispatched: false });
 
   try {
     let body: GenerateRequest;
@@ -190,9 +192,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    const claim = await claimVideoSubmission(registry, res, body.generationId, user.id, 'evolink', videoModel, body);
+    if (!claim) return;
+    if (claim.kind === 'existing') return res.status(200).json({ taskId: claim.taskId, usage: claim.usage || null });
 
     const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',
+      signal: AbortSignal.timeout(55_000),
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -216,7 +222,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
     }
 
-    await registerProviderTask(registry, 'evolink', data.id, user.id);
+    try { await registerProviderTask(registry, 'evolink', data.id, user.id); }
+    catch {
+      await saveAcceptedVideoTask(registry, claim.id, user.id, data.id, { providerUsage: data.usage || null });
+      return res.status(503).json({ taskId: data.id, usage: data.usage || null, retryable: true, error: 'EvoLink accepted the video, but task registration failed. Do not resubmit.' });
+    }
+    if (!await saveAcceptedVideoTask(registry, claim.id, user.id, data.id, { providerUsage: data.usage || null }))
+      return res.status(503).json({ taskId: data.id, usage: data.usage || null, retryable: true, error: 'EvoLink accepted the video, but saving its gallery record failed. Do not resubmit.' });
 
     return res.status(200).json({
       taskId: data.id,

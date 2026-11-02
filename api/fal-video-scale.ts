@@ -53,6 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
 
+  let acceptedTaskId: string | undefined;
   try {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -96,6 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!data?.request_id) {
         return res.status(502).json({ error: 'fal.ai response missing request_id' });
       }
+      acceptedTaskId = data.request_id;
       await registerProviderTask(registry, 'fal', data.request_id, user.id);
       return res.status(200).json({ requestId: data.request_id });
     }
@@ -145,6 +147,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ status: 'RUNNING', stage: statusData?.status || 'IN_QUEUE' });
   } catch (error: any) {
     console.error('fal video scale error:', error.message);
-    return res.status(500).json({ error: error.message || 'Video preprocessing failed' });
+    return res.status(500).json({ error: error.message || 'Video preprocessing failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }
 }

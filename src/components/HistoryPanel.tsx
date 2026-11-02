@@ -41,6 +41,8 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
         </div>
         <button 
           onClick={onClose}
+          aria-label="Close history"
+          title="Close history"
           className="p-1 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors"
         >
           <X className="w-5 h-5" />

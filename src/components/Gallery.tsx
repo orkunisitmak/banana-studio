@@ -2852,6 +2852,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                       e.stopPropagation();
                       if (onToggleFavorite) onToggleFavorite(media);
                     }}
+                    aria-label="Favorite"
+                    aria-pressed={Boolean(media.isFavorite)}
                     className={`absolute top-2 right-2 z-20 p-2 rounded-full transition-all ${media.isFavorite ? 'bg-pink-600 text-white' : 'bg-black/40 text-white/50 hover:bg-black/60 hover:text-white'}`}
                   >
                     <Heart className={`w-4 h-4 ${media.isFavorite ? 'fill-current' : ''}`} />
@@ -3015,7 +3017,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       {/* Reference Image Preview Popup */}
       {previewRefImage && (
         <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200" onClick={() => setPreviewRefImage(null)}>
-          <button className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
+          <button aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
           <img src={previewRefImage.data} alt="Reference" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>
       )}
@@ -3139,7 +3141,7 @@ export const Gallery: React.FC<GalleryProps> = ({
           <div id="gallery-details-pane" data-gallery-details-pane hidden={!isDetailsVisible} className={`w-full md:w-[400px] bg-[#161b22] border-l border-gray-800 ${isDetailsVisible ? 'flex' : 'hidden'} flex-col min-h-[50vh] md:h-full shrink-0 shadow-2xl`}>
             <div className="flex items-center justify-between p-6 border-b border-gray-800">
               <h3 className="text-sm font-semibold text-white">{isEditingSelectedMedia ? 'Source details' : 'Details'}</h3>
-              <button onClick={() => setSelectedMediaId(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+              <button onClick={() => setSelectedMediaId(null)} aria-label="Close details" title="Close details" className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Prompt */}
@@ -3509,6 +3511,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   }}
                   className={`py-2 rounded-xl flex items-center justify-center transition-colors border ${selectedMedia.isFavorite ? 'bg-pink-900/30 border-pink-500 text-pink-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
                   title="Favorite"
+                  aria-pressed={Boolean(selectedMedia.isFavorite)}
                 >
                   <Heart className={`w-4 h-4 ${selectedMedia.isFavorite ? 'fill-current' : ''}`} />
                 </button>

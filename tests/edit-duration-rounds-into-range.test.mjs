@@ -26,15 +26,15 @@ test('control: a clearly too long clip reports its length', () => {
   assert.equal(shown(message(45)), 45);
 });
 test('a 30.04 s clip is not reported as 30.0 s in a 4-30 s rule', () => {
-  assert.ok(shown(message(30.04)) > 30, message(30.04));
+  assert.equal(shown(message(30.04)), 30.04);
 });
 test('a 3.96 s clip is not reported as 4.0 s in a 4-30 s rule', () => {
-  assert.ok(shown(message(3.96)) < 4, message(3.96));
+  assert.equal(shown(message(3.96)), 3.96);
 });
 
 test('control: 30.001 s and 3.999 s are not shown as the limit', () => {
-  assert.ok(shown(message(30.001)) > 30, message(30.001));
-  assert.ok(shown(message(3.999)) < 4, message(3.999));
+  assert.equal(shown(message(30.001)), 30.01);
+  assert.equal(shown(message(3.999)), 3.99);
 });
 
 // The local-reference path: createVideoTask -> prepareReferenceVideos ->
@@ -57,10 +57,10 @@ const localEditMessage = async seconds => {
 test('a local 30.04 s reference is not reported as 30.0 s', async () => {
   const text = await localEditMessage(30.04);
   assert.match(text, /Current duration is/, text);
-  assert.ok(shown(text) > 30, text);
+  assert.equal(shown(text), 30.04);
 });
 test('a local 3.96 s reference is not reported as 4.0 s', async () => {
   const text = await localEditMessage(3.96);
   assert.match(text, /Current duration is/, text);
-  assert.ok(shown(text) < 4, text);
+  assert.equal(shown(text), 3.96);
 });

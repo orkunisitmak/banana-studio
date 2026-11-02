@@ -1683,7 +1683,7 @@ const AuthorizedWorkspace: React.FC<{
         return;
       }
 
-      const response = await fetch(media.url);
+      const response = await fetch(await workspaceStorage.refreshMediaAccessUrl(media.url, false).catch(() => media.url));
       // An expired link returns an error page; never add that as an image.
       if (!response.ok) throw new Error(`Reference download failed (${response.status})`);
       const blob = await response.blob();

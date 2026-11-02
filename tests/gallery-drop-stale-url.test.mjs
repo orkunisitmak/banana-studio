@@ -34,13 +34,15 @@ globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {
 const stale = 'https://p.example/storage/v1/object/sign/media/u/a.png?token=expired';
 const fresh = 'https://p.example/storage/v1/object/sign/media/u/a.png?token=renewed';
 const fetched = [];
-globalThis.fetch = async url => { fetched.push(String(url)); return String(url) === fresh ? new Response(new Blob(['png'], { type: 'image/png' })) : new Response('expired', { status: 400 }); };
+const norefreshOk = 'https://p.example/storage/v1/object/sign/media/u/b.png?token=norefresh-ok';
+const norefreshBad = 'https://p.example/storage/v1/object/sign/media/u/c.png?token=norefresh-bad';
+globalThis.fetch = async url => { fetched.push(String(url)); if (String(url) === norefreshOk) return new Response(new Blob(['png'], { type: 'image/png' })); return String(url) === fresh ? new Response(new Blob(['png'], { type: 'image/png' })) : new Response('expired', { status: 400 }); };
 globalThis.FileReader = class { readAsDataURL() { this.result = 'data:image/png;base64,eA=='; setTimeout(() => { this.onload?.(); this.onloadend?.(); }, 0); } };
 globalThis.__saved = [];
 const exp = await bundle('src/components/Controls.tsx', [{ name: 'probe', setup(b) {
   b.onResolve({ filter: /services[\\/]storageService$/ }, a => /Controls\.tsx$/.test(a.importer) ? { path: 'storage-mock', namespace: 'mock' } : undefined);
   b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ loader: 'js', contents: `
-    export const refreshMediaAccessUrl = async url => url.replace('token=expired', 'token=renewed');
+    export const refreshMediaAccessUrl = async url => { if (url.includes('norefresh')) throw new Error('refresh failed'); return url.replace('token=expired', 'token=renewed'); };
     export const compressImage = async d => d; export const estimateBase64Size = () => 1;
     export const saveReferenceImage = async i => { globalThis.__saved.push(i); return i; };
     export const getReferenceGallery = async () => []; export const deleteReferenceImage = async () => {};
@@ -70,4 +72,34 @@ test('dropping a gallery image onto the saved-references button renews an expire
   await btn.onDrop(drop); await settle();
   assert.deepEqual(fetched, [fresh], 'fetch must use the renewed link');
   assert.equal(globalThis.__saved.length, 1, 'reference saved');
+});
+
+const dropOf = url => ({ ...drop, dataTransfer: { ...dt, getData: k => k === 'application/nanogen-media' ? JSON.stringify({ id: 'b', mediaType: 'image', url }) : '' } });
+test('prompt box drop: a failed renewal falls back to the original link and adds the reference', async () => {
+  const bar = handlers.find(p => typeof p.className === 'string' && p.className.includes('fixed bottom-0'));
+  fetched.length = 0; updates.length = 0;
+  await bar.onDrop(dropOf(norefreshOk)); await settle();
+  assert.deepEqual(fetched, [norefreshOk]);
+  assert.equal(updates.length, 1, 'reference added');
+});
+test('prompt box drop: when the original link also fails, no reference is added', async () => {
+  const bar = handlers.find(p => typeof p.className === 'string' && p.className.includes('fixed bottom-0'));
+  fetched.length = 0; updates.length = 0;
+  await bar.onDrop(dropOf(norefreshBad)); await settle();
+  assert.deepEqual(fetched, [norefreshBad]);
+  assert.equal(updates.length, 0, 'no reference added');
+});
+test('saved-references drop: a failed renewal falls back to the original link and saves the reference', async () => {
+  const btn = handlers.find(p => typeof p.className === 'string' && p.className.includes('w-12 h-12'));
+  fetched.length = 0; globalThis.__saved.length = 0;
+  await btn.onDrop(dropOf(norefreshOk)); await settle();
+  assert.deepEqual(fetched, [norefreshOk]);
+  assert.equal(globalThis.__saved.length, 1);
+});
+test('saved-references drop: when the original link also fails, nothing is saved', async () => {
+  const btn = handlers.find(p => typeof p.className === 'string' && p.className.includes('w-12 h-12'));
+  fetched.length = 0; globalThis.__saved.length = 0;
+  await btn.onDrop(dropOf(norefreshBad)); await settle();
+  assert.deepEqual(fetched, [norefreshBad]);
+  assert.equal(globalThis.__saved.length, 0);
 });

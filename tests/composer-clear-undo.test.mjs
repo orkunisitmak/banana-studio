@@ -30,6 +30,7 @@ new Function('module', code)(mod);
 
 function scenario(initial) {
   let config = structuredClone(initial), undoStack = [];
+  let shown = null;
   const errors = [], limits = { videos: 4, audios: 3 };
   // Also allow the pending upload-invalidation change (#168) to clear its refs.
   const insertUploadDraftRef = { current: { token: {} } }, insertSourceUploadRef = { current: null };
@@ -38,12 +39,12 @@ function scenario(initial) {
     setUndoStack: update => { undoStack = update(undoStack); },
     setEnhanceError() {}, refInputRef: { current: null },
     insertUploadDraftRef, insertSourceUploadRef,
-    maxReferenceVideos: limits.videos, maxReferenceAudios: limits.audios, setAttachmentError: error => errors.push(error),
+    maxReferenceVideos: limits.videos, maxReferenceAudios: limits.audios, setAttachmentError: update => { shown = typeof update === 'function' ? update(shown) : update; errors.push(shown); },
     isH3VideoConfig: config.mode === 'video' && config.videoModel === 'minimax-h3',
     h3PromptSupported: true, preEnhancePrompt: config.originalPrompt ?? null,
   });
   return { clear: () => api().clear(), undo: () => api().undo(), remove: id => api().remove(id),
-    revert: () => api().revert(), state: () => config, entries: () => undoStack,
+    revert: () => api().revert(), shown: () => shown, setShown: value => { shown = value; }, state: () => config, entries: () => undoStack,
     change: update => { config = update(config); }, limits, errors };
 }
 
@@ -308,7 +309,7 @@ test('a refused Undo leaves the older entry under a new removal, and the next Un
   f.remove('image-0');
   f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
   f.undo();
-  assert.match(f.errors.at(-1), /restores that reference first/);
+  assert.match(f.errors.at(-1), /restores that image first/);
   f.remove('image-1');
   assert.equal(f.entries().length, 2);
   f.undo();
@@ -316,4 +317,23 @@ test('a refused Undo leaves the older entry under a new removal, and the next Un
   assert.ok(!f.state().referenceImages.some(ref => ref.id === 'image-0'));
   assert.equal(f.entries().length, 1);
   assert.equal(f.errors.at(-1), null);
+});
+
+test('a successful Undo clears its own warning but leaves an unrelated upload error', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.remove('image-1');
+  f.setShown('Source video upload failed.');
+  f.undo();
+  assert.equal(f.shown(), 'Source video upload failed.');
+});
+
+test('the full-composer warning names image references, since removing a video adds no Undo entry', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.undo();
+  assert.match(f.shown(), /removing another image reference/);
 });

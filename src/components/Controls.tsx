@@ -1079,11 +1079,13 @@ export const Controls: React.FC<ControlsProps> = ({
       }
       setAttachmentError(null);
     }
+    const undoFullMessage = 'Could not undo: the composer has no room for the removed reference image. Undo after removing another image reference restores that image first.';
     if (!lastEntry.clearedConfig && updatedConfig.referenceImages.length > getReferenceImageLimit(updatedConfig)) {
-      setAttachmentError('Could not undo: the composer has no room for the removed reference image. Undo after removing another reference restores that reference first.');
+      setAttachmentError(undoFullMessage);
       return;
     }
-    setAttachmentError(null);
+    // Clear only this warning; an upload error from something else stays.
+    setAttachmentError(previous => previous === undoFullMessage ? null : previous);
     setUndoStack(prev => prev.slice(0, -1));
     onChange(updatedConfig);
   };

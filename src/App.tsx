@@ -15,6 +15,7 @@ import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageMode
 import * as workspaceStorage from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
+import { brainstormImageCount } from './lib/brainstorm/brainstormLabels';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
 import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
@@ -1256,7 +1257,7 @@ const AuthorizedWorkspace: React.FC<{
       },
       onPrepared: () => {
         finishPreparing();
-        toast.updateToast(toastId, { title: `Generating ${batch.placeholders.length} images…`, message: 'Your ideas are ready. Creating images.' });
+        toast.updateToast(toastId, { title: `Generating ${brainstormImageCount(batch.placeholders.length)}…`, message: 'Your ideas are ready. Creating images.' });
       },
       onSettled: (completed, failed) => {
         const nextSettled = completed + failed;
@@ -1270,10 +1271,10 @@ const AuthorizedWorkspace: React.FC<{
     setIsBrainstormPreparing(true);
     setGeneratedMedia(previous => [...batch.placeholders, ...previous]);
     setActiveRequests(previous => previous + batch.placeholders.length);
-    const toastId = toast.loading(`Preparing ${batch.placeholders.length} images…`, 'You can follow your batch in the gallery.');
+    const toastId = toast.loading(`Preparing ${brainstormImageCount(batch.placeholders.length)}…`, 'You can follow your batch in the gallery.');
     void batch.run().then(({ completed, failed }) => {
       toast.dismissToast(toastId);
-      if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
+      if (!failed) toast.success('Brainstorm complete', `${brainstormImageCount(completed)} created.`);
       else if (completed) toast.warning('Batch partial', `${completed} created, ${failed} failed. Review the failed cards in the gallery.`);
       else toast.error('Brainstorm stopped', 'No images completed. Review the message on the gallery cards.');
     }).finally(finishPreparing);

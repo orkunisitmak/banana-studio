@@ -1,4 +1,5 @@
 import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
+import { submitOnEnter } from './submitOnEnter';
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
@@ -2702,7 +2703,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                             onChange={(e) => setNewTemplateName(e.target.value)}
                                             placeholder="Template Name..."
                                             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50"
-                                            onKeyDown={(e) => e.key === 'Enter' && handleConfirmSave()}
+                                            onKeyDown={submitOnEnter(handleConfirmSave)}
                                          />
                                          <button onClick={handleConfirmSave} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white font-medium text-sm transition-colors">Save</button>
                                      </div>

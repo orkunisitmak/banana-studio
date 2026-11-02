@@ -1,3 +1,4 @@
+import { submitOnEnter } from './submitOnEnter';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Youtube, Loader2, X, Search, TrendingUp, Clock, Check, Eye, Download, AlertCircle, Sparkles } from 'lucide-react';
@@ -500,7 +501,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                         type="text"
                         value={inputUrl}
                         onChange={(e) => { reset(); setInputUrl(e.target.value); }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLookup()}
+                        onKeyDown={submitOnEnter(handleLookup)}
                         placeholder="@handle, channel URL, or video URL"
                         className="min-w-0 flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/30"
                       />

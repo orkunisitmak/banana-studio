@@ -1440,8 +1440,8 @@ export const Controls: React.FC<ControlsProps> = ({
     // 1. Handle Desktop Files
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         const allFiles = Array.from(e.dataTransfer.files) as File[];
-        const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
-        const videoFiles = allFiles.filter(f => f.type.startsWith('video/') || (!f.type && /\.(mp4|mov|webm)$/i.test(f.name)));
+        const imageFiles = allFiles.filter(f => getMimeType(f, f.name).startsWith('image/'));
+        const videoFiles = allFiles.filter(f => getMimeType(f, f.name).startsWith('video/'));
         const audioFiles = allFiles.filter(f => f.type.startsWith('audio/')
           || (!f.type.startsWith('video/') && /\.(mp3|wav|m4a|aac|ogg|oga|flac|aif|aiff)$/i.test(f.name)));
 

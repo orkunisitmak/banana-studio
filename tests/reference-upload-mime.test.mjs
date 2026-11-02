@@ -410,3 +410,56 @@ test('video reference preflight reuses local blobs and does not download stored 
   assert.equal(state.uploads.filter(upload => upload.path.includes('/refs/')).length, 1);
   assert.equal(state.rows[0].reference_images[1].data, stored);
 });
+
+// Exercise the real desktop-drop dispatch, before the picker helpers are called.
+const dropStart = controls.indexOf('    // 1. Handle Desktop Files');
+const dropEnd = controls.indexOf('    // 2. Handle Gallery Drops', dropStart);
+assert.ok(dropStart > 0 && dropEnd > dropStart);
+const dropHandler = await transform(`export const dropFiles = async (files, getMimeType, options = {}) => {
+  const seen = { images: [], videos: [], audios: [], errors: [] };
+  const e = { dataTransfer: { files } };
+  const isH3VideoConfig = options.isH3VideoConfig ?? false;
+  const maxReferenceVideos = options.maxReferenceVideos ?? 3, maxReferenceAudios = 3;
+  const uploadingReferenceVideos = options.uploadingReferenceVideos ?? 0;
+  const config = { referenceVideos: options.referenceVideos ?? [] };
+  const setAttachmentError = message => seen.errors.push(message), addAttachmentError = setAttachmentError;
+  const processImageFiles = async files => seen.images.push(...files);
+  const processVideoFiles = async files => seen.videos.push(...files);
+  const processAudioFiles = async files => seen.audios.push(...files);
+  await (async () => { ${controls.slice(dropStart, dropEnd)} })();
+  return seen;
+};`, { loader: 'ts', format: 'esm' });
+const { dropFiles } = await import('data:text/javascript;base64,' + Buffer.from(dropHandler.code).toString('base64'));
+
+for (const type of ['', 'application/octet-stream']) {
+  for (const [name, category] of [['photo.JPG', 'images'], ['photo.png', 'images'], ['clip.MP4', 'videos'], ['clip.mov', 'videos'], ['clip.webm', 'videos']]) {
+    test(`desktop drop routes ${name} with ${type || 'empty'} MIME to its existing picker`, async () => {
+      const file = new File(['synthetic'], name, { type });
+      const result = await dropFiles([file], getMimeType);
+      assert.deepEqual(result[category], [file]);
+      assert.equal(file.type, type, 'dispatch must not relabel the file itself');
+      assert.equal(result.images.length + result.videos.length + result.audios.length, 1);
+    });
+  }
+}
+
+test('desktop drop preserves explicit MIME precedence and does not admit unknown binary files', async () => {
+  const image = new File(['synthetic'], 'photo.mp4', { type: 'image/jpeg' });
+  const video = new File(['synthetic'], 'clip.jpg', { type: 'video/mp4' });
+  const text = new File(['synthetic'], 'text.jpg', { type: 'text/plain' });
+  const unknown = new File(['synthetic'], 'unknown.bin', { type: 'application/octet-stream' });
+  const result = await dropFiles([image, video, text, unknown], getMimeType);
+  assert.deepEqual(result.images, [image]);
+  assert.deepEqual(result.videos, [video]);
+  assert.deepEqual(result.audios, []);
+});
+
+test('inferred video drops retain pending-upload limits and H3 action restrictions', async () => {
+  const files = ['one.mp4', 'two.mp4'].map(name => new File(['synthetic'], name, { type: 'application/octet-stream' }));
+  const limited = await dropFiles(files, getMimeType, { maxReferenceVideos: 3, referenceVideos: [{}], uploadingReferenceVideos: 1 });
+  assert.deepEqual(limited.videos, [files[0]]);
+  assert.deepEqual(limited.errors, ['Limit reached: 3 videos max.']);
+  const blocked = await dropFiles(files, getMimeType, { isH3VideoConfig: true, maxReferenceVideos: 0 });
+  assert.deepEqual(blocked.videos, []);
+  assert.deepEqual(blocked.errors, ['Choose an H3 Max action that accepts videos before adding a video.']);
+});

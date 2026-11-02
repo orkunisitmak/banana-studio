@@ -47,6 +47,9 @@ test('sanity: the picker renders two video rows, one selected', () => {
 test('selectable video rows expose their selected state with aria-pressed', () => {
   const bad = rows.filter(r => !/aria-pressed=/.test(r.match(/<button\b[^>]*>/)[0]));
   assert.deepEqual(bad.map(r => r.match(/Video [12]/)[0]), [], 'toggle rows with no aria-pressed (selection is only a check icon in a div)');
+  const state = name => rows.find(r => r.includes(name)).match(/<button\b[^>]*>/)[0].match(/aria-pressed="(true|false)"/)?.[1];
+  assert.equal(state('Video 1'), 'true', 'the selected row is pressed');
+  assert.equal(state('Video 2'), 'false', 'the other row is not pressed');
 });
 
 test('control: Gallery filter and sort toggles expose aria-pressed', () => {

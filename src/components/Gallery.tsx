@@ -1,4 +1,5 @@
 import { PROVIDER_LABELS } from '../lib/providers';
+import { videoProviderName } from '../lib/video/videoProviderName';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -2935,7 +2936,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRecoverBrokenVideo(media); }}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/90 hover:bg-violet-500 rounded-lg text-white text-xs font-medium transition-colors shadow-lg"
-                          title="Retry recovery from EvoLink"
+                          title={`Retry recovery from ${videoProviderName(media.taskId, media.videoModel === 'minimax-h3')}`}
                         >
                           <RefreshCw className="w-3.5 h-3.5" /> Retry
                         </button>
@@ -3093,7 +3094,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <AlertCircle className="w-12 h-12 text-red-400" />
                   <span className="text-sm font-semibold">Video unavailable</span>
                   <span className="text-xs text-gray-500">
-                    {selectedMedia.error || 'The source URL is no longer accessible. EvoLink media URLs expire after a period of time and the file was not cached locally.'}
+                    {selectedMedia.error || `The source URL is no longer accessible. ${videoProviderName(selectedMedia.taskId, selectedMedia.videoModel === 'minimax-h3')} media URLs expire after a period of time and the file was not cached locally.`}
                   </span>
                   {!isReadOnly && <div className="flex items-center gap-2">
                     {selectedMedia.taskId && onRecoverVideo && (

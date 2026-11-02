@@ -2233,6 +2233,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   setIsUserMenuOpen(false);
                 }}
                 aria-label="Notifications"
+                aria-describedby={toasts.length > 0 ? 'notification-count' : undefined}
                 aria-expanded={isNotificationPanelOpen}
                 className={`relative grid h-10 w-10 place-items-center rounded-xl border transition-colors ${isNotificationPanelOpen
                     ? 'border-violet-400/60 bg-violet-600 text-white'
@@ -2244,9 +2245,12 @@ export const Gallery: React.FC<GalleryProps> = ({
               >
                 <Bell className="w-4 h-4" />
                 {toasts.length > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#0d1117] bg-violet-500 px-1 text-[10px] font-bold text-white">
-                    {toasts.length > 9 ? '9+' : toasts.length}
-                  </span>
+                  <>
+                    <span aria-hidden="true" className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#0d1117] bg-violet-500 px-1 text-[10px] font-bold text-white">
+                      {toasts.length > 9 ? '9+' : toasts.length}
+                    </span>
+                    <span id="notification-count" className="sr-only">{toasts.length} {toasts.length === 1 ? 'update' : 'updates'}</span>
+                  </>
                 )}
               </button>
 
@@ -2282,7 +2286,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                         <p className="text-xs text-gray-600 mt-1">Generation updates will appear here</p>
                       </div>
                     ) : (
-                      <div className="p-2 space-y-2">
+                      <div role="status" aria-live="polite" className="p-2 space-y-2">
                         {toasts.map((toast) => {
                           const icons: Record<string, React.ReactNode> = {
                             success: <CheckCircle className="w-4 h-4 text-green-400" />,
@@ -2326,7 +2330,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                               {toast.type !== 'loading' && onDismissToast && (
                                 <button
                                   onClick={() => onDismissToast(toast.id)}
-                                  className="shrink-0 p-1 text-gray-600 hover:text-white rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                  aria-label={`Dismiss notification: ${toast.title}`}
+                                  className="shrink-0 p-1 text-gray-600 hover:text-white rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>

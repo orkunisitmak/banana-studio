@@ -15,7 +15,7 @@ const React = req('react');
 const { renderToStaticMarkup } = req('react-dom/server');
 
 const load = async () => {
-  const out = await build({ entryPoints: [root + '/src/components/Controls.tsx'], bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
+  const out = await build({ entryPoints: ['src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
     plugins: [{ name: 'p', setup(b) {
       b.onResolve({ filter: /\/(authService|storageService)$/ }, a => ({ path: a.path, namespace: 'stub' }));
       b.onResolve({ filter: /\/ControlDropdown$/ }, () => ({ path: 'dd', namespace: 'dd' }));

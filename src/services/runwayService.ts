@@ -925,7 +925,7 @@ export const createVideoTask = async (
     referenceImages.some(image => image.isFirstFrame),
     // The extracted frame becomes one more image reference; stop before extracting if that exceeds the route limit.
     frameCount => {
-      const frames = Array.from({ length: frameCount }, () => ({}) as ReferenceImage);
+      const frames = Array.from({ length: frameCount }, () => ({ isFirstFrame: true }) as ReferenceImage);
       const frameRouteError = seedanceProviderError(selectedProvider, {
         videoModel, mode: determineMode([...referenceImages, ...frames], refVids.slice(frameCount), refAudios, videoOperation),
         duration: videoDuration, quality: videoQuality, aspectRatio: videoAspectRatio,

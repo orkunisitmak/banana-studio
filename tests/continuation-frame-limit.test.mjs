@@ -73,3 +73,13 @@ test('the same 9 images with a 16:9 Continue video need no extracted frame and r
   assert.equal(sent.length, 1);
   assert.equal(JSON.parse(sent[0].body).imageUrls.length, 9);
 });
+
+test('three Continue videos of another ratio stop before the third frame is extracted', async () => {
+  globalThis.__w = 1080; globalThis.__h = 1920; sent.length = 0; extractions.count = 0;
+  const three = { ...config, referenceImages: [], referenceVideos: ['v1', 'v2', 'v3'].map(id => ({ id, url: `https://cdn.example/${id}.mp4`, mimeType: 'video/mp4', duration: 5, isContinuation: true })) };
+  let error;
+  try { await createVideoTask(three, { id: 'g4' }); } catch (e) { error = e; }
+  assert.match(error?.message || '', /Continue turns the previous video into a first-frame image/);
+  assert.ok(extractions.count < 3, `extracted ${extractions.count} frames`);
+  assert.equal(sent.length, 0);
+});

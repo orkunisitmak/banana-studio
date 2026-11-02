@@ -134,6 +134,11 @@ const readMediaDuration = (url: string, kind: 'video' | 'audio'): Promise<number
 };
 
 const readVideoDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'video');
+// A saved Video Edit result has no length of its own (-1 = source length), so measure it like an uploaded file.
+export const galleryVideoDuration = async (media: { url: string; videoOutputDuration?: number; videoDuration?: number }): Promise<number | undefined> => {
+  const known = media.videoOutputDuration || media.videoDuration;
+  return known && known > 0 ? known : readVideoDuration(media.url);
+};
 const readAudioDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'audio');
 
 const uploadReferenceVideo = async (file: File, allowNativeWebm = false): Promise<ReferenceVideo> => {
@@ -1530,19 +1535,24 @@ export const Controls: React.FC<ControlsProps> = ({
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
                 return;
               }
-              const MAX_VIDEOS = maxReferenceVideos;
-              if ((config.referenceVideos?.length || 0) >= MAX_VIDEOS) {
-                setAttachmentError(`Maximum of ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} allowed for the selected action.`);
-                return;
-              }
-              onChange({
-                ...config,
-                referenceVideos: [
-                  ...(config.referenceVideos || []),
-                  { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration: media.videoDuration }
-                ],
-                mode: 'video',
-              });
+              const duration = await galleryVideoDuration(media);
+              // Reading the length can take seconds; merge into the latest draft and its latest limit.
+              let full = false;
+              flushSync(() => onChange(previous => {
+                if ((previous.referenceVideos?.length || 0) >= attachLimitsRef.current.videos) {
+                  full = true;
+                  return previous;
+                }
+                return {
+                  ...previous,
+                  referenceVideos: [
+                    ...(previous.referenceVideos || []),
+                    { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration }
+                  ],
+                  mode: 'video',
+                };
+              }));
+              if (full) setAttachmentError(`Maximum of ${attachLimitsRef.current.videos} videos allowed for the selected action.`);
               return;
             }
             const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));

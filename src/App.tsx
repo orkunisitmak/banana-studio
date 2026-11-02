@@ -2,7 +2,7 @@ import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Controls } from './components/Controls';
+import { Controls, galleryVideoDuration } from './components/Controls';
 import { getReferenceImageLimit } from './lib/images/imageReferences';
 import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -1654,6 +1654,7 @@ const AuthorizedWorkspace: React.FC<{
   const handleUseAsReference = async (media: GeneratedMedia) => {
     try {
       if (media.mediaType === 'video') {
+        const duration = await galleryVideoDuration(media);
         let limit: number | null = null;
         flushSync(() => setConfig(prev => {
           const MAX_VIDEOS = prev.videoModel === 'minimax-h3'
@@ -1671,7 +1672,7 @@ const AuthorizedWorkspace: React.FC<{
                 id: Math.random().toString(36).substr(2, 9),
                 url: media.url,
                 mimeType: 'video/mp4',
-                duration: media.videoOutputDuration || media.videoDuration,
+                duration,
                 previousPrompt: media.prompt,
               }
             ],

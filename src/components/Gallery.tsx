@@ -925,7 +925,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       const slash = event.key === '/' && !event.metaKey && !event.ctrlKey
         && !(event.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
       if ((!commandK && !slash) || isSearchOpen || comparisonIds || isYouTubePreviewOpen || isCreatingFolder || isHelpCenterOpen || previewRefImage) return;
-      if ((event.target as HTMLElement)?.closest('[role="dialog"]')) return;
+      if ((event.target as HTMLElement)?.closest('[role="dialog"]:not([data-gallery-detail-dialog])')) return;
       event.preventDefault();
       openSearch();
     };
@@ -1325,7 +1325,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (e.defaultPrevented || e.isComposing || target?.closest('dialog, [role="dialog"], [role="listbox"], [role="menu"]')) return;
+      if (e.defaultPrevented || e.isComposing || target?.closest('dialog, [role="dialog"]:not([data-gallery-detail-dialog]), [role="listbox"], [role="menu"]')) return;
       const isTextTarget = target?.closest('input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])');
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'b') {
         if (isTextTarget || e.repeat) return;
@@ -1348,6 +1348,30 @@ export const Gallery: React.FC<GalleryProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
+
+  const detailViewerOpen = Boolean(selectedMedia && !comparisonIds && !isSearchOpen && !isSelectionMode && !selectedMedia.isLoading);
+  const detailDialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dialog = detailDialogRef.current;
+    if (!detailViewerOpen || !dialog) return;
+    const opener = document.activeElement as HTMLElement | null;
+    if (!dialog.contains(opener)) dialog.focus({ preventScroll: true });
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || event.defaultPrevented) return;
+      const focusable = (Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')) as HTMLElement[])
+        .filter(element => element.offsetParent !== null);
+      if (!dialog.contains(document.activeElement)) { event.preventDefault(); (focusable[0] || dialog).focus(); return; }
+      if (!focusable.length) { event.preventDefault(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', trapTab);
+    return () => {
+      window.removeEventListener('keydown', trapTab);
+      if (opener?.isConnected && !dialog.contains(opener)) opener.focus({ preventScroll: true });
+    };
+  }, [detailViewerOpen]);
 
   // --- Actions ---
 
@@ -3034,8 +3058,15 @@ export const Gallery: React.FC<GalleryProps> = ({
       {/* Detail Modal */}
       {searchDialog}
 
-      {selectedMedia && !comparisonIds && !isSearchOpen && !isSelectionMode && !selectedMedia.isLoading && (
-        <div className="fixed inset-0 z-[150] flex flex-col md:flex-row bg-[#0d1117] animate-in fade-in duration-200 overflow-y-auto md:overflow-hidden">
+      {selectedMedia && detailViewerOpen && (
+        <div
+          ref={detailDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedMedia.mediaType === 'video' ? 'Video details' : 'Image details'}
+          data-gallery-detail-dialog="true"
+          tabIndex={-1}
+          className="fixed inset-0 z-[150] flex flex-col md:flex-row bg-[#0d1117] animate-in fade-in duration-200 overflow-y-auto md:overflow-hidden outline-none">
           <div
             ref={viewerRef}
             className={`flex flex-col items-center ${detailViewerLayout} p-4 md:p-10 relative bg-black/80 backdrop-blur-sm min-w-0 md:h-full group shrink-0`}

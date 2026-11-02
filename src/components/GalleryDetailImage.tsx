@@ -53,7 +53,7 @@ export const DetailImage: React.FC<{
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const blocked = Boolean((event.target as Element | null)?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"]')
-        || document.querySelector('[role="dialog"], [role="menu"], [role="listbox"], [data-control-dropdown-dismiss]'));
+        || document.querySelector('[role="dialog"]:not([data-gallery-detail-dialog]), [role="menu"], [role="listbox"], [data-control-dropdown-dismiss]'));
       const command = getImageZoomCommand(event, blocked);
       if (!command || !imageRef.current?.naturalWidth) return;
       event.preventDefault();

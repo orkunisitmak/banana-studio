@@ -73,10 +73,10 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-mono bg-gray-900 text-gray-500 px-1.5 py-0.5 rounded border border-gray-700">
-                      {getImageResolutionLabel(img)}
+                      {img.mediaType === 'video' ? img.videoQuality || img.resolution : getImageResolutionLabel(img)}
                     </span>
                     <span className="text-[10px] font-mono bg-gray-900 text-gray-500 px-1.5 py-0.5 rounded border border-gray-700">
-                      {getImageOutputRatio(img.imageOutputSize || img.imageRequestedSize) || img.aspectRatio}
+                      {img.mediaType === 'video' ? img.videoAspectRatio || img.aspectRatio : getImageOutputRatio(img.imageOutputSize || img.imageRequestedSize) || img.aspectRatio}
                     </span>
                     {img.referenceImages && img.referenceImages.length > 0 && (
                        <span className="text-[10px] font-mono bg-violet-900/30 text-violet-400 px-1.5 py-0.5 rounded border border-violet-500/20 flex items-center gap-1">

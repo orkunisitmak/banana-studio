@@ -337,3 +337,18 @@ test('the full-composer warning names image references, since removing a video a
   f.undo();
   assert.match(f.shown(), /removing another image reference/);
 });
+
+test('a refused Undo keeps an unrelated upload error and shows its own warning under it, which a later Undo removes', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.setShown('Source video upload failed.');
+  f.undo();
+  assert.match(f.shown(), /^Source video upload failed\.\nCould not undo/);
+  f.undo();
+  assert.equal(f.shown().split('\n').length, 2);
+  f.change(config => ({ ...config, referenceImages: config.referenceImages.slice(1) }));
+  f.undo();
+  assert.equal(f.shown(), 'Source video upload failed.');
+});

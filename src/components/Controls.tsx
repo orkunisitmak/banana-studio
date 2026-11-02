@@ -2743,8 +2743,8 @@ export const Controls: React.FC<ControlsProps> = ({
                                              <div className="flex-1 min-w-0">
                                                  <span className="text-sm font-medium text-gray-200 group-hover:text-white block truncate">{t.name}</span>
                                                  <div className="flex items-center gap-2 mt-0.5">
-                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
-                                                   {t.config.imageModel !== SUNBURST_MODEL && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.aspectRatio}</span>}
+                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoQuality || t.config.resolution : t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
+                                                   {(t.config.mode === 'video' || t.config.imageModel !== SUNBURST_MODEL) && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoAspectRatio || t.config.aspectRatio : t.config.aspectRatio}</span>}
                                                  </div>
                                              </div>
                                              

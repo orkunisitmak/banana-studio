@@ -1769,6 +1769,7 @@ export const updateVideoStatus = async (
 };
 
 export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
+  let dbDeletionError: unknown;
   if (supabase) {
     const userId = await bindMediaSession();
     if (!userId) throw new Error('Not authenticated');
@@ -1792,25 +1793,25 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
       if (dbError) {
         console.error(`DB delete failed for ${media.id}, queuing for retry:`, dbError.message);
         addPendingDeletion(media.id);
+        dbDeletionError = new Error(`DB delete failed for ${media.id}: ${dbError.message}`);
       } else {
         removePendingDeletion(media.id);
       }
     } catch (e) {
       console.error(`DB delete error for ${media.id}, queuing for retry:`, e);
       addPendingDeletion(media.id);
+      dbDeletionError = e;
     }
   }
 
   await deleteImagesFromIndexedDb([media.id]);
+  if (dbDeletionError) throw dbDeletionError;
 };
 
-export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
-  if (medias.length === 0) return;
+// Returns the items whose delete failed so the caller can put them back.
+export const deleteImages = async (medias: GeneratedMedia[]): Promise<GeneratedMedia[]> => {
   const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
-  const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-  if (failed.length > 0) {
-    throw new Error(`${failed.length} of ${medias.length} deletes failed: ${failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason)}`);
-  }
+  return medias.filter((_, index) => results[index].status === 'rejected');
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {

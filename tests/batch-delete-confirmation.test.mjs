@@ -37,7 +37,7 @@ test('the batch delete success toast names the deleted images and videos', async
   for (const [ids, message] of [[['v1', 'v2'], '2 videos removed.'], [['i1', 'v1'], '1 image and 1 video removed.']]) {
     const deleted = [], toasts = [], mod = { exports: {} };
     new Function('module', handler)(mod);
-    await mod.exports({ generatedMedia: media, setGeneratedMedia() {}, deleteImages: async items => deleted.push(...items.map(m => m.id)),
+    await mod.exports({ generatedMedia: media, setGeneratedMedia() {}, deleteImages: async items => { deleted.push(...items.map(m => m.id)); return []; },
       toast: { success: (_title, text) => toasts.push(text), error() {} }, deletedMediaIdsRef: { current: new Set() }, describeMediaCount })(ids);
     assert.deepEqual(deleted, ids);
     assert.deepEqual(toasts, [message]);

@@ -1307,13 +1307,24 @@ const AuthorizedWorkspace: React.FC<{
     const toDelete = generatedMedia.filter(m => mediaIds.includes(m.id));
     mediaIds.forEach(id => deletedMediaIdsRef.current.add(id));
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
+    let failed: GeneratedMedia[] = toDelete;
     try {
-      await deleteImages(toDelete);
-      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
+      failed = await deleteImages(toDelete);
     } catch (e) {
       console.error("Batch delete failed", e);
-      toast.error('Delete Failed', 'Some images could not be fully deleted. They will be retried automatically.');
     }
+    if (failed.length === 0) {
+      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
+      return;
+    }
+    // Only the items that were not deleted come back; the rest stay removed.
+    const failedIds = new Set(failed.map(m => m.id));
+    failedIds.forEach(id => deletedMediaIdsRef.current.delete(id));
+    // Put them back where they were in the list (new items made meanwhile sort first).
+    const position = new Map<string, number>(generatedMedia.map((m, index) => [m.id, index]));
+    setGeneratedMedia(prev => [...prev, ...failed.filter(m => !prev.some(p => p.id === m.id))]
+      .sort((a, b) => (position.get(a.id) ?? -1) - (position.get(b.id) ?? -1)));
+    toast.error('Delete Failed', `${describeMediaCount(failedIds, failed)} could not be deleted and ${failed.length === 1 ? 'is' : 'are'} back in your library. Try again.`);
   };
 
   const handleToggleFavorite = async (media: GeneratedMedia) => {

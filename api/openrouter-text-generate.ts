@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const model = body.model as string;
   const upstreamModel = OPENROUTER_MODELS[model];
   const effort = body.reasoningEffort ?? DEFAULT_OPENROUTER_REASONING;
-  if (!isOpenRouterReasoningEffort(effort)) return res.status(400).json({ error: 'Unsupported Opus thinking effort.' });
+  if (!isOpenRouterReasoningEffort(effort)) return res.status(400).json({ error: 'Unsupported thinking effort.' });
   if (!ACTIONS.includes(usageContext?.action) || typeof usageContext?.prompt !== 'string') return res.status(400).json({ error: 'Invalid text feature.' });
   if (!Array.isArray(parts) || !parts.length || parts.length > 256 || !parts.some(part => typeof part?.text === 'string' && part.text.trim())) {
     return res.status(400).json({ error: 'Provide text and optional image references.' });

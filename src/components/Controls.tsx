@@ -2766,7 +2766,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                                     onSelectTemplate(t);
                                                     setIsTemplateMenuOpen(false);
                                                 }}
-                                                className="flex flex-1 min-w-0 items-center gap-3 p-3 text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
+                                                className="flex flex-1 min-w-0 items-center gap-3 p-3 text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                              >
                                              {/* Template Icon */}
                                              <span className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/20 flex items-center justify-center shrink-0">

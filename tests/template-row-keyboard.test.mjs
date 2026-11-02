@@ -65,12 +65,13 @@ test('control: the open Templates menu lists the saved template with Update and 
 test('a saved template can be applied from the keyboard', () => {
   const row = enclosing('>Product hero<');
   const operable = row.filter(tag => /^<button\b/.test(tag) || (/role="button"/.test(tag) && /tabindex="0"/i.test(tag)));
+  assert.ok(operable.every(tag => /focus-visible:ring-violet-400(?![\/\w])/.test(tag) || !/^<button\b/.test(tag)), 'the focus ring must be opaque so it stays visible on the dark menu');
   assert.ok(operable.length, `the template name sits only in non-focusable elements, so Tab never reaches it and Enter cannot apply it:\n${row.slice(-3).join('\n')}`);
 });
 
 test('the template Update and Delete buttons become visible when they get keyboard focus', () => {
   const actions = enclosing('title="Update with current settings"').at(-1);
   assert.match(actions, /opacity-0/);
-  assert.match(actions, /focus-within:opacity-100|focus-visible:opacity-100/,
+  assert.match(actions, /\bgroup-focus-within:opacity-100\b/,
     `Update / Delete wrapper is "${actions.match(/class="([^"]*)"/)[1]}": transparent until mouse hover, also when a button inside it has focus`);
 });

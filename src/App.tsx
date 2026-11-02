@@ -1292,6 +1292,14 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  // Put items whose delete never ran back where they were in the list (new items made meanwhile sort first).
+  const restoreDeletedMedia = (items: GeneratedMedia[]) => {
+    items.forEach(item => deletedMediaIdsRef.current.delete(item.id));
+    const position = new Map<string, number>(generatedMedia.map((m, index) => [m.id, index]));
+    setGeneratedMedia(prev => [...prev, ...items.filter(item => !prev.some(p => p.id === item.id))]
+      .sort((a, b) => (position.get(a.id) ?? -1) - (position.get(b.id) ?? -1)));
+  };
+
   const handleDelete = async (media: GeneratedMedia) => {
     deletedMediaIdsRef.current.add(media.id);
     setGeneratedMedia(prev => prev.filter(m => m.id !== media.id));
@@ -1299,7 +1307,12 @@ const AuthorizedWorkspace: React.FC<{
       await deleteImage(media);
     } catch (e) {
       console.error("Delete failed", e);
-      toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      if (e instanceof workspaceStorage.DeleteNotQueuedError) {
+        restoreDeletedMedia([media]);
+        toast.error('Delete Failed', 'The image could not be deleted and is back in your library. Try again.');
+      } else {
+        toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      }
     }
   };
 
@@ -1307,24 +1320,24 @@ const AuthorizedWorkspace: React.FC<{
     const toDelete = generatedMedia.filter(m => mediaIds.includes(m.id));
     mediaIds.forEach(id => deletedMediaIdsRef.current.add(id));
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
-    let failed: GeneratedMedia[] = toDelete;
+    let notQueued: GeneratedMedia[] = [], queued: GeneratedMedia[] = [];
     try {
-      failed = await deleteImages(toDelete);
+      ({ notQueued, queued } = await deleteImages(toDelete));
     } catch (e) {
+      // The session changed; we cannot tell what ran, so keep everything visible.
       console.error("Batch delete failed", e);
+      notQueued = toDelete;
     }
-    if (failed.length === 0) {
+    if (notQueued.length === 0 && queued.length === 0) {
       toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
       return;
     }
-    // Only the items that were not deleted come back; the rest stay removed.
-    const failedIds = new Set(failed.map(m => m.id));
-    failedIds.forEach(id => deletedMediaIdsRef.current.delete(id));
-    // Put them back where they were in the list (new items made meanwhile sort first).
-    const position = new Map<string, number>(generatedMedia.map((m, index) => [m.id, index]));
-    setGeneratedMedia(prev => [...prev, ...failed.filter(m => !prev.some(p => p.id === m.id))]
-      .sort((a, b) => (position.get(a.id) ?? -1) - (position.get(b.id) ?? -1)));
-    toast.error('Delete Failed', `${describeMediaCount(failedIds, failed)} could not be deleted and ${failed.length === 1 ? 'is' : 'are'} back in your library. Try again.`);
+    if (notQueued.length > 0) restoreDeletedMedia(notQueued);
+    const messages = [
+      notQueued.length > 0 && `${describeMediaCount(notQueued.map(m => m.id), notQueued)} could not be deleted and ${notQueued.length === 1 ? 'is' : 'are'} back in your library. Try again.`,
+      queued.length > 0 && `${describeMediaCount(queued.map(m => m.id), queued)} could not be fully deleted. ${queued.length === 1 ? 'It' : 'They'} will be retried automatically.`,
+    ].filter(Boolean);
+    toast.error('Delete Failed', messages.join(' '));
   };
 
   const handleToggleFavorite = async (media: GeneratedMedia) => {

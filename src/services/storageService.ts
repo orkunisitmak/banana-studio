@@ -1768,11 +1768,14 @@ export const updateVideoStatus = async (
   }
 };
 
+/** The delete never ran and was not queued, so nothing will retry it. */
+export class DeleteNotQueuedError extends Error {}
+
 export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
   let dbDeletionError: unknown;
   if (supabase) {
     const userId = await bindMediaSession();
-    if (!userId) throw new Error('Not authenticated');
+    if (!userId) throw new DeleteNotQueuedError('Not authenticated');
     // Delete storage files (best-effort - files may already be gone)
     try {
       const storagePath = media.storagePath || `${userId}/${getOriginalStoragePath(media.id)}`;
@@ -1808,10 +1811,16 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
   if (dbDeletionError) throw dbDeletionError;
 };
 
-// Returns the items whose delete failed so the caller can put them back.
-export const deleteImages = async (medias: GeneratedMedia[]): Promise<GeneratedMedia[]> => {
+// notQueued: the delete never ran, so nothing will retry it. queued: the database
+// delete failed and the id is queued for retry on the next load.
+export const deleteImages = async (medias: GeneratedMedia[]): Promise<{ notQueued: GeneratedMedia[]; queued: GeneratedMedia[] }> => {
   const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
-  return medias.filter((_, index) => results[index].status === 'rejected');
+  const rejected = (index: number) => results[index].status === 'rejected';
+  const notQueued = (index: number) => (results[index] as PromiseRejectedResult).reason instanceof DeleteNotQueuedError;
+  return {
+    notQueued: medias.filter((_, index) => rejected(index) && notQueued(index)),
+    queued: medias.filter((_, index) => rejected(index) && !notQueued(index)),
+  };
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {

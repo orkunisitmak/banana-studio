@@ -9,12 +9,12 @@ const record=value=>fs.appendFileSync(path.join(root,'provider-calls.jsonl'),JSO
 const json=value=>Response.json(value,{headers:{'x-request-id':'synthetic-request'}});
 globalThis.fetch=async(url,options={})=>{
  const target=String(url),input=options.body?JSON.parse(options.body):{},method=options.method||'GET';
- const upstream=new URL(target);if(!['api.openai.com','fal.run','openrouter.ai','generativelanguage.googleapis.com','queue.fal.run'].includes(upstream.hostname))throw new Error('Unexpected network request blocked by test');
+ const upstream=new URL(target);if(!['api.openai.com','fal.run','openrouter.ai','generativelanguage.googleapis.com','queue.fal.run','router.inference.ai.exchange'].includes(upstream.hostname))throw new Error('Unexpected network request blocked by test');
  if(target.includes('/chat/completions')){
   record({kind:'text',input,hasCookie:!!options.headers.Cookie});
   const analysis=input.response_format?.json_schema?.name==='youtube_video_analysis';
   const text=analysis?JSON.stringify({videoAvailable:true,brief:'Synthetic episode',premise:'Synthetic promise',evidence:[{timestamp:'00:03',fact:'Synthetic observation',relevance:'premise'}],limitation:''}):input.response_format?JSON.stringify({ideas:{idea_1:'First idea',idea_2:'Second idea',idea_3:'Third idea',idea_4:'Fourth idea',idea_5:'Fifth idea'}}):'Enhanced synthetic prompt.';
-  return json({id:'synthetic-text',choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}],usage:{cost:0.0123}});
+  return json({id:'synthetic-text',choices:[{finish_reason:'stop',message:{role:'assistant',content:text}}],...(upstream.hostname==='router.inference.ai.exchange'?{usage:{prompt_tokens:10,completion_tokens:20},exchange:{charge:{total_usd:0.0123}}}:{usage:{cost:0.0123}})});
  }
  if(target.includes('/api/v1/videos')||upstream.hostname==='queue.fal.run'){
   record({kind:'video',target:upstream.origin+upstream.pathname,method,input,hasCookie:!!options.headers.Cookie});

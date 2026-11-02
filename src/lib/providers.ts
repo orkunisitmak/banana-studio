@@ -1,14 +1,14 @@
 /** Application routes, verified against the providers' catalogues on 2026-10-20.
  * Auto selects an available route BEFORE submission, never after a paid call. */
-export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'codex';
+export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'liquid' | 'codex';
 /** Codex uses the desktop user's own ChatGPT sign-in instead of an API key. */
 export type KeyedProvider = Exclude<AIProvider, 'codex'>;
 export type ProviderChoice = AIProvider | 'auto';
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)',
+  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', liquid: 'Liquid Inference', codex: 'ChatGPT plan (Codex)',
 };
 export const PROVIDER_KEYS: Record<KeyedProvider, string> = {
-  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
+  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY', liquid: 'LIQUID_API_KEY',
 };
 export const providerSetup = (provider: AIProvider): string => provider === 'codex'
   ? 'install the Codex CLI and run `codex login` with your ChatGPT account (desktop app only)'
@@ -17,9 +17,9 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'codex'],
   'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
   'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
-  'anthropic/claude-opus-5.5': ['openrouter'],
+  'anthropic/claude-opus-5.5': ['openrouter', 'liquid'],
   'gpt-6.1-sol': ['openai', 'openrouter'],
-  'gemini-3.8-flash': ['gemini', 'openrouter'],
+  'gemini-3.8-flash': ['gemini', 'openrouter', 'liquid'],
   'seedance-2.0': ['evolink', 'fal', 'openrouter'],
   'seedance-2.5': ['evolink', 'fal', 'openrouter'],
   'minimax-h3': ['fal'],
@@ -45,4 +45,11 @@ export const OPENROUTER_MODELS: Record<string, string> = {
   'gpt-6.1-sol': 'openai/gpt-6.1-sol', 'gemini-3.8-flash': 'google/gemini-3.8-flash',
   'anthropic/claude-opus-5.5': 'anthropic/claude-opus-5.5',
   'seedance-2.0': 'bytedance/seedance-2.0', 'seedance-2.5': 'bytedance/seedance-2.5',
+};
+
+/** Liquid Inference (https://inference.ai.exchange) text routes, checked against
+ * GET https://router.inference.ai.exchange/v1/models on 2026-11-02. */
+export const LIQUID_MODELS: Record<string, string> = {
+  'anthropic/claude-opus-5.5': 'claude-opus-5-5',
+  'gemini-3.8-flash': 'gemini-3.8-flash',
 };

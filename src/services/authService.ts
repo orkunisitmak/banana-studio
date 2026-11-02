@@ -6,6 +6,7 @@ import { buildAdminUsageSummary } from '../lib/admin/adminUsage';
 import { AdminUsageRange, validateAdminUsageRange } from '../lib/admin/adminUsageRange';
 import { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from '../lib/prompts/textModels';
 import { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from '../lib/prompts/openrouterText';
+import { calculateLiquidTextCost } from '../lib/prompts/liquidText';
 import { UserProfile, AdminUserSummary, Resolution, AspectRatio, VideoModelId, VideoOperation, VideoQuality, estimateImageCost, estimateVideoCost } from '../types';
 
 const runtime = getWorkspaceConfig();
@@ -187,6 +188,7 @@ type UsageMetadataLike = {
   cachedContentTokenCount?: number;
   openaiUsage?: unknown;
   openrouterUsage?: unknown;
+  liquidUsage?: unknown;
   usageLogged?: boolean;
   usageLoggingPending?: boolean;
   promptTokensDetails?: TokenDetail[];
@@ -243,6 +245,7 @@ const estimateUsageCost = (
     return perImage * normalizedImageCount;
   }
 
+  if (metadata?.liquidUsage) return calculateLiquidTextCost(metadata.liquidUsage);
   if (metadata?.openrouterUsage) return calculateOpenRouterTextCost(metadata.openrouterUsage, model);
   if (model === OPENAI_TEXT_MODEL) return calculateOpenAITextCost(metadata?.openaiUsage);
   if (model === OPENROUTER_TEXT_MODEL) return calculateOpenRouterTextCost(metadata?.openrouterUsage);

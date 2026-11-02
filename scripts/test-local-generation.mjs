@@ -47,7 +47,7 @@ try {
  const combinations=[['openai','OPENAI_API_KEY','gpt-image-2.5-sunburst'],['openrouter','OPENROUTER_API_KEY','gpt-image-2.5-sunburst'],['openrouter','OPENROUTER_API_KEY','gemini-3-pro-image-preview'],['openrouter','OPENROUTER_API_KEY','gemini-nano-banana-2.1'],['fal','FAL_KEY','gpt-image-2.5-sunburst'],['fal','FAL_KEY','gemini-3-pro-image-preview'],['fal','FAL_KEY','gemini-nano-banana-2.1'],['gemini','GEMINI_API_KEY','gemini-3-pro-image-preview'],['gemini','GEMINI_API_KEY','gemini-nano-banana-2.1']];
  const setKeys=async keys=>{
   child.stdin.write(JSON.stringify({action:'keys',keys})+'\n');
-  for(let i=0;i<100;i++){const status=await(await fetch(origin+'/api/gemini-status',{headers:{Cookie:cookie}})).json();if(Object.entries(status.providers).every(([provider,enabled])=>enabled===Object.hasOwn(keys,{openai:'OPENAI_API_KEY',openrouter:'OPENROUTER_API_KEY',fal:'FAL_KEY',gemini:'GEMINI_API_KEY',evolink:'EVOLINK_API_KEY'}[provider])))return;await new Promise(resolve=>setTimeout(resolve,10));}
+  for(let i=0;i<100;i++){const status=await(await fetch(origin+'/api/gemini-status',{headers:{Cookie:cookie}})).json();if(Object.entries(status.providers).every(([provider,enabled])=>enabled===Object.hasOwn(keys,{openai:'OPENAI_API_KEY',openrouter:'OPENROUTER_API_KEY',fal:'FAL_KEY',gemini:'GEMINI_API_KEY',evolink:'EVOLINK_API_KEY',liquid:'LIQUID_API_KEY'}[provider])))return;await new Promise(resolve=>setTimeout(resolve,10));}
   throw new Error('Provider key update did not become ready.');
  };
  const readRow=async id=>{
@@ -78,6 +78,12 @@ try {
   assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(JSON.parse(result.body.text).length,5);
  }
  const analysis=await post('/api/openrouter-text-generate',{model:'gemini-3.8-flash',reasoningEffort:'low',contents:{parts:[{fileData:{fileUri:'https://www.youtube.com/watch?v=abcdefghijk'}},{text:'Analyze the actual supplied video.'}]},usageContext:{action:'enhance',prompt:'[youtube-video-brief]'},outputFormat:'youtube_analysis'});assert.equal(analysis.status,200,JSON.stringify(analysis.body));
+ await setKeys({LIQUID_API_KEY:'integration-test-only-value'});
+ for(const model of ['anthropic/claude-opus-5.5','gemini-3.8-flash']){
+  const result=await post('/api/liquid-text-generate',{model,reasoningEffort:'medium',contents:{parts:[{text:'Write five distinct ideas.'}]},usageContext:{action:'brainstorm',prompt:'Synthetic brainstorm'},brainstormCount:5});
+  assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.provider,'liquid');assert.equal(JSON.parse(result.body.text).length,5);
+ }
+ const liquidFootage=await post('/api/liquid-text-generate',{model:'gemini-3.8-flash',reasoningEffort:'low',contents:{parts:[{fileData:{fileUri:'https://www.youtube.com/watch?v=abcdefghijk'}},{text:'Analyze the actual supplied video.'}]},usageContext:{action:'enhance',prompt:'[youtube-video-brief]'},outputFormat:'youtube_analysis'});assert.equal(liquidFootage.status,400);
  for(const [provider,key] of [['fal','FAL_KEY'],['openrouter','OPENROUTER_API_KEY']]){
   await setKeys({[key]:'integration-test-only-value'});
   const result=await post('/api/seedance-video',{videoModel:'seedance-2.5',mode:'image_to_video',prompt:'A transition between first and last frames.',duration:8,quality:'720p',aspectRatio:provider==='openrouter'?'16:9':'adaptive',imageUrls:['https://example.invalid/first.png','https://example.invalid/last.png']});assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.provider,provider);
@@ -85,7 +91,8 @@ try {
   const foreign=await fetch(origin+'/api/seedance-video?taskId='+encodeURIComponent(result.body.taskId.replace('synthetic-video','unowned-task')),{headers:{Cookie:cookie}});assert.equal(foreign.status,404);
  }
  const calls=fs.readFileSync(path.join(root,'provider-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse),imageCalls=calls.filter(call=>call.kind==='image');assert.equal(imageCalls.length,19);assert.ok(imageCalls.filter(call=>!String(call.input.prompt).includes('[simulate-uncertain]')).every(call=>call.hasDataURL));assert.ok(calls.every(call=>!call.hasCookie));
- const textCalls=calls.filter(call=>call.kind==='text');assert.deepEqual(textCalls.slice(0,3).map(call=>call.input.model),['anthropic/claude-opus-5.5','openai/gpt-6.1-sol','google/gemini-3.8-flash']);assert.deepEqual(textCalls[3].input.provider.only,['google-ai-studio']);assert.ok(textCalls[3].input.messages[1].content.some(part=>part.type==='video_url'));assert.ok(textCalls.every(call=>call.input.provider.allow_fallbacks===false));
+ const textCalls=calls.filter(call=>call.kind==='text');assert.deepEqual(textCalls.slice(0,3).map(call=>call.input.model),['anthropic/claude-opus-5.5','openai/gpt-6.1-sol','google/gemini-3.8-flash']);assert.deepEqual(textCalls[3].input.provider.only,['google-ai-studio']);assert.ok(textCalls[3].input.messages[1].content.some(part=>part.type==='video_url'));assert.ok(textCalls.slice(0,4).every(call=>call.input.provider.allow_fallbacks===false));
+ assert.deepEqual(textCalls.slice(4).map(call=>call.input.model),['claude-opus-5-5','gemini-3.8-flash']);assert.ok(textCalls.slice(4).every(call=>call.input.provider===undefined&&call.input.reasoning.exclude===true));
  assert.ok(!calls.some(call=>call.target?.includes('evolink')));console.log('Single-key routes, exact five-idea batches, footage input, task ownership and no paid fallback passed.');
  console.log('Packaged app → local queue → mock provider → local gallery flow passed. No paid provider was contacted.');
 } catch(error){console.error(error.message);process.exitCode=1;}

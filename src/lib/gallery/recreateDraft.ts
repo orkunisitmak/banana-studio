@@ -21,8 +21,10 @@ export const createRecreateConfig = (media: GeneratedMedia, imageModel: Generati
     promptPreparation: media.promptPreparation,
     youtubeSource: media.youtubeSource,
     count: 1,
-    aspectRatio: media.aspectRatio,
-    resolution: media.resolution,
+    // A saved video stores its quality and ratio in these columns; the image
+    // controls keep their defaults so switching to Image shows valid options.
+    aspectRatio: mode === 'video' ? '1:1' : media.aspectRatio,
+    resolution: mode === 'video' ? '1K' : media.resolution,
     imageModel,
     openaiImageOptions: media.openaiImageOptions,
     imagePromptCategory: media.imagePromptCategory,

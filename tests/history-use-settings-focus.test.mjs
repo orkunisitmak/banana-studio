@@ -33,4 +33,6 @@ test('the History row renders a Use Settings button', () => {
 test('Use Settings shows when the row has keyboard focus, not only on hover', () => {
   assert.match(tag, /\bopacity-0\b/);
   assert.match(tag, /group-focus-within:opacity-100/);
+  const row = html.slice(0, html.indexOf(tag)).match(/<[a-z]+\b[^>]*\bclass="[^"]*"[^>]*>/g).filter(t => /\bgroup\b/.test(t.match(/class="([^"]*)"/)[1]));
+  assert.ok(row.length, 'an ancestor of the button carries the group class, so the focus selector can match');
 });

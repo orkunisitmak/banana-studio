@@ -64,6 +64,8 @@ test('dropping a gallery image onto the prompt box renews an expired signed link
   await bar.onDrop(drop); await settle();
   assert.deepEqual(fetched, [fresh], 'fetch must use the renewed link');
   assert.equal(updates.length, 1, 'reference added');
+  assert.equal(updates[0].referenceImages?.length, 1, 'reference added to config');
+  assert.equal(updates[0].referenceImages?.[0]?.data, 'data:image/png;base64,eA==', 'reference data');
 });
 test('dropping a gallery image onto the saved-references button renews an expired signed link first', async () => {
   const btn = handlers.find(p => typeof p.className === 'string' && p.className.includes('w-12 h-12'));

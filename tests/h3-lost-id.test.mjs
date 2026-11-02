@@ -8,7 +8,7 @@ const stubs = {
   providerTasks: `
     export const prepareTaskRegistry=async()=>({});
     export const registerProviderTask=async()=>{
-      if (globalThis.__registerFail) throw new Error('registry down');
+      if (globalThis.__registerFail) throw new Error('Generation was submitted but its private task could not be recorded (Task: h3-1). Contact an administrator before retrying.');
     };
     export const requireProviderTask=async()=>true;
   `,
@@ -64,7 +64,8 @@ const jsonResponse = (status, body) => async () => ({
 test('a registry failure after H3 accepts keeps the server message and returns no task id', async () => {
   const res = await submit(jsonResponse(200, { request_id: 'h3-1' }), { registerFail: true });
   assert.equal(res.statusCode, 500);
-  assert.equal(res.body.error, 'registry down');
+  assert.match(res.body.error, /\(Task: h3-1\)/);
+  assert.match(res.body.error, /Contact an administrator/);
   assert.equal(res.body.taskId, undefined);
 });
 

@@ -35,14 +35,15 @@ const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
   globalThis.__table = { rows: [...rows], attempts: 0, failures, throws, ghost };
   const saved = { fetch: globalThis.fetch, key: process.env.FAL_KEY };
   process.env.FAL_KEY = 'k';
-  globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? { request_id: 'h3-r1' } : { status: 'IN_QUEUE' });
+  let posts = 0;
+  globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? (posts++, { request_id: 'h3-r1' }) : { status: 'IN_QUEUE' });
   try {
     const submit = response();
     await post({ method: 'POST', headers: {}, body: { prompt: 'a cat', mode: 'text_to_video' } }, submit);
     const id = submit.body?.taskId;
     const status = response();
     if (id) await poll({ method: 'GET', headers: {}, query: { requestId: id } }, status);
-    return { submit, status, attempts: globalThis.__table.attempts };
+    return { submit, status, attempts: globalThis.__table.attempts, posts };
   } finally { globalThis.fetch = saved.fetch; if (saved.key === undefined) delete process.env.FAL_KEY; else process.env.FAL_KEY = saved.key; }
 };
 
@@ -61,14 +62,17 @@ test('a registry insert that throws is retried the same way', async () => {
 });
 
 test('a registry that never recovers still answers with the error after three tries', async () => {
-  const { submit, attempts } = await run({ failures: 99 });
+  const { submit, attempts, posts } = await run({ failures: 99 });
   assert.equal(submit.statusCode, 500);
   assert.match(submit.body.error, /could not be recorded/);
+  assert.match(submit.body.error, /h3-r1/);
   assert.equal(attempts, 3);
+  assert.equal(posts, 1);
 });
 
 test('an insert that saved the row before timing out counts as registered when the retry meets a duplicate', async () => {
-  const { submit, status, attempts } = await run({ failures: 0, ghost: true });
+  const { submit, status, attempts, posts } = await run({ failures: 0, ghost: true });
+  assert.equal(posts, 1);
   assert.equal(submit.statusCode, 200);
   assert.equal(attempts, 2);
   assert.equal(status.statusCode, 200);

@@ -353,14 +353,22 @@ test('a refused Undo keeps an unrelated upload error and shows its own warning u
   assert.equal(f.shown(), 'Source video upload failed.');
 });
 
-test('an attachment error added after a refused Undo goes on its own line, so a later Undo can remove only its warning', () => {
-  const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
-  assert.match(src, /const addAttachmentError = [^\n]*`\$\{previous\}\\n\$\{message\}`/);
-});
-
 test('a file name with a line break cannot split an attachment error into fake lines', () => {
-  const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
-  assert.match(src, /const addAttachmentError = \(rawMessage: string\) => \{ const message = rawMessage\.replace\(\/\[\\r\\n\]\+\/g, ' '\)/);
-  const clean = raw => raw.replace(/[\r\n]+/g, ' ');
-  assert.equal(clean('Could not read clip.\r\nLimit reached: 3 videos max.'), 'Could not read clip. Limit reached: 3 videos max.');
+  // Run the real addAttachmentError from Controls with a state setter, as an upload failure for a named file does.
+  const from = source.indexOf('  const addAttachmentError =');
+  const addSource = source.slice(from, source.indexOf('
+', from));
+  const factory = new Function('setAttachmentError', transformSync(addSource.replace('const addAttachmentError', 'var addAttachmentError') + '\nreturn addAttachmentError;', { loader: 'ts', format: 'cjs' }).code.replace(/^"use strict";/, ''));
+  let shown = null;
+  const add = factory(update => { shown = update(shown); });
+  add('Could not read clip.\r\nLimit reached: 3 videos max.');
+  assert.equal(shown, 'Could not read clip. Limit reached: 3 videos max.');
+  assert.equal(shown.includes('\n'), false);
+  add('Limit reached: 3 videos max.');
+  assert.equal(shown, 'Could not read clip. Limit reached: 3 videos max.\nLimit reached: 3 videos max.');
+  add('Limit reached: 3 videos max.');
+  assert.equal(shown.split('\n').length, 2);
+  shown = null;
+  add('Normal-name.mp4 is too large.');
+  assert.equal(shown, 'Normal-name.mp4 is too large.');
 });

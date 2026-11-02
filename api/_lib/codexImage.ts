@@ -23,13 +23,34 @@ const candidateDirectories = () => {
   ].filter(Boolean);
 };
 
+const isFile = (file: string) => { try { return fs.statSync(file).isFile(); } catch { return false; } };
+
+/** `npm install -g @openai/codex` on Windows puts only codex.cmd/.ps1 shims and a Node
+ * launcher in the npm directory; the native codex.exe is inside the platform package. */
+export const npmCodexExecutable = (shimDirectory: string, arch: string = process.arch): string | null => {
+  const [triple, platformPackage] = arch === 'arm64'
+    ? ['aarch64-pc-windows-msvc', 'codex-win32-arm64'] : ['x86_64-pc-windows-msvc', 'codex-win32-x64'];
+  const scope = path.join(shimDirectory, 'node_modules', '@openai');
+  return [path.join(scope, 'codex', 'node_modules', '@openai', platformPackage), path.join(scope, platformPackage), path.join(scope, 'codex')]
+    .map(root => path.join(root, 'vendor', triple, 'bin', 'codex.exe')).find(isFile) ?? null;
+};
+
 export const findCodexBinary = (): string | null => {
   const configured = process.env.CODEX_BIN?.trim();
-  // Windows .cmd/.bat shims cannot be started without a shell, and the prompt must never pass through one.
-  if (configured) return path.isAbsolute(configured) && !/\.(cmd|bat)$/i.test(configured) && fs.existsSync(configured) ? configured : null;
+  if (configured) {
+    if (!path.isAbsolute(configured)) return null;
+    // Windows .cmd/.bat shims cannot be started without a shell, and the prompt must never pass through one.
+    // Start the executable the shim would have launched instead.
+    if (/\.(cmd|bat|ps1)$/i.test(configured)) return process.platform === 'win32' ? npmCodexExecutable(path.dirname(configured)) : null;
+    return fs.existsSync(configured) ? configured : null;
+  }
   for (const directory of candidateDirectories()) {
     const file = path.join(directory, exe);
-    try { if (fs.statSync(file).isFile()) return file; } catch { /* Not installed here. */ }
+    if (isFile(file)) return file;
+    if (process.platform === 'win32' && isFile(path.join(directory, 'codex.cmd'))) {
+      const native = npmCodexExecutable(directory);
+      if (native) return native;
+    }
   }
   return null;
 };

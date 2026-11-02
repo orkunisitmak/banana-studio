@@ -24,8 +24,9 @@ internal sealed class WorkspaceProcess : IDisposable
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8
         };
         // Never inherit provider keys, NODE_OPTIONS, proxies or other shell configuration.
+        // PATH and the CODEX_* locations only help the workspace find the user's own Codex CLI and its sign-in.
         start.Environment.Clear();
-        foreach (var key in new[] { "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA" })
+        foreach (var key in new[] { "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PATH", "CODEX_HOME", "CODEX_BIN" })
             if (Environment.GetEnvironmentVariable(key) is { } value) start.Environment[key] = value;
         start.ArgumentList.Add(Path.Combine(root, "workspace", "server.mjs"));
         process = new Process { StartInfo = start, EnableRaisingEvents = true };

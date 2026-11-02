@@ -17,6 +17,7 @@ const compiled = await build({ stdin: { contents: `
     const setConfig = update => { config = update(config); };
     const flushSync = run => run();
     const toast = { success() {}, warning: (...args) => warnings.push(args), error: (...args) => errors.push(args) };
+    const workspaceStorage = { refreshMediaAccessUrl: async url => url };
     const fetch = async () => new Response('synthetic PNG bytes', { headers: { 'content-type': 'image/png' } });
     class FileReader { readAsDataURL() { this.result = 'data:image/png;base64,new-photo'; this.onloadend(); } }
     ${app.slice(start, app.indexOf('  // --- Template Handlers ---', start))}

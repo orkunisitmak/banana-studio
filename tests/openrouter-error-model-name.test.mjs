@@ -34,6 +34,7 @@ for (const model of ['gpt-6.1-sol', 'gemini-3.8-flash']) {
       assert.equal(res.code, status);
       assert.ok(res.body?.error, 'an error is returned');
       assert.doesNotMatch(res.body.error, /Opus/, res.body.error);
+      assert.match(res.body.error, /Metin modeli/, res.body.error);
     });
   }
 }

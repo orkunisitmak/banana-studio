@@ -31,9 +31,9 @@ const openBrainstorm = {
     b.onLoad({ filter: /components[\\/]Controls\.tsx$/ }, async a => {
       const fs = await import('node:fs');
       const src = fs.readFileSync(a.path, 'utf8');
-      const anchor = 'useState(false);\n  const [brainstormIdeaCount';
-      assert.ok(src.includes(anchor), 'anchor missing');
-      return { contents: src.replace(anchor, 'useState(true);\n  const [brainstormIdeaCount'), loader: 'tsx' };
+      const anchor = /useState\(false\);(\r?\n\s*const \[brainstormIdeaCount)/;
+      assert.ok(anchor.test(src), 'anchor missing');
+      return { contents: src.replace(anchor, 'useState(true);$1'), loader: 'tsx' };
     });
   },
 };

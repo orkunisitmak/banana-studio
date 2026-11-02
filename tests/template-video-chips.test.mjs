@@ -17,7 +17,7 @@ const { renderToStaticMarkup } = req('react-dom/server');
 test('video template row shows the video quality and ratio, not the image leftovers', async () => {
   const out = await build({ entryPoints: ['src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
     plugins: [{ name: 'p', setup(b) {
-      b.onLoad({ filter: /components\/Controls\.tsx$/ }, a => {
+      b.onLoad({ filter: /components[\\/]Controls\.tsx$/ }, a => {
         const src = fs.readFileSync(a.path, 'utf8').replace('useState(false);\n', 'useState(false);\n').replace(/(\[isTemplateMenuOpen, setIsTemplateMenuOpen\] = useState\()false\)/, '$1true)');
         return { contents: src, loader: 'tsx', resolveDir: root + '/src/components' };
       });

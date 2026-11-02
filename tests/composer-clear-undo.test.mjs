@@ -301,3 +301,19 @@ test('Undo of a removed image refuses when a later attachment filled the image l
   assert.equal(f.state().referenceImages.length, limit);
   assert.equal(f.entries().length, 0);
 });
+
+test('a refused Undo leaves the older entry under a new removal, and the next Undo restores the newer one and clears the warning', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.undo();
+  assert.match(f.errors.at(-1), /restores that reference first/);
+  f.remove('image-1');
+  assert.equal(f.entries().length, 2);
+  f.undo();
+  assert.ok(f.state().referenceImages.some(ref => ref.id === 'image-1'));
+  assert.ok(!f.state().referenceImages.some(ref => ref.id === 'image-0'));
+  assert.equal(f.entries().length, 1);
+  assert.equal(f.errors.at(-1), null);
+});

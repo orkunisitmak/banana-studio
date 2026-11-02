@@ -10,6 +10,7 @@ import { estimateImageProgress } from '../lib/images/imageProgress';
 import { createReferenceUploader } from '../lib/references/referenceUploadCache';
 import type { Session } from '@supabase/supabase-js';
 import { validateImageGenerationReferences } from '../lib/images/imagePrompting';
+import { imageReferenceError } from '../lib/images/imageReferences';
 import { imageGenerationQueue, type ImageSubmissionStage } from '../lib/images/imageGenerationQueue';
 
 export type ImageGenerationContext = { id: string; folderId?: string | null; onStage?: (stage: ImageSubmissionStage, waitReason?: 'rate'|'quota') => void };
@@ -121,7 +122,8 @@ export const generateOpenAIImage = async (
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }));
   if (optionError) throw new Error(optionError);
   const refs = getSunburstReferences(config.referenceImages || []);
-  if (refs.length > (config.imageModel === SUNBURST_MODEL ? 16 : 14) || refs.some(ref => !ref.data)) throw new Error('Attach up to 16 valid reference images.');
+  const referenceError = imageReferenceError(config.imageModel, refs);
+  if (referenceError) throw new Error(referenceError);
   const initialSession = await getImageSession();
   const owner = initialSession.user?.id;
   const id = context?.id || crypto.randomUUID();

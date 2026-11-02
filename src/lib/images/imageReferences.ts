@@ -12,6 +12,14 @@ export const summarizeImageReferences = (references: ReferenceImage[]) => ({
   total: references.length,
 });
 
+/** Reference photos one image request can carry: GPT Image 2.5 takes 16, Nano Banana 14. */
+export const imageReferenceLimit = (imageModel: string): number => imageModel === SUNBURST_MODEL ? 16 : 14;
+
+/** The error for an image request whose references exceed the model's limit or lack data, else null. */
+export const imageReferenceError = (imageModel: string, references: { data?: string }[]): string | null =>
+  references.length > imageReferenceLimit(imageModel) || references.some(ref => !ref.data)
+    ? `Attach up to ${imageReferenceLimit(imageModel)} valid reference images.` : null;
+
 /** Keep every draft entry point within the active model/action's image capacity. */
 export const getReferenceImageLimit = (config: GenerationConfig): number => {
   if (config.mode === 'video' && config.videoModel === 'minimax-h3') {
@@ -28,5 +36,5 @@ export const getReferenceImageLimit = (config: GenerationConfig): number => {
     return frameOnly ? 2 : 30;
   }
   if (config.mode === 'video' && config.videoModel === 'seedance-2.0') return 9;
-  return config.mode === 'image' && config.imageModel === SUNBURST_MODEL ? 16 : 14;
+  return config.mode === 'image' ? imageReferenceLimit(config.imageModel) : 14;
 };

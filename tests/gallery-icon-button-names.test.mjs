@@ -70,7 +70,7 @@ test('control: detail Favorite and Delete buttons are named by title', () => {
 // Favorite is a toggle: the filled heart is the only signal. A button must expose it with aria-pressed (as the Gallery filters, sort and selection buttons do).
 test('control: Gallery Favorites filter exposes aria-pressed', () => {
   const html = renderToStaticMarkup(React.createElement(Gallery, gp));
-  assert.match(html, /<button[^>]*aria-pressed="(true|false)"/);
+  assert.match(html, /<button[^>]*aria-label="Toggle favorites"[^>]*aria-pressed="(true|false)"/);
 });
 
 test('Gallery card Favorite buttons expose their state with aria-pressed', () => {

@@ -534,7 +534,7 @@ const CustomVideoPlayer: React.FC<{
   useEffect(() => {
     const handlePlayerKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (target?.matches('input, textarea, select, button, [role="button"], [contenteditable="true"]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const key = event.key.toLowerCase();

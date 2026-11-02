@@ -153,3 +153,10 @@ test('thumbnails of one photo list have different names', async () => {
   assert.match(html, /aria-label="Preview reference photo 1"/);
   assert.match(html, /aria-label="Preview reference photo 2"/);
 });
+
+test('Space on a reference thumbnail does not also play or pause the video player', () => {
+  const src = fs.readFileSync('src/components/Gallery.tsx', 'utf8');
+  const guard = src.match(/const handlePlayerKeyDown[\s\S]*?target\?\.matches\('([^']*)'\)\) return;/);
+  assert.ok(guard, 'player key handler guard not found');
+  assert.match(guard[1], /\[role="button"\]/);
+});

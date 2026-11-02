@@ -21,6 +21,7 @@ import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { FolderPreview } from './FolderPreview';
 import { buildFolderPreviewIndex } from './folderPreviews';
@@ -2343,7 +2344,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <div className="px-4 py-2 border-t border-gray-800 bg-violet-500/5">
                       <div className="flex items-center gap-2 text-xs text-violet-300">
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{toasts.filter(t => t.type === 'loading').length} generation(s) in progress</span>
+                        <span>{getGenerationsInProgressLabel(toasts.filter(t => t.type === 'loading').length)}</span>
                       </div>
                     </div>
                   )}

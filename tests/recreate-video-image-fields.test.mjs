@@ -36,7 +36,7 @@ test('Re-create on a video leaves a valid image Resolution after switching to Im
 
 test('real Controls after Re-create on a video then Image tab shows a valid Resolution', async () => {
   const { createRecreateConfig } = await bundle(root + '/src/lib/gallery/recreateDraft.ts');
-  const out = await build({ entryPoints: [root + '/src/components/Controls.tsx'], bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
+  const out = await build({ entryPoints: ['src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
     plugins: [{ name: 'p', setup(b) {
       b.onLoad({ filter: /components\/Controls\.tsx$/ }, a => {
         const src = fs.readFileSync(a.path, 'utf8').replace('useState(false);\n', 'useState(false);\n');

@@ -10,7 +10,7 @@ export const createServiceRoleClient=()=>({from:()=>({
   select:()=>({limit:async()=>({error:null}),eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})}),
   insert:async row=>{const t=globalThis.__table;t.attempts++;if(t.rows.some(r=>r.task_id===row.task_id))return{error:{code:"23505"}};if(t.ghost&&t.attempts===1){t.rows.push(row);throw new Error("timeout")}if(t.failures>0){t.failures--;if(t.throws)throw new Error("db down");return{error:{code:"500"}}}t.rows.push(row);return{error:null}},
 })});
-export const createUserScopedClient=()=>({from:()=>({select:()=>({eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})})})});`,
+export const createUserScopedClient=()=>({from:()=>({select:()=>({eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id&&r.user_id==="u1")||null,error:null})})})})})});`,
 };
 const load = async entry => {
   const out = await build({
@@ -77,10 +77,11 @@ test('an insert that saved the row before timing out counts as registered when t
 
 test('a duplicate that belongs to another user is not counted as registered', async () => {
   const taken = { provider: 'evolink', task_id: 'evo-r1', user_id: 'someone-else' };
-  const { submit, attempts } = await run({ failures: 0, rows: [taken] });
+  const { submit, status, attempts } = await run({ failures: 0, rows: [taken] });
   assert.notEqual(submit.statusCode, 200);
   assert.match(submit.body.error, /could not be recorded/);
   assert.equal(attempts, 3);
+  assert.equal(status.statusCode, 404, 'the other user\'s task cannot be polled');
 });
 
 test('a row this user already had before the submit counts as registered and polls', async () => {

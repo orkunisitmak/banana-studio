@@ -32,3 +32,9 @@ test('an H3 video without a task id still names fal.ai, and other media get no l
   assert.equal(brokenVideoProviderLabel({ mediaType: 'video' }), null);
   assert.equal(brokenVideoProviderLabel({ mediaType: 'image', taskId: 'bs_fal_abc' }), null);
 });
+
+test('a video with no task id uses the provider saved on the row', () => {
+  assert.equal(brokenVideoProviderLabel({ mediaType: 'video', generationProvider: 'openrouter' }), 'Held by OpenRouter');
+  assert.equal(brokenVideoProviderLabel({ mediaType: 'video', generationProvider: 'fal' }), 'Held by fal.ai');
+  assert.equal(brokenVideoProviderLabel({ mediaType: 'video', taskId: 'bs_fal_abc', generationProvider: 'openrouter' }), 'Held by fal.ai');
+});

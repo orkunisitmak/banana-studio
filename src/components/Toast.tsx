@@ -167,7 +167,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
           <div className="flex items-center gap-3">
             <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />
             <span className="text-sm text-gray-300">
-              Generating {loadingCount * 2} images...
+              Generating {loadingCount} {loadingCount === 1 ? 'task' : 'tasks'}...
             </span>
           </div>
         </div>

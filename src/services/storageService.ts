@@ -729,7 +729,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     videoModel,
     videoOperation: isVideo ? resolveVideoOperation(meta.videoOperation) : undefined,
     videoAspectRatio: meta.videoAspectRatio || (isVideo ? row.aspect_ratio : undefined),
-    videoQuality: meta.videoQuality || (isVideo ? '720p' : undefined),
+    videoQuality: meta.videoQuality || (isVideo ? row.resolution || '720p' : undefined),
     videoDuration: meta.videoDuration,
     audioEnabled: meta.audioEnabled,
     videoPromptExpansionMode: meta.videoPromptExpansionMode,

@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
 const req = createRequire(import.meta.url);
 const React = req('react');
 const { renderToStaticMarkup } = req('react-dom/server');
-const out = await build({ entryPoints: [new URL('../src/components/HistoryPanel.tsx', import.meta.url).pathname], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['react', 'lucide-react'], logLevel: 'silent' });
+const out = await build({ entryPoints: [fileURLToPath(new URL('../src/components/HistoryPanel.tsx', import.meta.url))], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['react', 'lucide-react'], logLevel: 'silent' });
 const mod = { exports: {} };
 new Function('module', 'exports', 'require', out.outputFiles[0].text)(mod, mod.exports, req);
 

@@ -24,10 +24,13 @@ const compiled = await build({ entryPoints: ['src/services/storageService.ts'], 
   } }] });
 const { updateImageStatus } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
-const update = async (status, read, updates) => {
-  const warn = console.warn; console.warn = () => {};
+const WANT_URL = 'https://x.supabase.co/storage/v1/object/authenticated/media/u1/a.png';
+const warnings = [];
+const update = async (status, read, updates, writeResult = { data: null, error: null }) => {
+  const warn = console.warn; console.warn = (...args) => { warnings.push(args.join(' ')); };
+  warnings.length = 0;
   globalThis.__writes = [];
-  globalThis.__respond = op => op.op === 'select' ? read : { data: null, error: null };
+  globalThis.__respond = op => op.op === 'select' ? read : writeResult;
   try { await updateImageStatus('i1', status, updates); } finally { console.warn = warn; }
   return globalThis.__writes.find(op => op.op === 'update')?.value;
 };
@@ -46,5 +49,15 @@ test('a failed metadata read still saves the completed status and the stored URL
   const written = await update('completed', { data: null, error: { message: 'timeout' } }, { url: 'https://x.supabase.co/storage/v1/object/sign/media/u1/a.png?token=t', metadata: { imagePromptCategory: 'x' } });
   assert.ok(written, 'the status update is written');
   assert.equal(written.status, 'completed');
-  assert.ok(written.url);
+  assert.equal(written.url, WANT_URL);
+  assert.equal(written.storage_path, 'u1/a.png');
+});
+test('a write that returns an error is warned about and the call still resolves', async () => {
+  const written = await update('failed', { data: { metadata: {} }, error: null }, { metadata: { error: 'boom' } }, { data: null, error: { message: 'row locked' } });
+  assert.equal(written.status, 'failed');
+  assert.ok(warnings.some(w => w.includes('status could not be saved') && w.includes('row locked')), warnings.join('|'));
+});
+test('control: a write without an error does not warn', async () => {
+  await update('failed', { data: { metadata: {} }, error: null }, { metadata: { error: 'boom' } });
+  assert.deepEqual(warnings, []);
 });

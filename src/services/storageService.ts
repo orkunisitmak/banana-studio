@@ -1732,7 +1732,8 @@ export const updateImageStatus = async (
         updateObj.metadata = merged;
       }
     }
-    await supabase.from('generations').update(updateObj).eq('id', id);
+    const { error: writeError } = await supabase.from('generations').update(updateObj).eq('id', id);
+    if (writeError) console.warn('updateImageStatus: status could not be saved:', writeError.message);
   } catch (e: any) {
     console.warn('updateImageStatus error:', e.message);
   }

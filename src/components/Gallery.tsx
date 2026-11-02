@@ -24,6 +24,7 @@ import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { canGenerateVariation } from '../lib/gallery/recreateDraft';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { getCountLabel } from '../lib/gallery/countLabel';
 import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { FolderPreview } from './FolderPreview';
@@ -2075,7 +2076,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             ) : (
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-semibold text-white sm:text-base">{showFavoritesOnly ? 'Favorites' : 'Gallery'}</h2>
-                <p className="hidden text-[11px] text-gray-500 lg:block">{visibleImages.length} items</p>
+                <p className="hidden text-[11px] text-gray-500 lg:block">{getCountLabel(visibleImages.length, 'item', 'items')}</p>
               </div>
             )}
           </div>
@@ -2597,14 +2598,14 @@ export const Gallery: React.FC<GalleryProps> = ({
               </button>
               </div>
             </div>
-            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{getCountLabel(selectedIds.size - comparableSelection.length, 'unavailable or non-image item', 'unavailable or non-image items')} excluded from comparison</p>}
             {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p role="status" className="text-xs text-gray-400">
                     {isPreparingPhotos ? `Preparing photos ${photoProgress.completed}/${photoProgress.total || selectedIds.size}…`
-                      : preparedPhotos ? `${preparedPhotos.length} photos ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
+                      : preparedPhotos ? `${getCountLabel(preparedPhotos.length, 'photo', 'photos')} ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
                       : 'Save originals to Photos using your phone’s share sheet.'}
                   </p>
                   {isPreparingPhotos && (

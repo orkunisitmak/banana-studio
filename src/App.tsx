@@ -1409,14 +1409,6 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
-  const handleHistorySelect = (media: GeneratedMedia) => {
-    recreateLoadIdRef.current += 1;
-    recreateLoadingRef.current = null;
-    setIsRecreateLoading(false);
-    setConfig(createRecreateConfig(media, resolveImageModel(media.imageModel ?? config.imageModel)));
-    setPromptLoadVersion(version => version + 1);
-  };
-
   const handleRecreate = async (media: GeneratedMedia) => {
     const loadId = ++recreateLoadIdRef.current;
     recreateLoadingRef.current = null;
@@ -1504,6 +1496,9 @@ const AuthorizedWorkspace: React.FC<{
         : `Ready to recreate this ${resolved.mediaType === 'video' ? 'video' : 'image'}.`
     );
   };
+
+  // History rows are gallery-list rows without reference photos, so they load like Re-create.
+  const handleHistorySelect = handleRecreate;
 
   const handleGenerateVariation = async (media: GeneratedMedia) => {
     const imageModel = resolveImageModel(media.imageModel ?? config.imageModel);

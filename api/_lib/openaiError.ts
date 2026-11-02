@@ -38,13 +38,13 @@ export function imageRateLimitDelay(response: Response, data: any, now = Date.no
   return seconds <= 86400 ? seconds : undefined;
 }
 
-export function openAIErrorMessage(status?: number, code?: string): string {
+export function openAIErrorMessage(status?: number, code?: string, text = false): string {
   if (status === 401 || status === 403) return 'OpenAI credentials or model permissions need attention. Contact the administrator.';
   if (code === 'insufficient_quota') return 'OpenAI quota is exhausted. Contact the administrator before generating again.';
   if (status === 429) return 'OpenAI is temporarily rate limited or out of quota. Try again later.';
-  if (status != null && status >= 500 && status <= 599) return `OpenAI is temporarily unavailable (HTTP ${status}). No image was returned. Check usage before starting a new generation.`;
+  if (status != null && status >= 500 && status <= 599) return `OpenAI is temporarily unavailable (HTTP ${status}). ${text ? 'Check usage before trying again.' : 'No image was returned. Check usage before starting a new generation.'}`;
   if (code === 'content_policy_violation' || code === 'moderation_blocked') return 'OpenAI declined this image request under its content policy. Adjust the prompt or references.';
   if (code === 'invalid_image' || code === 'invalid_image_url' || code === 'image_parse_error' || code === 'image_download_failed') return 'OpenAI could not read a reference image. Reattach the affected reference before generating again.';
   if (status === 400 || status === 422) return 'OpenAI could not accept this request. Check the prompt and references.';
-  return 'OpenAI request failed. Check the saved generation and usage before trying again.';
+  return text ? 'OpenAI request failed. Check usage before trying again.' : 'OpenAI request failed. Check the saved generation and usage before trying again.';
 }

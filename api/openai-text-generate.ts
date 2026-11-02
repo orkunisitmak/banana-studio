@@ -101,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await waitForTask(response.json(), provider.signal);
     provider.dispose();
     if (!response.ok) {
-      return fail(response.status, openAIErrorMessage(response.status));
+      return fail(response.status, openAIErrorMessage(response.status, undefined, true));
     }
 
     // A truncated/refused response can still be billed. Record returned usage
@@ -155,7 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     return fail(timeout ? 504 : 502, timeout
       ? 'GPT-6.1 Sol yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.'
-      : openAIErrorMessage());
+      : openAIErrorMessage(undefined, undefined, true));
   } finally {
     provider.dispose(); clearInterval(heartbeat); res.off?.('close', close);
     await guard.finish(outcome, providerRequestId, providerStatus);

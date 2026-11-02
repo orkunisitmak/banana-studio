@@ -109,8 +109,14 @@ const AuthorizedWorkspace: React.FC<{
     return () => { workspaceActive.current = false; };
   }, []);
   const assertWorkspaceSession = async (completed?: { result: unknown }) => {
-    const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new SessionChangedError('Session changed. Sign in again to continue.', completed);
+    const changed = () => new SessionChangedError('Session changed. Sign in again to continue.', completed);
+    let session: Awaited<ReturnType<typeof getSession>>;
+    try {
+      session = await getSession();
+    } catch {
+      throw changed();
+    }
+    if (!workspaceActive.current || session?.user.id !== userId) throw changed();
   };
   const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {

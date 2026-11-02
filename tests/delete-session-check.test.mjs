@@ -16,13 +16,13 @@ return { handleDelete, handleDeleteMultiple }; };`, { loader: 'ts', format: 'cjs
 
 class DeleteNotQueuedError extends Error {}
 const items = ['a', 'b'].map(id => ({ id, mediaType: 'image' }));
-// sessionChecks: the signed-in user id for each check, in order (the wrapper checks before and after the call).
+// sessionChecks: the signed-in user id (or an Error the lookup throws) for each check, in order (the wrapper checks before and after the call).
 const setup = ({ sessionChecks, deleteImage = async () => {}, deleteImages = async () => ({ notQueued: [], queued: [] }) }) => {
   const mod = { exports: {} }; new Function('module', code)(mod);
   const toasts = [];
   let list = items.slice(), checks = 0, calls = 0;
   const env = {
-    getSession: async () => ({ user: { id: sessionChecks[checks++] } }), workspaceActive: { current: true }, userId: 'u1',
+    getSession: async () => { const id = sessionChecks[checks++]; if (id instanceof Error) throw id; return { user: { id } }; }, workspaceActive: { current: true }, userId: 'u1',
     workspaceStorage: { DeleteNotQueuedError, deleteImage: async (...a) => { calls++; return deleteImage(...a); }, deleteImages: async (...a) => { calls++; return deleteImages(...a); } },
     generatedMedia: items, setGeneratedMedia: update => { list = update(list); },
     toast: { success: (t, m) => toasts.push(`success:${t}:${m}`), error: (t, m) => toasts.push(`error:${t}:${m}`) },
@@ -70,4 +70,17 @@ test('batch delete whose session check fails after a partial result restores onl
   await quiet(() => t.handleDeleteMultiple(['a', 'b']));
   assert.deepEqual(t.list(), ['a']);
   assert.deepEqual(t.toasts, ['error:Delete Failed:1 image could not be deleted and is back in your library. Try again.']);
+});
+
+test('a session lookup that throws before the delete puts the item back', async () => {
+  const t = setup({ sessionChecks: [new Error('401')] });
+  await quiet(() => t.handleDelete(items[0]));
+  assert.equal(t.calls(), 0);
+  assert.deepEqual(t.list(), ['a', 'b']);
+});
+
+test('a session lookup that throws after a batch delete keeps the finished result', async () => {
+  const t = setup({ sessionChecks: ['u1', new Error('401')], deleteImages: async medias => ({ notQueued: [medias[0]], queued: [] }) });
+  await quiet(() => t.handleDeleteMultiple(['a', 'b']));
+  assert.deepEqual(t.list(), ['a']);
 });

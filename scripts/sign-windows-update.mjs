@@ -26,6 +26,11 @@ export function createKeyPair(privateKeyPath){
  return pair.publicKey.export({format:'der',type:'spki'}).toString('base64');
 }
 
+export function createTrackedKeyPair(privateKeyPath,publicKeyFile){
+ if(fs.existsSync(publicKeyFile)&&fs.readFileSync(publicKeyFile,'utf8').trim())throw new Error('A Windows update public key is already tracked: installed apps trust it. Replacing it means every Windows user installs the next version by hand.');
+ fs.writeFileSync(publicKeyFile,createKeyPair(privateKeyPath)+'\n');
+}
+
 export function createManifest({archivePath,verificationPath,privateKeyPem,publicKey,version,repository=REPOSITORY}){
  if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('Only a plain release version can be published as an update.');
  const name=`Banana-Studio-${version}-windows-x64.zip`;
@@ -46,7 +51,7 @@ const usage='Usage: node scripts/sign-windows-update.mjs --generate-key <new-pri
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const args=process.argv.slice(2),publicKeyFile=path.join(root,'desktop/windows/WindowsUpdatePublicKey.txt');
  if(args[0]==='--generate-key'&&args[1]){
-  fs.writeFileSync(publicKeyFile,createKeyPair(args[1])+'\n');
+  createTrackedKeyPair(args[1],publicKeyFile);
   console.log(`Private key: ${args[1]}. Keep it outside the repository and back it up.\nPublic key: ${path.relative(root,publicKeyFile)}. Commit this file.`);
  }else if(args[1]==='--key'&&args[2]){
   const publicKey=fs.readFileSync(publicKeyFile,'utf8').trim();

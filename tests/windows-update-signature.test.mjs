@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { createKeyPair, createManifest, verifyManifest } from '../scripts/sign-windows-update.mjs';
+import { createKeyPair, createManifest, createTrackedKeyPair, verifyManifest } from '../scripts/sign-windows-update.mjs';
 
 const commit='0123456789abcdef0123456789abcdef01234567';
 const fixture=(t,version='1.2.3',overrides={})=>{
@@ -60,4 +60,17 @@ test('an existing signing key is never replaced',t=>{
  const file=path.join(directory,'key.pem');
  assert.ok(createKeyPair(file).length>0);
  assert.throws(()=>createKeyPair(file),/Refusing to replace/);
+});
+
+test('a tracked public key is never replaced by a new key pair',t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-windows-tracked-'));
+ t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const publicKeyFile=path.join(directory,'public.txt');
+ fs.writeFileSync(publicKeyFile,'\n');
+ createTrackedKeyPair(path.join(directory,'first.pem'),publicKeyFile);
+ const tracked=fs.readFileSync(publicKeyFile,'utf8');
+ assert.ok(tracked.trim().length>0);
+ assert.throws(()=>createTrackedKeyPair(path.join(directory,'second.pem'),publicKeyFile),/already tracked/);
+ assert.equal(fs.readFileSync(publicKeyFile,'utf8'),tracked);
+ assert.equal(fs.existsSync(path.join(directory,'second.pem')),false);
 });

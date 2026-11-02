@@ -30,6 +30,7 @@ new Function('module', code)(mod);
 
 function scenario(initial) {
   let config = structuredClone(initial), undoStack = [];
+  let shown = null;
   const errors = [], limits = { videos: 4, audios: 3 };
   // Also allow the pending upload-invalidation change (#168) to clear its refs.
   const insertUploadDraftRef = { current: { token: {} } }, insertSourceUploadRef = { current: null };
@@ -38,12 +39,12 @@ function scenario(initial) {
     setUndoStack: update => { undoStack = update(undoStack); },
     setEnhanceError() {}, refInputRef: { current: null },
     insertUploadDraftRef, insertSourceUploadRef,
-    maxReferenceVideos: limits.videos, maxReferenceAudios: limits.audios, setAttachmentError: error => errors.push(error),
+    maxReferenceVideos: limits.videos, maxReferenceAudios: limits.audios, setAttachmentError: update => { shown = typeof update === 'function' ? update(shown) : update; errors.push(shown); },
     isH3VideoConfig: config.mode === 'video' && config.videoModel === 'minimax-h3',
     h3PromptSupported: true, preEnhancePrompt: config.originalPrompt ?? null,
   });
   return { clear: () => api().clear(), undo: () => api().undo(), remove: id => api().remove(id),
-    revert: () => api().revert(), state: () => config, entries: () => undoStack,
+    revert: () => api().revert(), shown: () => shown, setShown: value => { shown = value; }, state: () => config, entries: () => undoStack,
     change: update => { config = update(config); }, limits, errors };
 }
 
@@ -283,4 +284,90 @@ test('valid H3 Auto and selected keyframes retain their restored image capacity'
     assert.deepEqual(f.state().h3MaxOptions, initial.h3MaxOptions);
     assert.equal(f.entries().length, 0);
   }
+});
+
+test('Undo of a removed image refuses when a later attachment filled the image limit, then works after room is made', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  const limit = helpers.getReferenceImageLimit(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  assert.equal(f.state().referenceImages.length, limit);
+  f.undo();
+  assert.equal(f.state().referenceImages.length, limit);
+  assert.equal(f.entries().length, 1);
+  assert.equal(f.errors.length, 1);
+  f.change(config => ({ ...config, referenceImages: config.referenceImages.slice(1) }));
+  f.undo();
+  assert.equal(f.state().referenceImages.length, limit);
+  assert.equal(f.entries().length, 0);
+});
+
+test('a refused Undo leaves the older entry under a new removal, and the next Undo restores the newer one and clears the warning', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.undo();
+  assert.match(f.errors.at(-1), /restores that image first/);
+  f.remove('image-1');
+  assert.equal(f.entries().length, 2);
+  f.undo();
+  assert.ok(f.state().referenceImages.some(ref => ref.id === 'image-1'));
+  assert.ok(!f.state().referenceImages.some(ref => ref.id === 'image-0'));
+  assert.equal(f.entries().length, 1);
+  assert.equal(f.errors.at(-1), null);
+});
+
+test('a successful Undo clears its own warning but leaves an unrelated upload error', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.remove('image-1');
+  f.setShown('Source video upload failed.');
+  f.undo();
+  assert.equal(f.shown(), 'Source video upload failed.');
+});
+
+test('the full-composer warning names image references, since removing a video adds no Undo entry', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.undo();
+  assert.match(f.shown(), /removing another image reference/);
+});
+
+test('a refused Undo keeps an unrelated upload error and shows its own warning under it, which a later Undo removes', () => {
+  const initial = { ...base, mode: 'image', imageModel: 'gemini-nano-banana-2.1', referenceImages: images(14), referenceVideos: [], referenceAudios: [] };
+  const f = scenario(initial);
+  f.remove('image-0');
+  f.change(config => ({ ...config, referenceImages: [...config.referenceImages, image('later')] }));
+  f.setShown('Source video upload failed.');
+  f.undo();
+  assert.match(f.shown(), /^Source video upload failed\.\nCould not undo/);
+  f.undo();
+  assert.equal(f.shown().split('\n').length, 2);
+  f.change(config => ({ ...config, referenceImages: config.referenceImages.slice(1) }));
+  f.undo();
+  assert.equal(f.shown(), 'Source video upload failed.');
+});
+
+test('a file name with a line break cannot split an attachment error into fake lines', () => {
+  // Run the real addAttachmentError from Controls with a state setter, as an upload failure for a named file does.
+  const from = source.indexOf('  const addAttachmentError =');
+  const addSource = source.slice(from, source.indexOf('\n', from));
+  const factory = new Function('setAttachmentError', transformSync(addSource.replace('const addAttachmentError', 'var addAttachmentError') + '\nreturn addAttachmentError;', { loader: 'ts', format: 'cjs' }).code.replace(/^"use strict";/, ''));
+  let shown = null;
+  const add = factory(update => { shown = update(shown); });
+  add('Could not read clip.\r\nLimit reached: 3 videos max.');
+  assert.equal(shown, 'Could not read clip. Limit reached: 3 videos max.');
+  assert.equal(shown.includes('\n'), false);
+  add('Limit reached: 3 videos max.');
+  assert.equal(shown, 'Could not read clip. Limit reached: 3 videos max.\nLimit reached: 3 videos max.');
+  add('Limit reached: 3 videos max.');
+  assert.equal(shown.split('\n').length, 2);
+  shown = null;
+  add('Normal-name.mp4 is too large.');
+  assert.equal(shown, 'Normal-name.mp4 is too large.');
 });

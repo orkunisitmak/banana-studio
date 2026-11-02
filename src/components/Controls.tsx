@@ -822,7 +822,8 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   // Several attachment problems in one action are all shown.
-  const addAttachmentError = (message: string) => setAttachmentError(previous => previous?.includes(message) ? previous : previous ? `${previous} ${message}` : message);
+  // A file name can hold a line break; keep each message on one line so the line checks stay exact.
+  const addAttachmentError = (rawMessage: string) => { const message = rawMessage.replace(/[\r\n]+/g, ' '); setAttachmentError(previous => previous?.split('\n').includes(message) ? previous : previous ? `${previous}\n${message}` : message); };
 
   const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -1080,6 +1081,14 @@ export const Controls: React.FC<ControlsProps> = ({
       }
       setAttachmentError(null);
     }
+    const undoFullMessage = 'Could not undo: the composer has no room for the removed reference image. Undo after removing another image reference restores that image first.';
+    if (!lastEntry.clearedConfig && updatedConfig.referenceImages.length > getReferenceImageLimit(updatedConfig)) {
+      // Keep an upload error that is already showing and add the Undo warning below it.
+      setAttachmentError(previous => previous?.split('\n').includes(undoFullMessage) ? previous : previous ? `${previous}\n${undoFullMessage}` : undoFullMessage);
+      return;
+    }
+    // Clear only this warning; an upload error from something else stays.
+    setAttachmentError(previous => previous?.split('\n').filter(line => line !== undoFullMessage).join('\n') || null);
     setUndoStack(prev => prev.slice(0, -1));
     onChange(updatedConfig);
   };

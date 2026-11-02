@@ -352,3 +352,8 @@ test('a refused Undo keeps an unrelated upload error and shows its own warning u
   f.undo();
   assert.equal(f.shown(), 'Source video upload failed.');
 });
+
+test('an attachment error added after a refused Undo goes on its own line, so a later Undo can remove only its warning', () => {
+  const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
+  assert.match(src, /const addAttachmentError = [^\n]*`\$\{previous\}\\n\$\{message\}`/);
+});

@@ -79,13 +79,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ notice = null, onRetry
           </button>
 
           {error && (
-            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+            <div role="alert" className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
               <p className="text-sm text-red-400 text-center">{error}</p>
             </div>
           )}
 
           {notice === 'unauthorized' && !error && (
-            <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
+            <div role="alert" className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-amber-400">Access Denied</p>
@@ -97,7 +97,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ notice = null, onRetry
           )}
 
           {notice === 'unavailable' && !error && (
-            <div className="mt-4 p-4 bg-sky-500/10 border border-sky-500/20 rounded-lg flex items-start gap-3">
+            <div role="alert" className="mt-4 p-4 bg-sky-500/10 border border-sky-500/20 rounded-lg flex items-start gap-3">
               <WifiOff className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-sky-400">Can't verify access</p>
@@ -114,7 +114,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ notice = null, onRetry
           )}
 
           {notice === 'signout-failed' && !error && (
-            <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
+            <div role="alert" className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-amber-400">Sign-out failed</p>

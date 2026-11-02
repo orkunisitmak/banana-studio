@@ -59,3 +59,9 @@ test('the viewer Tab trap steps aside while a dialog opened from the viewer is o
   assert.match(trap, /dialogOverViewerRef\.current\) return/);
   assert.match(src, /dialogOverViewerRef\.current = isYouTubePreviewOpen \|\| isHelpCenterOpen \|\| Boolean\(previewRefImage\)/);
 });
+
+test('Previous and Next move focus to the dialog when the pressed button is about to be removed at the first or last item', () => {
+  const src = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
+  assert.match(src, /handleNavigate\(1\); if \(selectedIndex >= navigableImages\.length - 2\) detailDialogRef\.current\?\.focus\(/);
+  assert.match(src, /handleNavigate\(-1\); if \(selectedIndex <= 1\) detailDialogRef\.current\?\.focus\(/);
+});

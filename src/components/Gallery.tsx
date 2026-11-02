@@ -3096,7 +3096,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             {/* Previous Button */}
             {!isEditingSelectedMedia && selectedIndex > 0 && (
               <button
-                onClick={(e) => { e.stopPropagation(); handleNavigate(-1); }}
+                onClick={(e) => { e.stopPropagation(); handleNavigate(-1); if (selectedIndex <= 1) detailDialogRef.current?.focus({ preventScroll: true }); }}
                 aria-label="Previous gallery item"
                 className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/80 rounded-full text-white transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 z-50 shadow-lg border border-white/10"
               >
@@ -3107,7 +3107,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             {/* Next Button */}
             {!isEditingSelectedMedia && selectedIndex >= 0 && selectedIndex < navigableImages.length - 1 && (
               <button
-                onClick={(e) => { e.stopPropagation(); handleNavigate(1); }}
+                onClick={(e) => { e.stopPropagation(); handleNavigate(1); if (selectedIndex >= navigableImages.length - 2) detailDialogRef.current?.focus({ preventScroll: true }); }}
                 aria-label="Next gallery item"
                 className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/80 rounded-full text-white transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 z-50 shadow-lg border border-white/10"
               >

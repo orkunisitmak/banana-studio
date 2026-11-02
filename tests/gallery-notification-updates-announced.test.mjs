@@ -83,11 +83,11 @@ test('the announcer stays mounted with the panel open, including when empty, and
   const emptyOpen = renderToStaticMarkup(React.createElement(Gallery, { ...gp, toasts: [] }));
   assert.match(emptyOpen, /data-notification-announcer[^>]*role="status"|role="status"[^>]*data-notification-announcer/);
   const emptyPanel = emptyOpen.slice(emptyOpen.indexOf('Notifications</span>'));
-  assert.doesNotMatch(emptyPanel.slice(0, emptyPanel.indexOf('No notifications')), /aria-live|role="(status|alert|log)"|<output\b/);
+  assert.doesNotMatch(emptyPanel.slice(0, emptyPanel.indexOf('No notifications')), /aria-live|role="(status|alert|log|marquee|timer)"|<output\b/);
   const open = renderToStaticMarkup(React.createElement(Gallery, { ...gp, toasts }));
   const region = open.match(/<div[^>]*data-notification-announcer[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
   assert.match(region, /Image ready/);
   assert.doesNotMatch(region, /Generating image/);
   const list = open.slice(open.indexOf('Notifications</span>'), open.indexOf('generation(s) in progress'));
-  assert.doesNotMatch(list, /aria-live|role="(status|alert|log)"|<output\b/);
+  assert.doesNotMatch(list, /aria-live|role="(status|alert|log|marquee|timer)"|<output\b/);
 });

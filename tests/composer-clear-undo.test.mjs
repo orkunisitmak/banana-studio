@@ -356,8 +356,7 @@ test('a refused Undo keeps an unrelated upload error and shows its own warning u
 test('a file name with a line break cannot split an attachment error into fake lines', () => {
   // Run the real addAttachmentError from Controls with a state setter, as an upload failure for a named file does.
   const from = source.indexOf('  const addAttachmentError =');
-  const addSource = source.slice(from, source.indexOf('
-', from));
+  const addSource = source.slice(from, source.indexOf('\n', from));
   const factory = new Function('setAttachmentError', transformSync(addSource.replace('const addAttachmentError', 'var addAttachmentError') + '\nreturn addAttachmentError;', { loader: 'ts', format: 'cjs' }).code.replace(/^"use strict";/, ''));
   let shown = null;
   const add = factory(update => { shown = update(shown); });

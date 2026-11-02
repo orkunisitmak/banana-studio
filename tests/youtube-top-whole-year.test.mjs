@@ -63,6 +63,7 @@ test('the scan stops once uploads are older than a year', async () => {
   const old = uploads.map((v, i) => i >= 100 ? { ...v, publishedAt: new Date(now - (400 + i) * DAY).toISOString() } : v);
   byId.clear(); old.forEach(v => byId.set(v.id, v));
   uploads.splice(0, uploads.length, ...old);
-  await getTopPerformingVideos('UUchannel', 10);
+  const top = await getTopPerformingVideos('UUchannel', 10);
   assert.ok(requests - before <= 6, `${requests - before} requests for a channel with 100 uploads in the last year`);
+  assert.ok(top.length > 0 && top.every(v => Date.parse(v.publishedAt) >= now - 366 * DAY), 'only videos from the last year are returned');
 });

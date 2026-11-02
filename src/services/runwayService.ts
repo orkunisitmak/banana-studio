@@ -738,6 +738,12 @@ export const prepareSeedanceReferenceGenerationPrompt = (
 // Convert app-internal @ tags (and user-entered @/# aliases) to each
 // provider's accepted prompt language. H3 Max receives ordered start/end
 // images rather than numbered media references, so no @ marker survives.
+const findPersonGroup = (refs: ReferenceImage[], id: number) => {
+  const group = getPersonGroups(refs).find(person => person.id === id);
+  if (!group) throw new Error(`Person ${id} için ekli referans yok.`);
+  return group;
+};
+
 const cleanPromptForVideoModel = (
   prompt: string,
   videoModel: VideoModelId,
@@ -783,8 +789,7 @@ const cleanPromptForVideoModel = (
 
   cleaned = cleaned.replace(/@PERSON_(\d+)\b/gi, (_tag, number) => {
     const id = Number(number);
-    const group = getPersonGroups(refs).find(person => person.id === id);
-    if (!group) throw new Error(`Person ${id} için ekli referans yok.`);
+    const group = findPersonGroup(refs, id);
     return `person ${id} shown in ${group.images.map(image => `@image${refs.indexOf(image) + 1}`).join(' and ')} (the SAME single person)`;
   });
   if (getPersonGroups(refs).some(group => group.id > 2)) cleaned += `\n${buildPersonIdentityContract(refs, index => `@image${index + 1}`)}`;
@@ -913,6 +918,12 @@ export const createVideoTask = async (
     referenceEditMode: videoOperation === 'reference_edit',
   });
   if (routeError) throw new Error(routeError);
+
+  // Same person-tag check cleanPromptForVideoModel runs later, moved ahead of
+  // the paid video preparation and the image uploads.
+  if (!(videoModel === 'seedance-2.5' && determineMode(referenceImages, refVids, refAudios, videoOperation) === 'image_to_video')) {
+    for (const [, id] of (prompt || '').matchAll(/@PERSON_(\d+)\b/gi)) findPersonGroup(referenceImages, Number(id));
+  }
 
   const preparedVideos = await prepareReferenceVideos(
     refVids,

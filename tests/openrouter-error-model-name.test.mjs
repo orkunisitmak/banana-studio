@@ -19,16 +19,19 @@ const handler = (await import('data:text/javascript;base64,' + Buffer.from(out.o
 
 process.env.OPENROUTER_API_KEY = 'k';
 const call = async (model, upstreamStatus) => {
-  globalThis.fetch = async () => new Response(JSON.stringify({ error: {} }), { status: upstreamStatus, headers: { 'content-type': 'application/json' } });
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls += 1; return new Response(JSON.stringify({ error: {} }), { status: upstreamStatus, headers: { 'content-type': 'application/json' } }); };
   const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; }, on() {}, off() {} };
   await handler({ method: 'POST', headers: {}, body: { model, contents: { parts: [{ text: 'a brief' }] }, usageContext: { action: 'enhance', prompt: 'p' } } }, res);
-  return res;
+  return { res, fetchCalls };
 };
 
 for (const model of ['gpt-6.1-sol', 'gemini-3.8-flash']) {
   for (const status of [429, 500]) {
     test(`${model} through OpenRouter: upstream ${status} does not blame Opus 5.5`, async () => {
-      const res = await call(model, status);
+      const { res, fetchCalls } = await call(model, status);
+      assert.equal(fetchCalls, 1, 'the request reached OpenRouter');
+      assert.equal(res.code, status);
       assert.ok(res.body?.error, 'an error is returned');
       assert.doesNotMatch(res.body.error, /Opus/, res.body.error);
     });

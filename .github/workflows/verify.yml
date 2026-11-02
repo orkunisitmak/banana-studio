@@ -114,6 +114,12 @@ jobs:
         run: |
           $app = Start-Process -FilePath '.build/staging-windows/Banana Studio/BananaStudio.exe' -ArgumentList '--test-window-placement' -Wait -PassThru
           if ($app.ExitCode -ne 0) { throw 'Window placement test failed.' }
+      - name: Test verified update signatures, archives, swap and rollback
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath '.build/staging-windows/Banana Studio/BananaStudio.exe' -ArgumentList '--test-updater' -Wait -PassThru
+          if ($app.ExitCode -ne 0) { throw 'Updater test failed.' }
+      - run: node scripts/test-windows-update-interop.mjs
       - run: node scripts/test-local-generation.mjs
       - name: Archive the audited standalone Windows application
         shell: pwsh

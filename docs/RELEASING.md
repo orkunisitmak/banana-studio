@@ -8,6 +8,26 @@ Download the artifact from the verified source commit. Confirm `verification-win
 
 Keep Mac assets and signed feeds on the latest release too; publishing a Windows-only latest release would interrupt the Mac update URL.
 
+### Verified Windows updates
+
+**File → Check for Updates…** installs an update only after verifying `windows-update.json`, its signature, and the archive's size and SHA-256. Until a public key is tracked, the app keeps opening the releases page.
+
+Set up once. Keep the private key outside the repository and back it up; if it is lost, every Windows user has to install the next version by hand:
+
+```powershell
+node scripts/sign-windows-update.mjs --generate-key C:\secure\banana-windows-update.pem
+```
+
+Commit the resulting `desktop/windows/WindowsUpdatePublicKey.txt`. Builds made after that commit trust the key.
+
+For each release, sign in the folder holding the verified artifact and record, then attach the zip, `verification-windows-x64.json` and `windows-update.json` to the same release:
+
+```powershell
+node scripts/sign-windows-update.mjs .build\Banana-Studio-<version>-windows-x64.zip --key C:\secure\banana-windows-update.pem
+```
+
+Before publishing, run an actual older-to-newer update on Windows and confirm that the new version opens with the same gallery and Credential Manager keys. This update signature proves the release came from this project. It is not Authenticode: Windows may still show an unrecognized-publisher warning.
+
 ## macOS release procedure
 
 Banana Studio supports community releases without Apple notarization, as well as optional Developer ID signed and notarized releases. Development builds disable updates and remain for local testing only. Community releases keep Sparkle's signed-feed and archive verification enabled.

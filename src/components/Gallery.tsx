@@ -2815,23 +2815,33 @@ export const Gallery: React.FC<GalleryProps> = ({
               );
             }
 
+            const activateCard = (shiftKey: boolean) => {
+              if (shiftKey && !isSelectionMode) {
+                setIsSelectionMode(true);
+                setSelectedIds(new Set([media.id]));
+                setLastSelectedId(media.id);
+                setSelectedMediaId(null);
+              } else if (isSelectionMode) {
+                toggleSelection(media.id, shiftKey);
+              } else {
+                setSelectedMediaId(media.id);
+              }
+            };
+
             return (
               <div
                 key={media.id}
                 data-gallery-media-id={media.id}
                 draggable={!isReadOnly && !isMoving}
                 onDragStart={(e) => handleDragStart(e, 'image', media.id, media)}
-                onClick={(e) => {
-                  if (e.shiftKey && !isSelectionMode) {
-                    setIsSelectionMode(true);
-                    setSelectedIds(new Set([media.id]));
-                    setLastSelectedId(media.id);
-                    setSelectedMediaId(null);
-                  } else if (isSelectionMode) {
-                    toggleSelection(media.id, e.shiftKey);
-                  } else {
-                    setSelectedMediaId(media.id);
-                  }
+                role="button"
+                tabIndex={0}
+                aria-label={`${media.mediaType === 'video' ? 'Open video' : 'Open image'}: ${(media.prompt || '').slice(0, 80)}`}
+                onClick={(e) => activateCard(e.shiftKey)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  activateCard(e.shiftKey);
                 }}
                 style={cardStyle}
                 className={`group relative bg-gray-800 rounded-2xl overflow-hidden border transition-all shadow-lg ${isSelected

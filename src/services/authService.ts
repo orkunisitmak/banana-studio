@@ -187,6 +187,7 @@ type UsageMetadataLike = {
   cachedContentTokenCount?: number;
   openaiUsage?: unknown;
   openrouterUsage?: unknown;
+  anthropicUsage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; cache_creation?: { ephemeral_1h_input_tokens?: number } };
   usageLogged?: boolean;
   usageLoggingPending?: boolean;
   promptTokensDetails?: TokenDetail[];
@@ -244,6 +245,12 @@ const estimateUsageCost = (
   }
 
   if (metadata?.openrouterUsage) return calculateOpenRouterTextCost(metadata.openrouterUsage, model);
+  if (metadata?.anthropicUsage && model === OPENROUTER_TEXT_MODEL) {
+    const usage = metadata.anthropicUsage;
+    const tokens = [usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens ?? 0, usage.cache_creation_input_tokens ?? 0, usage.cache_creation?.ephemeral_1h_input_tokens ?? 0];
+    return tokens.every((value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0) && tokens[4] <= tokens[3]
+      ? (tokens[0] * 4 + tokens[1] * 20 + tokens[2] * 0.2 + (tokens[3] - tokens[4]) * 5 + tokens[4] * 8) / 1_000_000 : null;
+  }
   if (model === OPENAI_TEXT_MODEL) return calculateOpenAITextCost(metadata?.openaiUsage);
   if (model === OPENROUTER_TEXT_MODEL) return calculateOpenRouterTextCost(metadata?.openrouterUsage);
 

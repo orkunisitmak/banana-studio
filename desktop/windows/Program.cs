@@ -192,9 +192,9 @@ internal sealed class StudioWindow : Form
         keysOpen = true;
         try
         {
-            using var dialog = new Form { Text = "Provider API Keys", Width = 670, Height = 480, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 3, RowCount = 8, AutoSize = true };
-            var info = new Label { Text = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank fields keep saved keys. Remove clears a key.", AutoSize = true, MaximumSize = new Size(600, 0) };
+            using var dialog = new Form { Text = "Provider API Keys", Width = 670, Height = 540, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 3, RowCount = 9, AutoSize = true };
+            var info = new Label { Text = "Add only the providers you use. Anthropic Console covers Claude text and image references; OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank fields keep saved keys. Remove clears a key.", AutoSize = true, MaximumSize = new Size(600, 0) };
             grid.Controls.Add(info, 0, 0); grid.SetColumnSpan(info, 3);
             var rows = new List<(string Name, TextBox Field, CheckBox Remove)>();
             var row = 1;

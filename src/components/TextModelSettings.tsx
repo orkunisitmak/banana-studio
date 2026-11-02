@@ -85,7 +85,7 @@ export const TextModelSettings: React.FC = () => {
             className="mt-2 block w-full rounded-xl border border-gray-700 bg-gray-900 p-3 text-base sm:text-sm text-white outline-none focus:border-violet-400">
             {(selectedModel === OPENROUTER_TEXT_MODEL ? OPENROUTER_REASONING_EFFORTS : OPENAI_REASONING_EFFORTS).map(value => <option key={value} value={value}>{({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' })[value]}{value === (selectedModel === OPENROUTER_TEXT_MODEL ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING) ? ' · Default' : ''}</option>)}
           </select>
-          <span className="mt-2 block text-xs leading-relaxed text-gray-500">High gives briefs more reasoning time. Lower levels respond faster; higher levels may take longer. Applies to new requests.</span>
+          <span className="mt-2 block text-xs leading-relaxed text-gray-500">High gives briefs more reasoning time. Lower levels respond faster; higher levels may take longer. Applies to new requests. Direct Anthropic supports Max for Claude Opus 5.5.</span>
         </label>
       )}
       {saved && <p className="mt-4 text-xs text-gray-400">{isLocalWorkspace() ? 'Settings are saved on this computer.' : `Currently using ${saved.source === 'personal' ? 'your personal settings' : 'settings saved for all users'}.`}</p>}

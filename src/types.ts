@@ -93,7 +93,7 @@ export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; descriptio
   {
     label: 'Claude Opus 5.5',
     value: 'anthropic/claude-opus-5.5',
-    description: 'Default via OpenRouter. Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
+    description: 'Direct Anthropic Console API or OpenRouter. Adjustable thinking. Enhance, brainstorm and variations with image references.',
   },
   {
     label: 'Gemini 3.8 Flash',

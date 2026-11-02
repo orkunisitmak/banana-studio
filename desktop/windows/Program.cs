@@ -137,7 +137,7 @@ internal sealed class StudioWindow : Form
             status.Text = $"Downloading and verifying Banana Studio {update.Version}…"; status.Visible = true; status.BringToFront();
             using var downloading = new CancellationTokenSource(TimeSpan.FromMinutes(20));
             var stage = await Updater.Prepare(update, publicKey, downloading.Token);
-            Updater.StartApply(stage);
+            try { Updater.StartApply(stage); } catch { Updater.DiscardStage(stage); throw; }
             Close();
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)

@@ -235,6 +235,8 @@ internal static partial class Updater
         if (stageReportingHealth != null) try { File.WriteAllText(Path.Combine(stageReportingHealth, HealthyMarker), "ok"); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
+    internal static void DiscardStage(string stage) { stageInProgress = null; TryDeleteDirectory(stage); }
+
     // A stage holds a full copy of the app, so finished ones must not accumulate.
     internal static void CleanFinishedStages()
     {

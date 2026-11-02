@@ -1,3 +1,4 @@
+import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
@@ -1903,7 +1904,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     placeholder="Folder Name"
                     value={newFolderName}
                     onChange={e => setNewFolderName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
+                    onKeyDown={submitOnEnter(handleCreateFolder)}
                   />
                   <button onClick={handleCreateFolder} className="bg-violet-600 text-white px-3 py-1 rounded">Save</button>
                 </div>
@@ -2654,7 +2655,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                       className="h-9 w-full rounded-lg border border-violet-400/30 bg-black/30 px-2.5 text-xs text-white outline-none focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/10"
                       value={newFolderName}
                       onChange={e => setNewFolderName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleRenameFolder()}
+                      onKeyDown={submitOnEnter(handleRenameFolder)}
                       aria-invalid={!!folderRenameError}
                       aria-describedby={folderRenameError ? 'rename-folder-error' : undefined}
                     />

@@ -39,7 +39,7 @@ const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
   try {
     const submit = response();
     await post({ method: 'POST', headers: {}, body: { endpoint: 'fal-ai/nano-banana-pro', input: { prompt: 'p' } } }, submit);
-    const id = submit.body?.requestId;
+    const id = submit.body?.requestId ?? submit.body?.taskId;
     const status = response();
     if (id) await poll({ method: 'GET', headers: {}, query: { requestId: id, endpoint: 'fal-ai/nano-banana-pro' } }, status);
     return { submit, status, attempts: globalThis.__table.attempts };
@@ -61,9 +61,11 @@ test('a registry insert that throws is retried the same way', async () => {
 });
 
 test('a registry that never recovers still answers with the error after three tries', async () => {
-  const { submit, attempts } = await run({ failures: 99 });
+  const { submit, status, attempts } = await run({ failures: 99 });
   assert.equal(submit.statusCode, 500);
   assert.match(submit.body.error, /could not be recorded/);
+  assert.equal(submit.body.taskId, 'fal-r1');
+  assert.equal(status.statusCode, 404);
   assert.equal(attempts, 3);
 });
 

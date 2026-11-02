@@ -1122,8 +1122,17 @@ export const Controls: React.FC<ControlsProps> = ({
         setIsTemplateMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (!isTemplateMenuOpen || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setIsTemplateMenuOpen(false);
+      templateButtonRef.current?.focus();
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [isTemplateMenuOpen]);
 
   // --- Brainstorm Handlers ---
@@ -2663,6 +2672,8 @@ export const Controls: React.FC<ControlsProps> = ({
                     ref={templateButtonRef}
                     onClick={handleToggleTemplateMenu}
                     title="Templates"
+                    aria-haspopup="dialog"
+                    aria-expanded={isTemplateMenuOpen}
                     className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border transition-all ${
                         isTemplateMenuOpen ? 'border-violet-400/35 bg-violet-500/15 text-violet-200' : 'border-white/[0.07] bg-[#171e28] text-gray-400 hover:border-white/15 hover:bg-[#1b2330] hover:text-white'
                     }`}
@@ -2674,6 +2685,8 @@ export const Controls: React.FC<ControlsProps> = ({
                 {isTemplateMenuOpen && createPortal(
                     <div 
                         ref={templateMenuRef}
+                        role="dialog"
+                        aria-label="Templates"
                         style={{
                             position: 'fixed',
                             left: `${templateMenuPos.left}px`,
@@ -2701,6 +2714,7 @@ export const Controls: React.FC<ControlsProps> = ({
                                             value={newTemplateName} 
                                             onChange={(e) => setNewTemplateName(e.target.value)}
                                             placeholder="Template Name..."
+                                            aria-label="Template name"
                                             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50"
                                             onKeyDown={(e) => e.key === 'Enter' && handleConfirmSave()}
                                          />

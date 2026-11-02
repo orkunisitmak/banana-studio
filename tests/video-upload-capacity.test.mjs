@@ -32,7 +32,7 @@ const scenario = async (start, steps, limits = { videos: 3 }, queued = false) =>
     await new Promise(r => setTimeout(r, 0));
   }
   gates.forEach(g => g.ok()); await Promise.all(pending); flush();
-  return { videos: config.referenceVideos.map(v => v.id).join(','), limit: errors.some(e => /Limit reached: \d+ videos?/.test(e || '')), uploading };
+  return { videos: config.referenceVideos.map(v => v.id).join(','), limit: errors.some(e => { const m = /Limit reached: (\d+) (videos?) max\./.exec(e || ''); return !!m && m[2] === (m[1] === '1' ? 'video' : 'videos'); }), uploading };
 };
 
 test('a second video picked while the last free slot uploads is not added', async () => {

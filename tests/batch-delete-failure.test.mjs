@@ -15,13 +15,15 @@ ${slice(storage, 'const deleteImagesFromIndexedDb', 'const clearImagesFromIndexe
 ${slice(storage, '// --- Pending Deletions Queue ---', '// --- Helper: Create Thumbnail ---')}
 ${slice(storage, '/** The delete never ran', 'export const toggleFavorite').replaceAll('export ', '')}
 const workspaceStorage = { DeleteNotQueuedError };
+${slice(app, '/** The workspace session check failed.', 'export default function App')}
 ${slice(app, '  // Put items whose delete never ran', '  const handleToggleFavorite')}
 return { deleteImage, deleteImages, retryPendingDeletions, handleDelete, handleDeleteMultiple, DeleteNotQueuedError }; };`, { loader: 'ts', format: 'cjs' }).code;
 
 const items = ['a', 'b', 'c'].map(id => ({ id, mediaType: 'image' }));
 // dbErrors: id -> message returned by Supabase, or an Error instance to make the call throw.
+// sessionErrorCalls: which deleteImage calls fail while looking up the session.
 // signedOutCalls: which deleteImage calls (0-based, in call order) find no session.
-const setup = ({ signedOutCalls = [], dbErrors = {}, indexedDbBroken = false } = {}) => {
+const setup = ({ signedOutCalls = [], sessionErrorCalls = [], dbErrors = {}, indexedDbBroken = false } = {}) => {
   const mod = { exports: {} }; new Function('module', code)(mod);
   const log = { toasts: [], idbDeleted: [] };
   const serverRows = new Set(['a', 'b', 'c']);
@@ -39,7 +41,7 @@ const setup = ({ signedOutCalls = [], dbErrors = {}, indexedDbBroken = false } =
   };
   const store = { delete: id => log.idbDeleted.push(id) };
   const env = {
-    supabase, bindMediaSession: async () => (signedOutCalls.includes(calls++) ? null : 'u1'), MEDIA_BUCKET_NAME: 'media', STORE_NAME: 'media',
+    supabase, bindMediaSession: async () => { const call = calls++; if (sessionErrorCalls.includes(call)) throw new Error('auth service down'); return signedOutCalls.includes(call) ? null : 'u1'; }, MEDIA_BUCKET_NAME: 'media', STORE_NAME: 'media',
     openDB: async () => {
       if (indexedDbBroken) throw new Error('IndexedDB unavailable');
       return { transaction: () => { const tx = { objectStore: () => store }; setTimeout(() => tx.oncomplete()); return tx; } };
@@ -176,4 +178,16 @@ test('deleting an id that is already gone resolves and queues nothing', async ()
   await t.deleteImage(items[0]);
   await t.deleteImage(items[0]);
   assert.deepEqual(t.pending(), []);
+});
+
+test('deleteImage rejects as not queued when the session lookup throws', async () => {
+  const t = setup({ sessionErrorCalls: [0] });
+  await assert.rejects(t.deleteImage(items[0]), err => err instanceof t.DeleteNotQueuedError && /auth service down/.test(err.message));
+  assert.deepEqual(t.pending(), []);
+});
+
+test('a batch whose session lookup throws is restored, not reported as queued', async () => {
+  const t = setup({ sessionErrorCalls: [0, 1] });
+  const result = await quiet(() => t.deleteImages(items.slice(0, 2)));
+  assert.deepEqual([ids(result.notQueued), ids(result.queued)], [['a', 'b'], []]);
 });

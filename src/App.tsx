@@ -81,6 +81,15 @@ const normalizeStoredMedia = (media: GeneratedMedia): GeneratedMedia => {
   };
 };
 
+/** The workspace session check failed. `completed` is set when it failed after the wrapped call had already finished, with that call's value in `result`. */
+class SessionChangedError extends Error {
+  completed?: { result: unknown };
+  constructor(message: string, completed?: { result: unknown }) {
+    super(message);
+    this.completed = completed;
+  }
+}
+
 export default function App() {
   return <AuthBoundary>{({ userId, profile }, onSignOut) => (
     <AuthorizedWorkspace key={userId} userId={userId} userProfile={profile} onSignOut={onSignOut} />
@@ -99,15 +108,15 @@ const AuthorizedWorkspace: React.FC<{
     workspaceActive.current = true;
     return () => { workspaceActive.current = false; };
   }, []);
-  const assertWorkspaceSession = async () => {
+  const assertWorkspaceSession = async (completed?: { result: unknown }) => {
     const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new Error('Session changed. Sign in again to continue.');
+    if (!workspaceActive.current || session?.user.id !== userId) throw new SessionChangedError('Session changed. Sign in again to continue.', completed);
   };
   const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {
       await assertWorkspaceSession();
       const result = await operation(...args);
-      await assertWorkspaceSession();
+      await assertWorkspaceSession({ result });
       return result;
     };
   const saveImage = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveImage(media, userId));
@@ -1307,7 +1316,9 @@ const AuthorizedWorkspace: React.FC<{
       await deleteImage(media);
     } catch (e) {
       console.error("Delete failed", e);
-      if (e instanceof workspaceStorage.DeleteNotQueuedError) {
+      // The delete finished and only the session check after it failed: it is gone, so keep it gone.
+      if (e instanceof SessionChangedError && e.completed) return;
+      if (e instanceof workspaceStorage.DeleteNotQueuedError || e instanceof SessionChangedError) {
         restoreDeletedMedia([media]);
         toast.error('Delete Failed', 'The image could not be deleted and is back in your library. Try again.');
       } else {
@@ -1324,9 +1335,10 @@ const AuthorizedWorkspace: React.FC<{
     try {
       ({ notQueued, queued } = await deleteImages(toDelete));
     } catch (e) {
-      // The session changed; we cannot tell what ran, so keep everything visible.
       console.error("Batch delete failed", e);
-      notQueued = toDelete;
+      // A session check after the deletes keeps their results; one before them means nothing ran.
+      if (e instanceof SessionChangedError && e.completed) ({ notQueued, queued } = e.completed.result as Awaited<ReturnType<typeof workspaceStorage.deleteImages>>);
+      else notQueued = toDelete;
     }
     if (notQueued.length === 0 && queued.length === 0) {
       toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);

@@ -1774,7 +1774,12 @@ export class DeleteNotQueuedError extends Error {}
 export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
   let dbDeletionError: unknown;
   if (supabase) {
-    const userId = await bindMediaSession();
+    let userId: string | null;
+    try {
+      userId = await bindMediaSession();
+    } catch (e) {
+      throw new DeleteNotQueuedError(`Session unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (!userId) throw new DeleteNotQueuedError('Not authenticated');
     // Delete storage files (best-effort - files may already be gone)
     try {

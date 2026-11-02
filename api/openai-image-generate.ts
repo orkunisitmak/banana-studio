@@ -103,7 +103,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid prompt references.' });
   }
   if (generationPrompt.length > 32000) return res.status(400).json({ error: 'Shorten the prompt to leave room for reference and canvas instructions (32,000 characters total).' });
-  const guard = context.guard || await startOpenAIRequest(req, res, user, 'image', body.id);
+  const guard = context.guard || await startOpenAIRequest(req, res, user, 'image', body.id, PROVIDER_LABELS[provider]);
   if (!guard) return;
   let providerStatus: number | undefined;
   let providerErrorCode: string | undefined;
@@ -129,7 +129,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     });
     if (insertError) {
       await guard.finish('rejected');
-      return res.status(insertError.code === '23505' ? 409 : 500).json({ error: 'Could not create the saved generation. No OpenAI request was sent.',
+      return res.status(insertError.code === '23505' ? 409 : 500).json({ error: `Could not create the saved generation. No ${PROVIDER_LABELS[provider]} request was sent.`,
         ...(insertError.code === '23505' ? { code: 'GENERATION_EXISTS' } : {}),
       });
     }

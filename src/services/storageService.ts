@@ -1806,7 +1806,11 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
 
 export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
   if (medias.length === 0) return;
-  await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} of ${medias.length} deletes failed: ${failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason)}`);
+  }
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {

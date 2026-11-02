@@ -40,6 +40,22 @@ test('an accepted enqueue whose body times out reconnects to the saved job', asy
   assert.deepEqual([...new Set(run.read)], [run.id]);
 });
 
+test('a readable 500 with the accepted durable id reconnects to the saved job', async () => {
+  const run = await generate(async (_url, init) => ({
+    status: 500, ok: false,
+    json: async () => ({ error: 'ack failed', id: JSON.parse(init.body).id, durable: true }),
+  }));
+  assert.equal(run.result.url, 'https://done');
+  assert.deepEqual(run.sent, [run.id]);
+  assert.deepEqual([...new Set(run.read)], [run.id]);
+});
+
+test('a readable 500 without an accepted id still fails', async () => {
+  const run = await generate(respond(500, { error: 'ack failed' }));
+  assert.match(run.error?.message || '', /ack failed/);
+  assert.deepEqual(run.read, []);
+});
+
 test('an unreadable or rejected non-202 enqueue still fails', async () => {
   for (const [status, body] of [[400, undefined], [202, { durable: false }]]) {
     const run = await generate(respond(status, body));

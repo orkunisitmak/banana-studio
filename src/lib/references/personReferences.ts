@@ -97,7 +97,7 @@ export const addSavedPersonToDraft = <T extends PersonDraft>(draft: T, person: S
   if (snapshotIds.size > 1) throw new Error('These saved photos are assigned to different people. Unassign them before adding this person.');
   const linked = definitions.find(group => group.savedPersonId === person.id)
     || definitions.find(group => snapshotIds.has(group.id));
-  const meAvailable = !definitions.some(group => group.id === 1) && !/@MAIN_PERSON\b|(?<![\w.+-])@ME\b/i.test(`${draft.prompt} ${draft.originalPrompt || ''}`);
+  const meAvailable = !definitions.some(group => group.id === 1) && !/@MAIN_PERSON\b|(?<!\w)@ME\b(?!\.\w)/i.test(`${draft.prompt} ${draft.originalPrompt || ''}`);
   const id = linked?.id ?? (person.isMe && meAvailable ? 1 : nextIdentityNumber(definitions.map(group => group.id), [draft.prompt, draft.originalPrompt]));
   const name = linked?.name || cleanPersonName(person.name);
   const pending: ReferenceImage[] = [];
@@ -159,7 +159,7 @@ export const normalizeReferencePrompt = (prompt: string, references: ReferenceIm
     if (index < 0) throw new Error('Prompttaki referans bu üretime ekli değil. Ekli referansları kontrol et.');
     return `image ${index + 1}`;
   };
-  return mapUnquotedPrompt(resolveStableImageReferences(prompt, inputs), text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<![\w.+-])@ME\b|@PERSON_(\d+)\b/gi,
+  return mapUnquotedPrompt(resolveStableImageReferences(prompt, inputs), text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<!\w)@ME\b(?!\.\w)|@PERSON_(\d+)\b/gi,
     (token, imageIndex, personIndex) => {
       if (imageIndex) return label(references[Number(imageIndex) - 1]);
       const id = personIndex ? Number(personIndex) : token.toUpperCase() === '@SECOND_PERSON' ? 2 : 1;
@@ -198,7 +198,7 @@ export const mergePersonReferenceInputs = (primary: ReferenceImage[], secondary:
   // Validate each namespace before merging; a missing token must not bind to the other draft.
   const validate = (prompt: string, refs: ReferenceImage[], definitions: PersonGroupDefinition[]) => {
     const ids = new Set(getPersonGroups(refs, definitions).map(group => group.id));
-    mapUnquotedPrompt(prompt, text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<![\w.+-])@ME\b|@PERSON_(\d+)\b/gi, (token, imageIndex, personIndex) => {
+    mapUnquotedPrompt(prompt, text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<!\w)@ME\b(?!\.\w)|@PERSON_(\d+)\b/gi, (token, imageIndex, personIndex) => {
       if (imageIndex) { if (!refs[Number(imageIndex) - 1]) throw new Error('Şablon birleştirilirken prompttaki referans bulunamadı.'); }
       else {
         const id = personIndex ? Number(personIndex) : token.toUpperCase() === '@SECOND_PERSON' ? 2 : 1;
@@ -234,7 +234,7 @@ export const mergePersonReferenceInputs = (primary: ReferenceImage[], secondary:
     const mapped = id == null ? undefined : personMap.get(id);
     references.push(mapped == null ? ref : assignReferencePerson(ref, mapped, personGroups.find(group => group.id === mapped)?.name));
   }
-  const prompt = mapUnquotedPrompt(secondaryPrompt, text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<![\w.+-])@ME\b|@PERSON_(\d+)\b/gi, (token, imageIndex, personIndex) => {
+  const prompt = mapUnquotedPrompt(secondaryPrompt, text => text.replace(/@REF_IMAGE_(\d+)\b|@MAIN_PERSON\b|@SECOND_PERSON\b|(?<!\w)@ME\b(?!\.\w)|@PERSON_(\d+)\b/gi, (token, imageIndex, personIndex) => {
     if (imageIndex) {
       const ref = secondary[Number(imageIndex) - 1];
       if (!ref) throw new Error('Şablon birleştirilirken prompttaki referans bulunamadı.');

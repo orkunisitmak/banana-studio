@@ -7,6 +7,7 @@ const out = await build({ entryPoints: [fileURLToPath(new URL('../src/lib/refere
 const { normalizeReferencePrompt, mergePersonReferenceInputs, addSavedPersonToDraft } = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
 
 const me = { id: 'a', data: 'https://x/a.png', mimeType: 'image/png', personId: 1 };
+const emails = ['name!@me.com', 'çağrı@me.com', 'a+b@ME.COM', 'x.y@me.com'].map(a => `Mail ${a} today`);
 const email = 'Thumbnail footer: contact jane@me.com in small white type';
 
 test('an @me.com email is plain text when no main person is attached', () => {
@@ -18,7 +19,7 @@ test('an @me.com email is not rewritten when a main person is attached', () => {
 });
 
 test('a real @ME mention still resolves, including next to punctuation', () => {
-  for (const prompt of ['@ME on the left', 'Put (@ME) on the left', 'Put @me, smiling']) {
+  for (const prompt of ['@ME on the left', 'Put (@ME) on the left', 'Put @me, smiling', '-@ME smiling', 'Left.@ME', 'Put @ME. Then smile']) {
     const out = normalizeReferencePrompt(prompt, [me]);
     assert.match(out, /the main person shown in image 1/, prompt);
   }
@@ -35,4 +36,29 @@ test('adding a saved person to a draft with an @me.com email still offers the Me
   const person = { id: 'p', name: 'Me', isMe: true, photos: [{ id: '1', data: 'https://x/p.png', mimeType: 'image/png' }] };
   const draft = addSavedPersonToDraft({ referenceImages: [], personGroups: [], prompt: email, originalPrompt: email }, person, 5);
   assert.equal(draft.referenceImages[0].personId, 1);
+});
+
+test('emails with punctuation or non-ASCII before @me.com stay plain text in every matcher', () => {
+  const guest = { id: 'g', data: 'https://x/g.png', mimeType: 'image/png', personId: 1 };
+  const person = { id: 'p', name: 'Me', isMe: true, photos: [{ id: '1', data: 'https://x/p.png', mimeType: 'image/png' }] };
+  for (const text of emails) {
+    assert.equal(normalizeReferencePrompt(text, [me]), text, text);
+    assert.equal(normalizeReferencePrompt(text, []), text, text);
+    assert.equal(mergePersonReferenceInputs([me], [guest], text, 'ok').prompt, `${text} ok`, text);
+    const draft = addSavedPersonToDraft({ referenceImages: [], personGroups: [], prompt: text, originalPrompt: text }, person, 5);
+    assert.equal(draft.referenceImages[0].personId, 1, text);
+  }
+});
+
+test('a mention right after punctuation counts as present when adding a saved person', () => {
+  const person = { id: 'p', name: 'Me', isMe: true, photos: [{ id: '1', data: 'https://x/p.png', mimeType: 'image/png' }] };
+  for (const prompt of ['-@ME smiling', 'Left.@ME']) {
+    const draft = addSavedPersonToDraft({ referenceImages: [], personGroups: [], prompt, originalPrompt: prompt }, person, 5);
+    assert.notEqual(draft.referenceImages[0]?.personId, 1, prompt);
+  }
+});
+
+test('merging templates maps a mention after punctuation', () => {
+  const guest = { id: 'g', data: 'https://x/g.png', mimeType: 'image/png', personId: 1 };
+  assert.match(mergePersonReferenceInputs([me], [guest], 'Intro', '-@ME and Left.@ME').prompt, /-@MAIN_PERSON and Left\.@MAIN_PERSON/);
 });

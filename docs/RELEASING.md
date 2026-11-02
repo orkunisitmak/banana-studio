@@ -2,7 +2,7 @@
 
 ## Windows community archive
 
-The verification workflow builds Windows x64 on `windows-2022`, tests the shared workspace and an isolated Credential Manager entry, runs the packaged mocked generation/protected edit, then uploads `prepared-windows-x64`. The archive includes the self-contained .NET application, pinned Node runtime, shared web/server build and sharp's installed runtime dependencies with licenses. No user data or provider key is included. The archive is unsigned; do not claim Authenticode validation or automatic updates.
+The verification workflow builds Windows x64 on `windows-2022`, tests the shared workspace and an isolated Credential Manager entry, runs the packaged mocked generation/protected edit, then uploads `prepared-windows-x64`. The archive includes the self-contained .NET application, pinned Node runtime, shared web/server build and sharp's installed runtime dependencies with licenses. No user data or provider key is included. The archive is not Authenticode-signed; do not claim Authenticode validation. Automatic updates need a signed `windows-update.json`; see [Verified Windows updates](#verified-windows-updates).
 
 Download the artifact from the verified source commit. Confirm `verification-windows-x64.json` matches the zip hash and commit before attaching both to the release. Test interactive clipboard, keyboard, Library and image/video preview in a Windows session. CI does not claim to perform that interactive acceptance test. A tester needing only Windows can download the portable zip, extract all files together and run `BananaStudio.exe`. Document the WebView2 Runtime requirement.
 

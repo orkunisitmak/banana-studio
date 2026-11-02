@@ -29,6 +29,7 @@ internal static partial class Updater
 
     private static string UpdatesDirectory => Path.Combine(WorkspaceProcess.DataDirectory, "updates");
     private static string? stageReportingHealth;
+    private static volatile string? stageInProgress;
 
     [GeneratedRegex(@"^\d+\.\d+\.\d+$")] private static partial Regex ReleaseVersion();
     [GeneratedRegex(@"^[0-9a-f]{64}$")] private static partial Regex Sha256Text();
@@ -98,6 +99,7 @@ internal static partial class Updater
         if (problem != null) throw new InvalidDataException(problem);
         RequireWritableInstall(AppContext.BaseDirectory);
         var stage = Path.Combine(UpdatesDirectory, Guid.NewGuid().ToString("N"));
+        stageInProgress = stage;
         Directory.CreateDirectory(stage);
         try
         {
@@ -117,11 +119,11 @@ internal static partial class Updater
                     await target.WriteAsync(buffer.AsMemory(0, read), cancel);
                 }
             }
-            ExtractVerified(archive, update, Path.Combine(stage, "payload"));
+            await Task.Run(() => ExtractVerified(archive, update, Path.Combine(stage, "payload")), cancel);
             File.Delete(archive);
             return stage;
         }
-        catch { TryDeleteDirectory(stage); throw; }
+        catch { stageInProgress = null; TryDeleteDirectory(stage); throw; }
     }
 
     // Hash and extraction use one handle that denies writes, so the checked bytes are the extracted bytes.
@@ -157,7 +159,8 @@ internal static partial class Updater
     // The verified copy applies the swap, because the running files cannot replace themselves.
     internal static void StartApply(string stage)
     {
-        var start = new ProcessStartInfo(Path.Combine(PayloadApp(Path.Combine(stage, "payload")), ExecutableName)) { UseShellExecute = false };
+        var payloadApp = PayloadApp(Path.Combine(stage, "payload"));
+        var start = new ProcessStartInfo(Path.Combine(payloadApp, ExecutableName)) { UseShellExecute = false, WorkingDirectory = payloadApp };
         start.ArgumentList.Add("--apply-update");
         start.ArgumentList.Add(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
         start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -171,17 +174,19 @@ internal static partial class Updater
         {
             if (!int.TryParse(processId, out var parent)) return 1;
             if (!IsOwnStage(stage)) return 1;
+            // A process keeps its working directory locked. Inheriting the install folder would block the swap.
+            Environment.CurrentDirectory = stage;
             WaitForExit(parent);
             var app = Path.Combine(target, ExecutableName);
             var ok = Apply(target, PayloadApp(Path.Combine(stage, "payload")), () =>
             {
-                var process = Process.Start(new ProcessStartInfo(app) { UseShellExecute = false, ArgumentList = { "--report-update-health", stage } });
+                var process = Process.Start(new ProcessStartInfo(app) { UseShellExecute = false, WorkingDirectory = target, ArgumentList = { "--report-update-health", stage } });
                 return () => { try { process?.Kill(true); process?.WaitForExit(10_000); } catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { } };
             }, () => File.Exists(Path.Combine(stage, HealthyMarker)), HealthTimeout);
             if (!ok)
             {
                 MessageBox.Show("The update could not start, so the previous version of Banana Studio was restored. Your gallery was not changed.", "Banana Studio");
-                Process.Start(new ProcessStartInfo(app) { UseShellExecute = false })?.Dispose();
+                Process.Start(new ProcessStartInfo(app) { UseShellExecute = false, WorkingDirectory = target })?.Dispose();
             }
             return ok ? 0 : 1;
         }
@@ -235,7 +240,7 @@ internal static partial class Updater
     {
         if (!Directory.Exists(UpdatesDirectory)) return;
         foreach (var stage in Directory.GetDirectories(UpdatesDirectory))
-            if (Guid.TryParseExact(Path.GetFileName(stage), "N", out _)) TryDeleteDirectory(stage);
+            if (stage != stageInProgress && Guid.TryParseExact(Path.GetFileName(stage), "N", out _)) TryDeleteDirectory(stage);
     }
 
     private static bool IsOwnStage(string stage)

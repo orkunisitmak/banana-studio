@@ -140,7 +140,7 @@ internal sealed class StudioWindow : Form
             Updater.StartApply(stage);
             Close();
         }
-        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             status.Visible = false;
             if (MessageBox.Show(this, "The update could not be completed, and nothing was changed. " + error.Message + "\n\nOpen the releases page to download it manually?", "Check for Updates", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) OpenExternal(Updater.ReleasesPage);

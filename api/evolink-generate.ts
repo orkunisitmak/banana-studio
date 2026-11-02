@@ -64,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.EVOLINK_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured' });
 
+  let acceptedTaskId: string | undefined;
   try {
     let body: GenerateRequest;
     try {
@@ -216,6 +217,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
     }
 
+    acceptedTaskId = data.id;
     await registerProviderTask(registry, 'evolink', data.id, user.id);
 
     return res.status(200).json({
@@ -227,6 +229,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (error: any) {
     console.error('EvoLink generate error:', error.message);
-    return res.status(500).json({ error: error.message || 'Video generation failed' });
+    return res.status(500).json({ error: error.message || 'Video generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }
 }

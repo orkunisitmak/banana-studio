@@ -71,3 +71,16 @@ test('finished updates are announced from an always-mounted live region while th
   const empty = renderToStaticMarkup(React.createElement(ClosedGallery, { ...gp, toasts: [] }));
   assert.match(empty, /data-notification-announcer/);
 });
+
+test('only added updates are announced, not the whole list again', () => {
+  const closed = renderToStaticMarkup(React.createElement(ClosedGallery, { ...gp, toasts }));
+  const region = closed.match(/<div[^>]*data-notification-announcer[^>]*>/)?.[0] ?? '';
+  assert.match(region, /aria-atomic="false"/);
+  assert.match(region, /aria-relevant="additions"/);
+});
+
+test('the open panel has its live region before the first update arrives', () => {
+  const emptyOpen = renderToStaticMarkup(React.createElement(Gallery, { ...gp, toasts: [] }));
+  const emptyPanel = emptyOpen.slice(emptyOpen.indexOf('Notifications</span>'));
+  assert.match(emptyPanel.slice(0, emptyPanel.indexOf('No notifications')), /role="status"[^>]*aria-live="polite"/);
+});

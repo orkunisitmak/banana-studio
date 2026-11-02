@@ -891,6 +891,11 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  // Updates already shown in the open panel are not announced again when it closes.
+  const [seenToastIds, setSeenToastIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (isNotificationPanelOpen) setSeenToastIds(new Set(toasts.map(toast => toast.id)));
+  }, [isNotificationPanelOpen, toasts]);
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
 
@@ -2255,8 +2260,8 @@ export const Gallery: React.FC<GalleryProps> = ({
               </button>
 
               {/* Always mounted so finished and failed updates are announced while the panel is closed; the open panel announces its own list. */}
-              <div data-notification-announcer role="status" aria-live="polite" className="sr-only">
-                {!isNotificationPanelOpen && toasts.filter(toast => toast.type !== 'loading').map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
+              <div data-notification-announcer role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" className="sr-only">
+                {!isNotificationPanelOpen && toasts.filter(toast => toast.type !== 'loading' && !seenToastIds.has(toast.id)).map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
               </div>
 
               {/* Notification Panel Dropdown */}
@@ -2283,7 +2288,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   </div>
 
                   {/* Notification List */}
-                  <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                  <div role="status" aria-live="polite" className="max-h-[400px] overflow-y-auto custom-scrollbar">
                     {toasts.length === 0 ? (
                       <div className="p-8 text-center">
                         <Bell className="w-10 h-10 text-gray-700 mx-auto mb-3" />
@@ -2291,7 +2296,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                         <p className="text-xs text-gray-600 mt-1">Generation updates will appear here</p>
                       </div>
                     ) : (
-                      <div role="status" aria-live="polite" className="p-2 space-y-2">
+                      <div className="p-2 space-y-2">
                         {toasts.map((toast) => {
                           const icons: Record<string, React.ReactNode> = {
                             success: <CheckCircle className="w-4 h-4 text-green-400" />,

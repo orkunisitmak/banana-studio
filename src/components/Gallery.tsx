@@ -2254,6 +2254,11 @@ export const Gallery: React.FC<GalleryProps> = ({
                 )}
               </button>
 
+              {/* Always mounted so finished and failed updates are announced while the panel is closed; the open panel announces its own list. */}
+              <div data-notification-announcer role="status" aria-live="polite" className="sr-only">
+                {!isNotificationPanelOpen && toasts.filter(toast => toast.type !== 'loading').map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
+              </div>
+
               {/* Notification Panel Dropdown */}
               {isNotificationPanelOpen && (
                 <div

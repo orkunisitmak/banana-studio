@@ -8,14 +8,14 @@ const deps = fileURLToPath(new URL('..', import.meta.url));
 const root = deps;
 const req = createRequire(deps + '/package.json');
 const { build } = req('esbuild');
-async function load(entry) {
+async function load(entry, panelOpen = true) {
   const out = await build({
     entryPoints: ['.' + entry], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', nodePaths: [deps + '/node_modules'], logLevel: 'silent',
     external: ['react', 'react-dom', 'react-dom/server', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
     loader: { '.css': 'empty', '.svg': 'dataurl', '.png': 'dataurl' },
     plugins: [{ name: 'open-panel', setup(b) { b.onLoad({ filter: /Gallery\.tsx$/ }, async a => {
       const fs = await import('node:fs'); let s = fs.readFileSync(a.path, 'utf8');
-      s = s.replace('[isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false)', '[isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(true)');
+      s = s.replace('[isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false)', '[isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(' + panelOpen + ')');
       return { contents: s, loader: 'tsx' }; }); } }],
   });
   const mod = { exports: {} };
@@ -31,6 +31,7 @@ const { renderToStaticMarkup } = req('react-dom/server');
 const React = req('react');
 req('react-dom').createPortal = node => node;
 const { Gallery } = await load('/src/components/Gallery.tsx');
+const { Gallery: ClosedGallery } = await load('/src/components/Gallery.tsx', false);
 const toasts = [{ id: 't1', type: 'success', title: 'Image ready' }, { id: 't2', type: 'loading', title: 'Generating image', progress: 40 }];
 const img = { id: 'a', url: 'https://example.com/a.png', thumbnailUrl: 'https://example.com/a.png', prompt: 'cat', aspectRatio: '1:1', resolution: '1K', imageModel: 'gemini-3-pro-image-preview', mediaType: 'image', timestamp: Date.now(), createdAt: Date.now(), referenceImages: [] };
 const gp = { images: [img], currentFolderId: null, onFolderSelect() {}, selectedImageId: null, onImageSelect() {}, onClear() {}, onUseAsReference() {}, onRecreate() {}, onDelete() {}, onDeleteMultiple() {}, onMove() {}, onToggleFavorite() {}, toasts, onDismissToast() {}, onDismissAllToasts() {} };
@@ -57,4 +58,16 @@ test('control: a loading card announces its progress with role=status and aria-l
 test('the bell is described with the number of updates', () => {
   assert.match(bell, /aria-describedby="notification-count"/);
   assert.match(html, /<span id="notification-count" class="sr-only">2 updates<\/span>/);
+});
+
+test('finished updates are announced from an always-mounted live region while the panel is closed, and progress is not', () => {
+  const closed = renderToStaticMarkup(React.createElement(ClosedGallery, { ...gp, toasts: [...toasts, { id: 't3', type: 'error', title: 'Generation failed', message: 'Try again' }] }));
+  const region = closed.match(/<div[^>]*data-notification-announcer[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+  assert.match(region, /role="status"/);
+  assert.match(region, /aria-live="polite"/);
+  assert.match(region, /Image ready/);
+  assert.match(region, /Generation failed\. Try again/);
+  assert.doesNotMatch(region, /Generating image/);
+  const empty = renderToStaticMarkup(React.createElement(ClosedGallery, { ...gp, toasts: [] }));
+  assert.match(empty, /data-notification-announcer/);
 });

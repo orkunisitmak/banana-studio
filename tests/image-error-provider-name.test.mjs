@@ -20,6 +20,8 @@ const out = await build({ entryPoints: ['api/openai-image-generate.ts'], absWork
 const handler = (await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'))).default;
 
 for (const key of ['OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'FAL_KEY']) process.env[key] = 'k';
+process.env.OPENAI_ENABLED = 'true';
+process.env.OPENROUTER_ENABLED = 'true';
 process.env.VERCEL_ENV = 'production';
 const jwt = 'h.' + Buffer.from(JSON.stringify({ session_id: '11111111-2222-3333-4444-555555555555' })).toString('base64url') + '.s';
 const call = async (model, provider) => {
@@ -50,3 +52,38 @@ for (const [model, provider, label] of cases) {
     assert.equal(res.body.error, `Could not create the saved generation. No ${label} request was sent.`);
   });
 }
+
+// The request guard reads OPENROUTER_ENABLED for OpenRouter image requests and OPENAI_ENABLED for the rest.
+const withSwitches = async (openai, openrouter, fn) => {
+  process.env.OPENAI_ENABLED = openai; process.env.OPENROUTER_ENABLED = openrouter;
+  try { await fn(); } finally { process.env.OPENAI_ENABLED = 'true'; process.env.OPENROUTER_ENABLED = 'true'; }
+};
+
+test('openrouter image: OPENROUTER_ENABLED=false turns it off even when OPENAI_ENABLED=true', async () => {
+  await withSwitches('true', 'false', async () => {
+    globalThis.__ledger = { allowed: false, reason: 'rate', retry_after: 30 };
+    const res = await call('gemini-nano-banana-2.1', 'openrouter');
+    assert.equal(res.code, 503);
+    assert.match(res.body.error, /OpenRouter/);
+  });
+});
+
+test('openrouter image: OPENAI_ENABLED=false does not turn it off', async () => {
+  await withSwitches('false', 'true', async () => {
+    globalThis.__ledger = { allowed: false, reason: 'rate', retry_after: 30 };
+    const res = await call('gemini-nano-banana-2.1', 'openrouter');
+    assert.equal(res.code, 429);
+  });
+});
+
+test('gemini image: OPENAI_ENABLED=false turns it off, OPENROUTER_ENABLED=false does not', async () => {
+  globalThis.__ledger = { allowed: false, reason: 'rate', retry_after: 30 };
+  await withSwitches('false', 'true', async () => {
+    const res = await call('gemini-nano-banana-2.1', 'gemini');
+    assert.equal(res.code, 503);
+    assert.match(res.body.error, /temporarily disabled/);
+  });
+  await withSwitches('true', 'false', async () => {
+    assert.equal((await call('gemini-nano-banana-2.1', 'gemini')).code, 429);
+  });
+});

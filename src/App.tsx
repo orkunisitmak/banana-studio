@@ -15,6 +15,7 @@ import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageMode
 import * as workspaceStorage from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
+import { brainstormImageCount } from './lib/brainstorm/brainstormLabels';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
 import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
@@ -264,6 +265,13 @@ const AuthorizedWorkspace: React.FC<{
     if (!isAuthenticated) return;
     let cancelled = false;
     const historyLoadStartedAt = Date.now();
+    // IDs from earlier pages, passed as an immutable snapshot to each merge.
+    let deliveredHistoryIds: ReadonlySet<string> = new Set();
+    const mergeHistoryPage = (page: GeneratedMedia[]) => {
+      const delivered = deliveredHistoryIds;
+      deliveredHistoryIds = new Set([...delivered, ...page.map(item => item.id)]);
+      setGeneratedMedia(current => mergeLoadedGalleryHistory(current, page, historyLoadStartedAt, delivered));
+    };
     setIsInitialGalleryLoading(true);
     setIsGalleryIndexLoading(true);
     setGalleryHistoryError(null);
@@ -275,7 +283,7 @@ const AuthorizedWorkspace: React.FC<{
             if (cancelled) return;
             // First callback contains exactly the newest 48 rows. Render it
             // immediately while storageService continues hydrating older pages.
-            setGeneratedMedia(current => mergeLoadedGalleryHistory(current, partialHistory.map(normalizeStoredMedia), historyLoadStartedAt));
+            mergeHistoryPage(partialHistory.map(normalizeStoredMedia));
             setIsInitialGalleryLoading(false);
           }, (error) => {
             if (!cancelled) setGalleryHistoryError(error.message);
@@ -302,7 +310,7 @@ const AuthorizedWorkspace: React.FC<{
         // Migrate legacy data
         const migratedHistory = history.map(normalizeStoredMedia);
 
-        setGeneratedMedia(current => mergeLoadedGalleryHistory(current, migratedHistory, historyLoadStartedAt));
+        mergeHistoryPage(migratedHistory);
         if (savedTemplates) setTemplates(normalizedTemplates);
         
         // Resume pending/processing videos and recover rows that were marked
@@ -1249,7 +1257,7 @@ const AuthorizedWorkspace: React.FC<{
       },
       onPrepared: () => {
         finishPreparing();
-        toast.updateToast(toastId, { title: `Generating ${batch.placeholders.length} images…`, message: 'Your ideas are ready. Creating images.' });
+        toast.updateToast(toastId, { title: `Generating ${brainstormImageCount(batch.placeholders.length)}…`, message: 'Your ideas are ready. Creating images.' });
       },
       onSettled: (completed, failed) => {
         const nextSettled = completed + failed;
@@ -1263,10 +1271,10 @@ const AuthorizedWorkspace: React.FC<{
     setIsBrainstormPreparing(true);
     setGeneratedMedia(previous => [...batch.placeholders, ...previous]);
     setActiveRequests(previous => previous + batch.placeholders.length);
-    const toastId = toast.loading(`Preparing ${batch.placeholders.length} images…`, 'You can follow your batch in the gallery.');
+    const toastId = toast.loading(`Preparing ${brainstormImageCount(batch.placeholders.length)}…`, 'You can follow your batch in the gallery.');
     void batch.run().then(({ completed, failed }) => {
       toast.dismissToast(toastId);
-      if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
+      if (!failed) toast.success('Brainstorm complete', `${brainstormImageCount(completed)} created.`);
       else if (completed) toast.warning('Batch partial', `${completed} created, ${failed} failed. Review the failed cards in the gallery.`);
       else toast.error('Brainstorm stopped', 'No images completed. Review the message on the gallery cards.');
     }).finally(finishPreparing);

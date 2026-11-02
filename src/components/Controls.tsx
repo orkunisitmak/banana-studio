@@ -1,4 +1,5 @@
 import { getMediaMimeType as getMimeType } from '../lib/references/mediaMimeType';
+import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
@@ -2877,7 +2878,7 @@ export const Controls: React.FC<ControlsProps> = ({
                             </div>;
                           })()}
                           <ImageReferenceSummary references={brainstormInputImages} />
-                          <p className="text-xs text-gray-400">{brainstormIdeaCount} ideas × {config.count} image{config.count > 1 ? 's' : ''} = {brainstormImageCount} images</p>
+                          <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, config.count, brainstormImageCount)}</p>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
                             disabled={!canBrainstormGenerate}
                             title={brainstormCostPreview.description}

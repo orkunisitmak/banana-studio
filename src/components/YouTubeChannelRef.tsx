@@ -20,6 +20,7 @@ import { analyzeYouTubeVideo } from '../services/youtubeBriefService';
 import { getPersonGroups } from '../lib/references/personReferences';
 import type { PersonGroupDefinition, ReferenceImage } from '../types';
 import type { YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
+import { normalizeSearch } from './gallerySearch';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { TextTaskStage } from '../services/geminiClient';
 
@@ -688,9 +689,9 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
 
                 {/* Video Grid */}
                 {!isLoading && videos.length > 0 && (() => {
-                  const query = browseSearch.toLowerCase().trim();
+                  const query = normalizeSearch(browseSearch);
                   const filteredVideos = query
-                    ? videos.filter((v) => v.title.toLowerCase().includes(query))
+                    ? videos.filter((v) => normalizeSearch(v.title).includes(query))
                     : videos;
 
                   return (

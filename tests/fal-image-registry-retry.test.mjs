@@ -64,6 +64,7 @@ test('a registry that never recovers still answers with the error after three tr
   const { submit, status, attempts } = await run({ failures: 99 });
   assert.equal(submit.statusCode, 500);
   assert.match(submit.body.error, /could not be recorded/);
+  assert.match(submit.body.error, /Contact an administrator before retrying\./);
   assert.equal(submit.body.taskId, 'fal-r1');
   assert.equal(status.statusCode, 404);
   assert.equal(attempts, 3);
@@ -78,9 +79,10 @@ test('an insert that saved the row before timing out counts as registered when t
 
 test('a duplicate that belongs to another user is not counted as registered', async () => {
   const taken = { provider: 'fal', task_id: 'fal-r1', user_id: 'someone-else' };
-  const { submit, attempts } = await run({ failures: 0, rows: [taken] });
+  const { submit, status, attempts } = await run({ failures: 0, rows: [taken] });
   assert.notEqual(submit.statusCode, 200);
   assert.match(submit.body.error, /could not be recorded/);
+  assert.equal(status.statusCode, 404);
   assert.equal(attempts, 3);
 });
 

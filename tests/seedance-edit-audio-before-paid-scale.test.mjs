@@ -57,3 +57,11 @@ test('control: the same Edit without audio does submit the scale job', async () 
   try { await createVideoTask(config(null), { id: 'g2' }); } catch {}
   assert.equal(scaleSubmits, 1);
 });
+
+test('control: a valid reference audio passes the check and the scale job is submitted', async () => {
+  scaleSubmits = 0;
+  let error;
+  try { await createVideoTask(config('https://cdn.example/a.mp3'), { id: 'g3' }); } catch (e) { error = e; }
+  assert.doesNotMatch(error?.message ?? '', /reference audio/);
+  assert.equal(scaleSubmits, 1);
+});

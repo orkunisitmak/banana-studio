@@ -28,6 +28,7 @@ import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
 import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
 import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
+import { galleryCardLabel, isCardActivationKey } from '../lib/gallery/cardKeyboard';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
 
@@ -2716,7 +2717,7 @@ export const Gallery: React.FC<GalleryProps> = ({
           })}
 
           {/* Images */}
-          {visibleImages.map((media) => {
+          {visibleImages.map((media, mediaIndex) => {
             const isSelected = selectedIds.has(media.id);
             const aspectRatio = getMediaDisplayAspectRatio(media);
             const cardStyle = getGalleryCardStyle(aspectRatio, targetRowHeight);
@@ -2836,10 +2837,11 @@ export const Gallery: React.FC<GalleryProps> = ({
                 onDragStart={(e) => handleDragStart(e, 'image', media.id, media)}
                 role="button"
                 tabIndex={0}
-                aria-label={`${media.mediaType === 'video' ? 'Open video' : 'Open image'}: ${(media.prompt || '').slice(0, 80)}`}
+                aria-label={galleryCardLabel(media.mediaType, media.prompt, isSelectionMode, isSelected, mediaIndex + 1, visibleImages.length)}
+                aria-pressed={isSelectionMode ? isSelected : undefined}
                 onClick={(e) => activateCard(e.shiftKey)}
                 onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  if (!isCardActivationKey(e.key, e.target === e.currentTarget, e.repeat)) return;
                   e.preventDefault();
                   activateCard(e.shiftKey);
                 }}

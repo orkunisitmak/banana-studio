@@ -93,3 +93,28 @@ test('Escape closes the open Templates menu and returns focus to its button', as
   for (const [, fn] of keydown) fn({ key: 'Escape', defaultPrevented: false });
   assert.deepEqual(closes, [false]);
 });
+
+test('opening the Templates menu moves focus onto the menu', async () => {
+  const Controls = await loadControls(true);
+  const realUseEffect = React.useEffect;
+  const realUseRef = React.useRef;
+  const refs = [];
+  const focusEffects = [];
+  React.useRef = init => { const r = realUseRef(init); refs.push(r); return r; };
+  React.useEffect = effect => {
+    if (/templateMenuRef\.current\??\.focus\(\)/.test(effect.toString())) focusEffects.push(effect);
+  };
+  let html;
+  try {
+    html = renderToStaticMarkup(React.createElement(Controls, props));
+  } finally {
+    React.useEffect = realUseEffect;
+    React.useRef = realUseRef;
+  }
+  assert.match(html.match(/<div[^>]*w-\[300px\][^>]*>/)?.[0], /tabindex="-1"/);
+  assert.equal(focusEffects.length, 1, 'no effect focuses the open Templates menu');
+  let focused = 0;
+  for (const r of refs) r.current = { focus: () => { focused++; } };
+  focusEffects[0]();
+  assert.equal(focused, 1);
+});

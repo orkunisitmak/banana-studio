@@ -1110,6 +1110,11 @@ export const Controls: React.FC<ControlsProps> = ({
       }
   };
 
+  // Move focus into the portaled Templates menu so the next Tab reaches its controls
+  useEffect(() => {
+    if (isTemplateMenuOpen) templateMenuRef.current?.focus();
+  }, [isTemplateMenuOpen]);
+
   // Click outside listener for template menu
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -2687,13 +2692,14 @@ export const Controls: React.FC<ControlsProps> = ({
                         ref={templateMenuRef}
                         role="dialog"
                         aria-label="Templates"
+                        tabIndex={-1}
                         style={{
                             position: 'fixed',
                             left: `${templateMenuPos.left}px`,
                             bottom: `${templateMenuPos.bottom}px`,
                             zIndex: 9999
                         }}
-                        className="w-[300px] bg-[#161b22] border border-gray-700/50 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200"
+                        className="w-[300px] outline-none bg-[#161b22] border border-gray-700/50 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200"
                     >
                          {/* Header */}
                          <div className="px-4 py-3 bg-gray-900/50 border-b border-gray-800">

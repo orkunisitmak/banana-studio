@@ -62,6 +62,7 @@ test('a registry failure after Seedance accepts keeps the registry message and r
   const res = await submit(jsonResponse(200, { request_id: 'abc' }), { registerFail: true });
   assert.equal(res.statusCode, 502);
   assert.match(res.body.error, /registry down/);
+  assert.equal(res.body.retryable, false);
   assert.equal(res.body.taskId, undefined);
 });
 

@@ -11,7 +11,7 @@ const { build } = req('esbuild');
 
 const stubs = {
   '/authService': 'export const logUsage=()=>{};export const supabase={auth:{getSession:async()=>({data:{session:{access_token:"t",user:{id:"u1"}}}})}};',
-  '/storageService': 'export const uploadBase64ToPublicUrl=async()=>"https://cdn.example/frame.jpg";export const uploadBlobToPublicUrl=async()=>"";export const uploadVideoBlobToPublicUrl=async()=>"";export const refreshMediaAccessUrl=async u=>u;',
+  '/storageService': 'export const uploadBase64ToPublicUrl=async()=>(globalThis.__media++,"https://cdn.example/frame.jpg");export const uploadBlobToPublicUrl=async()=>(globalThis.__media++,"");export const uploadVideoBlobToPublicUrl=async()=>(globalThis.__media++,"");export const refreshMediaAccessUrl=async u=>(globalThis.__media++,u);',
   '/providerRouting': 'export const selectProvider=async()=>"evolink";',
 };
 const compiled = await build({ entryPoints: [root + '/src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
@@ -34,6 +34,7 @@ globalThis.window = globalThis;
 globalThis.document = { createElement: () => ({ videoWidth: 1920, videoHeight: 1080, duration: 10, removeAttribute() {}, load() {}, pause() {},
   set src(_) { queueMicrotask(() => { this.onloadedmetadata?.(); }); } }) };
 const sent = [];
+globalThis.__media = 0; // every media upload or refresh the stubs see
 globalThis.fetch = async (url, init) => { sent.push({ url, body: init?.body }); return new Response(JSON.stringify({ taskId: 't1' }), { status: 200 }); };
 
 const base = {
@@ -50,18 +51,20 @@ const plain = pad('Replace the lead with the new person in the clip. ', 1990); /
 test('a Recast prompt that is under 2,000 characters only before @VIDEO / #IMAGE_1 expand is rejected by the composer check, before any media is prepared', async () => {
   assert.equal(withTags.length, 1990);
   assert.match(getH3MaxConfigError({ ...base, prompt: withTags }) || '', /must not exceed/);
-  sent.length = 0;
+  sent.length = 0; globalThis.__media = 0;
   let error;
   try { await createVideoTask({ ...base, prompt: withTags }, { id: 'g1' }); } catch (e) { error = e; }
   assert.match(error?.message || '', /must not exceed/);
   assert.equal(sent.length, 0);
+  assert.equal(globalThis.__media, 0, 'no media was prepared');
 });
 
 test('a tagged prompt that stays under 2,000 characters once expanded is accepted and submitted expanded', async () => {
   const short = pad('Replace the lead with #IMAGE_1 in @VIDEO. ', 1900);
   assert.equal(getH3MaxConfigError({ ...base, prompt: short }), null);
-  sent.length = 0;
+  sent.length = 0; globalThis.__media = 0;
   await createVideoTask({ ...base, prompt: short }, { id: 'g2' });
+  assert.ok(globalThis.__media > 0, 'the counters see media preparation for a valid prompt');
   const prompt = JSON.parse(sent[0].body).prompt;
   assert.match(prompt, /^Replace the lead with reference photo 1 in the source video\./);
   assert.ok(prompt.length <= 2000);

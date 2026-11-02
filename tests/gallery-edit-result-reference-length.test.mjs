@@ -61,13 +61,16 @@ globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {
     let src = '';
     Object.defineProperty(media, 'src', { get: () => src, set: value => {
       src = value;
-      if (value && kind === 'video') setTimeout(() => { media.duration = SOURCE_SECONDS; media.onloadedmetadata?.(); }, 1);
+      if (value && kind === 'video') setTimeout(() => {
+        if (value.includes('unreadable')) { media.onerror?.(); return; }
+        media.duration = SOURCE_SECONDS; media.onloadedmetadata?.();
+      }, 1);
     } });
     return media;
   } };
 req('react-dom').createPortal = node => node;
 
-const { Controls } = await bundle('./src/components/Controls.tsx');
+const { Controls, galleryVideoDuration } = await bundle('./src/components/Controls.tsx');
 const { estimateVideoCost } = await bundle('./src/types.ts');
 
 // The saved Video Edit result as the gallery lists it (App placeholder: videoDuration -1 for Edit).
@@ -132,5 +135,32 @@ test('a draft edit made while the dropped video length is being read is kept', a
   latest = { ...latest, prompt: 'typed while reading' };
   await pending;
   assert.equal(latest.prompt, 'typed while reading');
+  assert.equal(latest.referenceVideos.length, 1);
+});
+
+test('an invalid saved output length falls back to the valid saved source length instead of reading the file', async () => {
+  const dropped = await dropGalleryCard({ ...galleryEditResult, id: 'v3', videoOutputDuration: -1, videoDuration: 8 });
+  assert.equal(dropped.referenceVideos[0].duration, 8);
+  assert.equal(await galleryVideoDuration({ url: galleryEditResult.url, videoOutputDuration: -1, videoDuration: 8 }), 8);
+});
+
+test('"Use as reference" and drop share galleryVideoDuration: an Edit result with no saved length is measured as 12 s', async () => {
+  assert.equal(await galleryVideoDuration({ url: galleryEditResult.url, videoDuration: -1 }), SOURCE_SECONDS);
+});
+
+test('a video whose length cannot be read is still attached, with no length', async () => {
+  const dropped = await dropGalleryCard({ ...galleryEditResult, id: 'v4', url: 'https://example.supabase.co/media/unreadable.mp4' });
+  assert.equal(dropped.referenceVideos.length, 1);
+  assert.equal(dropped.referenceVideos[0].duration, undefined);
+});
+
+test('two drops that finish reading together attach only one video when the action allows one', async () => {
+  let latest = editConfig;
+  const onChange = next => { latest = typeof next === 'function' ? next(latest) : next; };
+  dropHandler = undefined;
+  renderToStaticMarkup(React.createElement(Controls, props(editConfig, onChange)));
+  const drop = id => dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
+    dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id }) : '' } });
+  await Promise.all([drop('a'), drop('b')]);
   assert.equal(latest.referenceVideos.length, 1);
 });

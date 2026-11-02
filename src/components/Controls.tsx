@@ -136,7 +136,7 @@ const readMediaDuration = (url: string, kind: 'video' | 'audio'): Promise<number
 const readVideoDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'video');
 // A saved Video Edit result has no length of its own (-1 = source length), so measure it like an uploaded file.
 export const galleryVideoDuration = async (media: { url: string; videoOutputDuration?: number; videoDuration?: number }): Promise<number | undefined> => {
-  const known = media.videoOutputDuration || media.videoDuration;
+  const known = media.videoOutputDuration != null && media.videoOutputDuration > 0 ? media.videoOutputDuration : media.videoDuration;
   return known && known > 0 ? known : readVideoDuration(media.url);
 };
 const readAudioDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'audio');

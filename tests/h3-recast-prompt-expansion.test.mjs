@@ -14,7 +14,7 @@ const stubs = {
   '/storageService': 'export const uploadBase64ToPublicUrl=async()=>(globalThis.__media++,"https://cdn.example/frame.jpg");export const uploadBlobToPublicUrl=async()=>(globalThis.__media++,"");export const uploadVideoBlobToPublicUrl=async()=>(globalThis.__media++,"");export const refreshMediaAccessUrl=async u=>(globalThis.__media++,u);',
   '/providerRouting': 'export const selectProvider=async()=>"evolink";',
 };
-const compiled = await build({ entryPoints: [root + '/src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
+const compiled = await build({ entryPoints: ['src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
   define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
   plugins: [{ name: 'stubs', setup(b) {
     b.onResolve({ filter: /.*/ }, args => { const key = Object.keys(stubs).find(stub => args.path.endsWith(stub)); return key ? { path: key, namespace: 'stub' } : undefined; });
@@ -24,7 +24,7 @@ const compiled = await build({ entryPoints: [root + '/src/services/runwayService
 const mod = { exports: {} };
 new Function('module', 'exports', 'require', compiled.outputFiles[0].text)(mod, mod.exports, p => req(p));
 const { createVideoTask } = mod.exports;
-const cfg = await build({ entryPoints: [root + '/src/lib/video/h3MaxConfig.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent' });
+const cfg = await build({ entryPoints: ['src/lib/video/h3MaxConfig.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent' });
 const cfgMod = { exports: {} };
 new Function('module', 'exports', 'require', cfg.outputFiles[0].text)(cfgMod, cfgMod.exports, p => req(p));
 const { getH3MaxConfigError } = cfgMod.exports;

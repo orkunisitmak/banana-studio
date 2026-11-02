@@ -33,8 +33,9 @@ test('video template row shows the video quality and ratio, not the image leftov
   const base = { prompt: 'p', count: 1, aspectRatio: '1:1', resolution: '1K', imageModel: 'gemini-nano-banana-2.1', referenceImages: [], referenceVideos: [], referenceAudios: [], mode: 'image', videoModel: 'seedance-2.5', videoOperation: 'generate', videoAspectRatio: '9:16', videoQuality: '1080p', videoDuration: 5, audioEnabled: true, videoPromptExpansionMode: 'balanced' };
   const tpl = { id: 't', name: 'Tall clip', createdAt: 1, config: { ...base, mode: 'video' } };
   const bare = { id: 'b', name: 'Bare clip', createdAt: 2, config: { ...base, mode: 'video', videoQuality: undefined, videoAspectRatio: undefined } };
+  const blank = { id: 'x', name: 'Blank clip', createdAt: 3, config: { ...base, mode: 'video', videoQuality: undefined, videoAspectRatio: undefined, aspectRatio: undefined } };
   const noop = () => {};
-  const html = renderToStaticMarkup(React.createElement(mod.exports.Controls, { config: base, templates: [tpl, bare], onChange: noop, onGenerate: noop, onSaveTemplate: noop, onUpdateTemplate: noop, onDeleteTemplate: noop, onSelectTemplate: noop, activeRequests: 0 }));
+  const html = renderToStaticMarkup(React.createElement(mod.exports.Controls, { config: base, templates: [tpl, bare, blank], onChange: noop, onGenerate: noop, onSaveTemplate: noop, onUpdateTemplate: noop, onDeleteTemplate: noop, onSelectTemplate: noop, activeRequests: 0 }));
   assert.ok(html.includes('Tall clip'), 'template list rendered');
   const row = html.slice(html.indexOf('Tall clip'), html.indexOf('Tall clip') + 600);
   const chips = [...row.matchAll(/text-gray-400">([^<]+)</g)].map(m => m[1]);
@@ -43,5 +44,9 @@ test('video template row shows the video quality and ratio, not the image leftov
   // A saved video template without quality or ratio reads like History: 720p, and the image ratio as the fallback.
   const bareRow = html.slice(html.indexOf('Bare clip'), html.indexOf('Bare clip') + 600);
   const bareChips = [...bareRow.matchAll(/text-gray-400">([^<]+)</g)].map(m => m[1]);
-  assert.ok(bareChips.includes('720p') && !bareChips.includes('1K'), `bare video template chips read: ${bareChips.join(' | ')}`);
+  assert.ok(bareChips.includes('720p') && bareChips.includes('1:1') && !bareChips.includes('1K'), `bare video template chips read: ${bareChips.join(' | ')}`);
+  // With no ratio anywhere the chip shows a dash, not an empty box.
+  const blankRow = html.slice(html.indexOf('Blank clip'), html.indexOf('Blank clip') + 600);
+  const blankChips = [...blankRow.matchAll(/text-gray-400">([^<]+)</g)].map(m => m[1]);
+  assert.ok(blankChips.includes('720p') && blankChips.includes('—'), `blank video template chips read: ${blankChips.join(' | ')}`);
 });

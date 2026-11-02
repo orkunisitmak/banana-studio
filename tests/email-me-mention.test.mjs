@@ -29,6 +29,7 @@ test('a real @ME mention still resolves, including next to punctuation', () => {
 test('merging templates leaves an @me.com email alone and still maps a real @ME', () => {
   const guest = { id: 'g', data: 'https://x/g.png', mimeType: 'image/png', personId: 1 };
   assert.equal(mergePersonReferenceInputs([], [], 'Mail jane@me.com', 'and bob@me.com').prompt, 'Mail jane@me.com and bob@me.com');
+  assert.equal(mergePersonReferenceInputs([me], [guest], 'Intro', 'Mail jane@me.com').prompt, 'Intro Mail jane@me.com');
   assert.match(mergePersonReferenceInputs([me], [guest], 'Intro', '@ME waves').prompt, /@MAIN_PERSON waves/);
 });
 
@@ -44,7 +45,7 @@ test('emails with punctuation or non-ASCII before @me.com stay plain text in eve
   for (const text of emails) {
     assert.equal(normalizeReferencePrompt(text, [me]), text, text);
     assert.equal(normalizeReferencePrompt(text, []), text, text);
-    assert.equal(mergePersonReferenceInputs([me], [guest], text, 'ok').prompt, `${text} ok`, text);
+    assert.equal(mergePersonReferenceInputs([me], [guest], 'Intro', text).prompt, `Intro ${text}`, text);
     const draft = addSavedPersonToDraft({ referenceImages: [], personGroups: [], prompt: text, originalPrompt: text }, person, 5);
     assert.equal(draft.referenceImages[0].personId, 1, text);
   }

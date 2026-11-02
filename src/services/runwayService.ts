@@ -9,7 +9,6 @@ import { getSeedanceFrameError, prepareSeedanceFramePrompt } from '../lib/video/
 import { prepareReferenceAudio } from '../lib/video/referenceAudio';
 import { buildH3MaxInput, H3_MAX_CAPABILITIES, type H3MaxMode } from '../lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxMode, getH3MaxReferenceImages, getH3MaxRequestBody, getKnownVideoDuration } from '../lib/video/h3MaxConfig';
-import { normalizeH3MaxPromptLanguage } from '../lib/video/h3MaxPromptGuide';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
 import { hydrateH3MaxReferenceDimensions } from '../lib/video/h3MaxReferenceMetadata';
 export { hydrateH3MaxReferenceDimensions } from '../lib/video/h3MaxReferenceMetadata';
@@ -851,7 +850,6 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     images:getH3MaxReferenceImages(resolved).map(image=>({width:image.width,height:image.height})),
     videos:resolved.referenceVideos.map(video=>({duration:video.duration,width:video.width,height:video.height,size:video.size})),
   }};
-  if(H3_MAX_CAPABILITIES[mode].prompt!=='unsupported')body.prompt=normalizeH3MaxPromptLanguage(config.prompt,{mode,options:config.h3MaxOptions},{images:config.referenceImages,videos:referenceVideos,audios:referenceAudios});
   const submissionBody={...body,...(context?.id?{generationId:context.id}:{})};
   // Validate final URLs and hydrated duration limits immediately before admission.
   buildH3MaxInput(body);

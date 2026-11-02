@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Real api/openai-image-generate.ts handler and real openaiGuard.ts. Only auth/DB clients are stubbed.
 const root = fileURLToPath(new URL('..', import.meta.url));
+const pkgUrl = pathToFileURL(root + 'package.json').href;
 const { build } = createRequire(root + '/package.json')('esbuild');
 const stubs = {
   auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});
@@ -12,9 +13,9 @@ export const createServiceRoleClient=()=>({rpc:()=>({abortSignal:async()=>({data
 export const createUserScopedClient=()=>({from:()=>({insert:async()=>({error:globalThis.__insertError||null})})});`,
 };
 const stubbed = new RegExp(`/(${Object.keys(stubs).join('|')})\\.js$`);
-const out = await build({ entryPoints: ['api/openai-image-generate.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': JSON.stringify('file://' + root + '/package.json') }, banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr('file://"+root+"/package.json');" },
+const out = await build({ entryPoints: ['api/openai-image-generate.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': JSON.stringify(pkgUrl) }, banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr("+JSON.stringify(pkgUrl)+");" },
   plugins: [{ name: 'stubs', setup(b) {
-    b.onResolve({ filter: stubbed }, a => a.importer.includes('/api/') ? ({ path: a.path.match(stubbed)[1], namespace: 'stub' }) : undefined);
+    b.onResolve({ filter: stubbed }, a => a.importer.replaceAll('\\','/').includes('/api/') ? ({ path: a.path.match(stubbed)[1], namespace: 'stub' }) : undefined);
     b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));
   } }] });
 const handler = (await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'))).default;

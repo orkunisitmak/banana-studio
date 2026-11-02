@@ -164,8 +164,9 @@ test('Space on a reference thumbnail does not also play or pause the video playe
   finally { React.useEffect = realUseEffect; }
   assert.ok(handlers.length, 'video player key handler not registered');
   // Minimal element: matches() understands the tag and role selectors the handler passes.
-  const el = (tag, role) => ({ matches: sel => sel.split(',').map(x => x.trim()).some(x => x === tag || (role && x === `[role="${role}"]`)) });
+  const el = (tag, role, inDialog) => ({ closest: sel => (inDialog && sel === '[role="dialog"]' ? {} : null), matches: sel => sel.split(',').map(x => x.trim()).some(x => x === tag || (role && x === `[role="${role}"]`)) });
   const space = target => { let prevented = false; handlers.forEach(fn => fn({ key: ' ', target, preventDefault() { prevented = true; } })); return prevented; };
   assert.equal(space(el('div', 'button')), false);
+  assert.equal(space(el('div', undefined, true)), false);
   assert.equal(space(el('div')), true);
 });

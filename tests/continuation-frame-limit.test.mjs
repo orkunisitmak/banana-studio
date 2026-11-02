@@ -14,7 +14,7 @@ const stubs = {
   '/storageService': 'export const uploadBase64ToPublicUrl=async()=>"https://cdn.example/frame.jpg";export const uploadBlobToPublicUrl=async()=>"";export const uploadVideoBlobToPublicUrl=async()=>"";export const refreshMediaAccessUrl=async u=>u;',
   '/providerRouting': 'export const selectProvider=async()=>"evolink";',
 };
-const compiled = await build({ entryPoints: [root + '/src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
+const compiled = await build({ entryPoints: ['src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
   define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
   plugins: [{ name: 'stubs', setup(b) {
     b.onResolve({ filter: /.*/ }, args => { const key = Object.keys(stubs).find(stub => args.path.endsWith(stub)); return key ? { path: key, namespace: 'stub' } : undefined; });

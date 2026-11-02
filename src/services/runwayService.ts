@@ -513,6 +513,7 @@ const prepareReferenceVideos = async (
   videoModel: VideoModelId,
   operation: VideoOperation,
   hasManualFirstFrame = false,
+  assertRoomForFrames: (frameCount: number) => void = () => {},
 ): Promise<{
   requestVideos: ReferenceVideo[];
   persistedVideos: ReferenceVideo[];
@@ -559,6 +560,7 @@ const prepareReferenceVideos = async (
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
+        assertRoomForFrames(generatedFirstFrames.length + 1);
         generatedFirstFrames.push(await extractContinuationFirstFrame(ref.url, targetAspectRatio, quality, label));
         extractedVideoIndices.push(i);
         continue;
@@ -921,6 +923,17 @@ export const createVideoTask = async (
     videoModel,
     videoOperation,
     referenceImages.some(image => image.isFirstFrame),
+    // The extracted frame becomes one more image reference; stop before extracting if that exceeds the route limit.
+    frameCount => {
+      const frames = Array.from({ length: frameCount }, () => ({}) as ReferenceImage);
+      const frameRouteError = seedanceProviderError(selectedProvider, {
+        videoModel, mode: determineMode([...referenceImages, ...frames], refVids.slice(frameCount), refAudios, videoOperation),
+        duration: videoDuration, quality: videoQuality, aspectRatio: videoAspectRatio,
+        imageUrls: Array.from({ length: referenceImages.length + frameCount }, () => ''),
+        videoUrls: refVids.slice(frameCount).map(() => ''), audioUrls: refAudios.map(() => ''),
+      });
+      if (frameRouteError) throw new Error(`Continue turns the previous video into a first-frame image, which needs one more image slot than is free. Remove a reference image or disable Continue.`);
+    },
   );
   const maximumReferenceDuration = videoModel === 'seedance-2.5' ? 30 : 15;
   const audioUrls = await Promise.all(refAudios.map((a, i) =>

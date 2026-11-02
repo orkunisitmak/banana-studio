@@ -1,5 +1,5 @@
 import { PROVIDER_LABELS } from '../lib/providers';
-import { videoProviderName, videoProviderLabel } from '../lib/video/videoProviderName';
+import { videoProviderName, brokenVideoProviderLabel } from '../lib/video/videoProviderName';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -2931,9 +2931,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <span className="text-[9px] text-gray-500 max-w-[80%] text-center leading-tight">
                       {media.error || 'Source URL may have expired'}
                     </span>
-                    {media.mediaType === 'video' && media.taskId && (
+                    {brokenVideoProviderLabel(media) && (
                       <span className="text-[9px] text-gray-500 max-w-[80%] text-center leading-tight">
-                        {videoProviderLabel(media.taskId, media.videoModel === 'minimax-h3')}
+                        {brokenVideoProviderLabel(media)}
                       </span>
                     )}
                     {!isReadOnly && <div className="flex items-center gap-2">

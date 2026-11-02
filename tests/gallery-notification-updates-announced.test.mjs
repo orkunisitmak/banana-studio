@@ -46,7 +46,7 @@ test('sanity: bell, badge count and panel rendered', () => {
 
 test('notification count and updates reach screen readers', () => {
   const nameHasCount = /aria-label="[^"]*\d/.test(bell);
-  const listIsLive = /role="(status|log|alert)"|aria-live=/.test(panel);
+  const listIsLive = /data-notification-announcer/.test(html);
   assert.ok(nameHasCount || listIsLive, 'bell is always just "Notifications" (badge "2" is a bare span) and the notification list is not a live region, so finished or failed generations are never announced; bell=' + bell.slice(0, 80));
 });
 
@@ -79,8 +79,15 @@ test('only added updates are announced, not the whole list again', () => {
   assert.match(region, /aria-relevant="additions"/);
 });
 
-test('the open panel has its live region before the first update arrives', () => {
+test('the announcer stays mounted with the panel open, including when empty, and the panel list is not a live region', () => {
   const emptyOpen = renderToStaticMarkup(React.createElement(Gallery, { ...gp, toasts: [] }));
+  assert.match(emptyOpen, /data-notification-announcer[^>]*role="status"|role="status"[^>]*data-notification-announcer/);
   const emptyPanel = emptyOpen.slice(emptyOpen.indexOf('Notifications</span>'));
-  assert.match(emptyPanel.slice(0, emptyPanel.indexOf('No notifications')), /role="status"[^>]*aria-live="polite"/);
+  assert.doesNotMatch(emptyPanel.slice(0, emptyPanel.indexOf('No notifications')), /aria-live|role="status"/);
+  const open = renderToStaticMarkup(React.createElement(Gallery, { ...gp, toasts }));
+  const region = open.match(/<div[^>]*data-notification-announcer[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+  assert.match(region, /Image ready/);
+  assert.doesNotMatch(region, /Generating image/);
+  const list = open.slice(open.indexOf('Notifications</span>'), open.indexOf('generation(s) in progress'));
+  assert.doesNotMatch(list, /aria-live|role="status"/);
 });

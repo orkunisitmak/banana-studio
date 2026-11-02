@@ -891,11 +891,6 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
-  // Updates already shown in the open panel are not announced again when it closes.
-  const [seenToastIds, setSeenToastIds] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    if (isNotificationPanelOpen) setSeenToastIds(new Set(toasts.map(toast => toast.id)));
-  }, [isNotificationPanelOpen, toasts]);
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
 
@@ -2259,9 +2254,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                 )}
               </button>
 
-              {/* Always mounted so finished and failed updates are announced while the panel is closed; the open panel announces its own list. */}
+              {/* Always mounted, open or closed: only newly added finished or failed updates are announced, and progress changes in the panel list are not. */}
               <div data-notification-announcer role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" className="sr-only">
-                {!isNotificationPanelOpen && toasts.filter(toast => toast.type !== 'loading' && !seenToastIds.has(toast.id)).map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
+                {toasts.filter(toast => toast.type !== 'loading').map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
               </div>
 
               {/* Notification Panel Dropdown */}
@@ -2288,7 +2283,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   </div>
 
                   {/* Notification List */}
-                  <div role="status" aria-live="polite" className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                  <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
                     {toasts.length === 0 ? (
                       <div className="p-8 text-center">
                         <Bell className="w-10 h-10 text-gray-700 mx-auto mb-3" />

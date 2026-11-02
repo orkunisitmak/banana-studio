@@ -1718,16 +1718,22 @@ export const updateImageStatus = async (
     }
     if (updates?.storagePath) updateObj.storage_path = updates.storagePath;
     if (updates?.metadata) {
+      // Without the saved metadata, writing it would drop the saved details. Still
+      // save the status and URL; leave the saved metadata untouched.
       const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
-      if (error) throw new Error(`Could not preserve the saved image details: ${error.message}`);
-      const merged = { ...(existing?.metadata || {}), ...updates.metadata };
-      if (status === 'completed') {
-        delete merged.error;
-        delete merged.pollingWarning;
+      if (error) {
+        console.warn('updateImageStatus: saved image details could not be read; keeping them unchanged:', error.message);
+      } else {
+        const merged = { ...(existing?.metadata || {}), ...updates.metadata };
+        if (status === 'completed') {
+          delete merged.error;
+          delete merged.pollingWarning;
+        }
+        updateObj.metadata = merged;
       }
-      updateObj.metadata = merged;
     }
-    await supabase.from('generations').update(updateObj).eq('id', id);
+    const { error: writeError } = await supabase.from('generations').update(updateObj).eq('id', id);
+    if (writeError) console.warn('updateImageStatus: status could not be saved:', writeError.message);
   } catch (e: any) {
     console.warn('updateImageStatus error:', e.message);
   }

@@ -15,23 +15,23 @@ const React = req('react');
 const { renderToStaticMarkup } = req('react-dom/server');
 const PANEL = 'const [isBrainstormPanelOpen, setIsBrainstormPanelOpen] = useState(false)';
 
-const routeHook = `import { resolveProvider } from '../lib/providers';
+const routeHook = available => `import { resolveProvider } from '../lib/providers';
 export function useProviderRoute(model) {
-  const choice = 'fal', available = { openrouter: true };
+  const choice = 'fal', available = ${JSON.stringify(available)};
   try { return { model, choice, available, provider: resolveProvider(model, choice, available) }; }
   catch (error) { return { model, choice, available, provider: choice, error: error.message }; }
 }
 export function ProviderRouteControl() { return null; }
 export function ProviderRoutingSettings() { return null; }`;
 
-async function loadControls(panelOpen) {
+async function loadControls(panelOpen, available = { openrouter: true }) {
   const out = await build({
     entryPoints: ['./src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false,
     format: 'cjs', platform: 'node', logLevel: 'silent',
     external: ['react', 'react-dom', 'react-dom/server', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
     loader: { '.css': 'empty', '.svg': 'dataurl', '.png': 'dataurl' },
     plugins: [{ name: 'route', setup(b) {
-      b.onLoad({ filter: /components[\\/]ProviderRoutingSettings\.tsx$/ }, () => ({ contents: routeHook, loader: 'tsx', resolveDir: `${root}/src/components` }));
+      b.onLoad({ filter: /components[\\/]ProviderRoutingSettings\.tsx$/ }, () => ({ contents: routeHook(available), loader: 'tsx', resolveDir: `${root}/src/components` }));
       if (panelOpen) b.onLoad({ filter: /components[\\/]Controls\.tsx$/ }, args => {
         const src = fs.readFileSync(args.path, 'utf8');
         assert.ok(src.includes(PANEL), 'Brainstorm panel state not found');
@@ -73,4 +73,13 @@ test('Brainstorm & generate is also blocked while the image route cannot run, be
   assert.ok(button, 'Brainstorm panel rendered');
   assert.match(button, /\sdisabled=""/,
     `"Brainstorm & generate" is enabled although Nano Banana Pro cannot be routed (${KEY_MESSAGE}): ${button}`);
+  assert.ok(button.includes(`title="${KEY_MESSAGE}"`), `the disabled button explains why: ${button}`);
+});
+
+test('control: Brainstorm & generate stays enabled when the fal.ai route has a key', async () => {
+  const html = renderToStaticMarkup(React.createElement(await loadControls(true, { openrouter: true, fal: true }), props));
+  const button = html.match(/<button[^>]*aria-label="Generate brainstorm images"[^>]*>/)?.[0];
+  assert.ok(button, 'Brainstorm panel rendered');
+  assert.doesNotMatch(button, /\sdisabled=""/);
+  assert.ok(!html.includes(KEY_MESSAGE), 'no route message when the route works');
 });

@@ -63,11 +63,22 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             >
               <div className="flex gap-3 mb-3">
                 <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-gray-900 border border-gray-700 relative">
-                  <img 
-                    src={img.thumbnailUrl || img.url} 
-                    alt="Thumbnail" 
-                    className="w-full h-full object-cover"
-                  />
+                  {img.mediaType === 'video' && !img.thumbnailUrl ? (
+                    <video
+                      src={`${img.url}#t=0.1`}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      aria-label="Video thumbnail"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <img 
+                      src={img.thumbnailUrl || img.url} 
+                      alt="Thumbnail" 
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 line-clamp-2 mb-1">

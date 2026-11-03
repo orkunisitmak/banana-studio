@@ -43,7 +43,7 @@ const mount = props => {
   const click = async label => { const button = nodes().find(n => n.type === 'button' && ((n.props['aria-label'] || text(n.props.children)).startsWith(label))); assert.ok(button, `Expected available button: ${label}`); button.props.onClick({ stopPropagation() {}, preventDefault() {} }); await settle(); };
   const type = async value => { nodes().find(n => n.type === 'input').props.onChange({ target: { value } }); await settle(); };
   render();
-  return { settle, click, type, text: () => text(tree), update: values => { Object.assign(props, values); render(); }, unmount: () => { destroyed = true; slots.forEach(slot => slot?.cleanup?.()); } };
+  return { settle, click, type, nodes, text: () => text(tree), update: values => { Object.assign(props, values); render(); }, unmount: () => { destroyed = true; slots.forEach(slot => slot?.cleanup?.()); } };
 };
 const videos = (channel, count) => Array.from({ length: count }, (_, i) => ({ id: `${channel}${i}`, title: `${channel} video ${i}`, publishedAt: '2026-01-01', thumbnailUrl: `${channel}${i}`, viewCount: 1, likeCount: 0, duration: 60 }));
 
@@ -215,11 +215,14 @@ test('Escape closes the open YouTube reference panel and ignores other keys', as
   const ui = mount({ onAddReferences() {}, onPrepareBrainstorm() {}, draftKey: 'k', remainingSlots: 14 });
   await ui.settle(); await ui.click('YT');
   assert.match(ui.text(), /YouTube Ref/);
+  let focused = 0; ui.nodes().find(n => n.type === 'button' && n.props.ref).props.ref.current = { focus: () => focused++, contains: () => false, getBoundingClientRect: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }) };
   const press = async event => { listeners.filter(l => l[0] === 'keydown').forEach(l => l[1](event)); await ui.settle(); };
   await press({ key: 'Enter' });
   await press({ key: 'Escape', defaultPrevented: true });
   assert.match(ui.text(), /YouTube Ref/);
+  assert.equal(focused, 0);
   await press({ key: 'Escape' });
   assert.doesNotMatch(ui.text(), /YouTube Ref/);
+  assert.equal(focused, 1, 'focus returns to the trigger');
   ui.unmount();
 });

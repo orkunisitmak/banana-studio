@@ -99,12 +99,13 @@ const getMimeType = (file: File | Blob, name?: string): string => {
   return 'application/octet-stream';
 };
 
-const readFileAsBase64 = (file: File | Blob): Promise<string> => {
+const readFileAsBase64 = (file: File | Blob, mimeType?: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    // The data URL carries the Blob's type, and the upload later takes its content type from it.
+    reader.readAsDataURL(mimeType && file.type !== mimeType ? new Blob([file], { type: mimeType }) : file);
   });
 };
 
@@ -702,7 +703,12 @@ export const Controls: React.FC<ControlsProps> = ({
         if (String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WEBP') return 'image/webp';
         return '';
       };
-      const kinds = await Promise.all(files.map(async file => { const named = getMimeType(file, (file as File).name); return named === 'application/octet-stream' ? await sniffImageType(file) || named : named; }));
+      // A file whose first bytes cannot be read counts as unrecognised, so it cannot reject the other files.
+      const kinds = await Promise.all(files.map(async file => {
+        const named = getMimeType(file, (file as File).name);
+        if (named === 'application/octet-stream') return await sniffImageType(file).catch(() => '') || named;
+        return named === 'image/jpg' ? 'image/jpeg' : named;
+      }));
       const supported = config.mode !== 'image' ? files : files.filter((_, index) => ['image/png', 'image/jpeg', 'image/webp'].includes(kinds[index]));
       const unsupportedFormat = supported.length < files.length;
 
@@ -716,7 +722,7 @@ export const Controls: React.FC<ControlsProps> = ({
       for (const file of filesToProcess) {
           const name = (file as File).name;
           let mimeType = kinds[files.indexOf(file)];
-          let data = await readFileAsBase64(file);
+          let data = await readFileAsBase64(file, mimeType);
 
           // Keep image-edit sources intact, including imports made before the
           // user switches from Nano Banana to Sunburst. Image generation sends

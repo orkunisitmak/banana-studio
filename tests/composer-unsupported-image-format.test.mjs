@@ -32,10 +32,10 @@ const attach = async file => {
     config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
     onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
     setAttachmentError: message => { if (message) errors.push(message); }, addAttachmentError: message => errors.push(message),
-    readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+    readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
   await processImageFiles([file]);
-  return { attached: draft.referenceImages.map(ref => ref.mimeType), errors };
+  return { attached: draft.referenceImages.map(ref => ref.mimeType), datas: draft.referenceImages.map(ref => ref.data), errors };
 };
 
 // The sibling reader in the image editor, run for real.
@@ -76,7 +76,7 @@ test('an unsupported file does not use up the last free slot of a supported one'
     config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
     onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
     setAttachmentError() {}, addAttachmentError() {},
-    readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+    readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
   await processImageFiles([new File([new Uint8Array([1])], 'photo.heic', { type: 'image/heic' }), new File([new Uint8Array([1])], 'photo.jpg', { type: 'image/jpeg' })]);
   assert.equal(draft.referenceImages.length, 14);
@@ -98,10 +98,37 @@ test('the format message and the slot limit message are both kept', async () => 
     config: draft, maxReferenceImages: 2, attachLimitsRef: { current: { images: 2 } },
     onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
     setAttachmentError() {}, addAttachmentError: message => errors.push(message),
-    readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+    readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
   const jpg = n => new File([new Uint8Array([1])], n, { type: 'image/jpeg' });
   await processImageFiles([jpg('a.jpg'), jpg('b.jpg'), new File([new Uint8Array([1])], 'c.gif', { type: 'image/gif' })]);
   assert.equal(errors.length, 2);
   assert.ok(errors.some(m => /Limit reached/.test(m)) && errors.some(m => /PNG|WebP/.test(m)));
+});
+
+test('a gallery download with no content type is stored as the type found in its bytes', async () => {
+  const png = await attach(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0])]));
+  assert.ok(png.datas[0].startsWith('data:image/png;base64,'), png.datas[0]);
+});
+
+test('an image/jpg file is attached as image/jpeg', async () => {
+  const result = await attach(new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpg' }));
+  assert.deepEqual(result.attached, ['image/jpeg']);
+  assert.deepEqual(result.errors, []);
+});
+
+test('a file whose bytes cannot be read does not stop the valid file next to it', async () => {
+  let draft = { mode: 'image', referenceImages: [] };
+  const errors = [];
+  const processImageFiles = create({
+    config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
+    onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
+    setAttachmentError() {}, addAttachmentError: message => errors.push(message),
+    readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+  });
+  const unreadable = new Blob([new Uint8Array([1])]);
+  unreadable.slice = () => ({ arrayBuffer: () => Promise.reject(new Error('NotReadableError')) });
+  await processImageFiles([new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpeg' }), unreadable]);
+  assert.deepEqual(draft.referenceImages.map(ref => ref.mimeType), ['image/jpeg']);
+  assert.ok(errors.some(message => /PNG|JPE?G|WebP/i.test(message)));
 });

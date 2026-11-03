@@ -699,10 +699,16 @@ export const Controls: React.FC<ControlsProps> = ({
       const filesToProcess = files.slice(0, remainingSlots);
       const newImages: ReferenceImage[] = [];
 
+      let unsupportedFormat = false;
       for (const file of filesToProcess) {
-          let data = await readFileAsBase64(file);
           const name = (file as File).name;
           let mimeType = getMimeType(file, name);
+          // Image providers only read these formats; the Gallery editor refuses the rest up front too.
+          if (config.mode === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+            unsupportedFormat = true;
+            continue;
+          }
+          let data = await readFileAsBase64(file);
 
           // Keep image-edit sources intact, including imports made before the
           // user switches from Nano Banana to Sunburst. Image generation sends
@@ -724,6 +730,8 @@ export const Controls: React.FC<ControlsProps> = ({
             mimeType
           });
       }
+
+      if (unsupportedFormat) setAttachmentError('Choose a PNG, JPG or WebP reference image.');
 
       if (newImages.length > 0) {
         // Merge into the latest draft: reading/compressing the files awaited,

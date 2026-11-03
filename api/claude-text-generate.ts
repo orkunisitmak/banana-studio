@@ -110,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(502, 'Model video analizini beklenen biçimde döndürmedi.');
       }
     }
-    const result = { text, candidates: null, provider: 'claude', providerModel: CLAUDE_TEXT_MODEL, usageMetadata: { provider: 'claude', claudeUsage: response.usage, usageLogged, usageLoggingPending }, requestId: guard.id };
+    const result = { text, candidates: null, provider: 'claude', model: CLAUDE_TEXT_MODEL, providerModel: CLAUDE_TEXT_MODEL, usageMetadata: { provider: 'claude', claudeUsage: response.usage, usageLogged, usageLoggingPending }, requestId: guard.id };
     outcome = 'completed'; await guard.finish('completed', requestId, providerStatus);
     if (streaming) { send({ type: 'result', result }); return res.end(); }
     return res.status(200).json(result);

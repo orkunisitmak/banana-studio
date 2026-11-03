@@ -19,7 +19,7 @@ const ast = ts.createSourceFile('Controls.tsx', source, ts.ScriptTarget.Latest, 
 const find = name => { let found; const visit = node => { if (!found && ts.isVariableDeclaration(node) && node.name.getText(ast) === name) found = node.initializer.getText(ast); ts.forEachChild(node, visit); }; visit(ast); assert.ok(found, name); return found; };
 
 const { code } = await transform(`export const create=(state)=>{
-  const {config,onChange,setAttachmentError,maxReferenceImages,attachLimitsRef,readFileAsBase64,estimateBase64Size,compressImage,flushSync}=state;
+  const {config,onChange,setAttachmentError,addAttachmentError,maxReferenceImages,attachLimitsRef,readFileAsBase64,estimateBase64Size,compressImage,flushSync}=state;
   const getMimeType=${find('getMimeType')};
   return ${find('processImageFiles')};
 };`, { loader: 'ts', format: 'esm' });
@@ -31,7 +31,7 @@ const attach = async file => {
   const processImageFiles = create({
     config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
     onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
-    setAttachmentError: message => { if (message) errors.push(message); },
+    setAttachmentError: message => { if (message) errors.push(message); }, addAttachmentError: message => errors.push(message),
     readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
   await processImageFiles([file]);
@@ -75,10 +75,33 @@ test('an unsupported file does not use up the last free slot of a supported one'
   const processImageFiles = create({
     config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
     onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
-    setAttachmentError() {},
+    setAttachmentError() {}, addAttachmentError() {},
     readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
   await processImageFiles([new File([new Uint8Array([1])], 'photo.heic', { type: 'image/heic' }), new File([new Uint8Array([1])], 'photo.jpg', { type: 'image/jpeg' })]);
   assert.equal(draft.referenceImages.length, 14);
   assert.equal(draft.referenceImages[13].mimeType, 'image/jpeg');
+});
+
+test('a gallery download with no content type is recognised from its bytes', async () => {
+  const png = await attach(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0])]));
+  assert.equal(png.attached.length, 1);
+  assert.equal(png.attached[0], 'image/png');
+  const gif = await attach(new Blob([new Uint8Array([71, 73, 70, 56, 57, 97])]));
+  assert.deepEqual(gif.attached, []);
+});
+
+test('the format message and the slot limit message are both kept', async () => {
+  let draft = { mode: 'image', referenceImages: [{ id: 'a', data: 'x', mimeType: 'image/png' }] };
+  const errors = [];
+  const processImageFiles = create({
+    config: draft, maxReferenceImages: 2, attachLimitsRef: { current: { images: 2 } },
+    onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
+    setAttachmentError() {}, addAttachmentError: message => errors.push(message),
+    readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+  });
+  const jpg = n => new File([new Uint8Array([1])], n, { type: 'image/jpeg' });
+  await processImageFiles([jpg('a.jpg'), jpg('b.jpg'), new File([new Uint8Array([1])], 'c.gif', { type: 'image/gif' })]);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some(m => /Limit reached/.test(m)) && errors.some(m => /PNG|WebP/.test(m)));
 });

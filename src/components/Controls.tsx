@@ -694,11 +694,20 @@ export const Controls: React.FC<ControlsProps> = ({
 
       // Image providers only read these formats; the Gallery editor refuses the rest up front too.
       // Drop unsupported files before counting slots, so one of them cannot use up the slot a valid file needs.
-      const supported = config.mode !== 'image' ? files : files.filter(file => ['image/png', 'image/jpeg', 'image/webp'].includes(getMimeType(file, (file as File).name)));
+      // A gallery download can come back with no content type or file name, so look at its first bytes.
+      const sniffImageType = async (file: File | Blob) => {
+        const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+        if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png';
+        if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+        if (String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WEBP') return 'image/webp';
+        return '';
+      };
+      const kinds = await Promise.all(files.map(async file => { const named = getMimeType(file, (file as File).name); return named === 'application/octet-stream' ? await sniffImageType(file) || named : named; }));
+      const supported = config.mode !== 'image' ? files : files.filter((_, index) => ['image/png', 'image/jpeg', 'image/webp'].includes(kinds[index]));
       const unsupportedFormat = supported.length < files.length;
 
       if (supported.length > remainingSlots) {
-        setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
+        addAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       }
 
       const filesToProcess = supported.slice(0, remainingSlots);
@@ -706,7 +715,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
       for (const file of filesToProcess) {
           const name = (file as File).name;
-          let mimeType = getMimeType(file, name);
+          let mimeType = kinds[files.indexOf(file)];
           let data = await readFileAsBase64(file);
 
           // Keep image-edit sources intact, including imports made before the
@@ -730,7 +739,7 @@ export const Controls: React.FC<ControlsProps> = ({
           });
       }
 
-      if (unsupportedFormat) setAttachmentError('Choose a PNG, JPG or WebP reference image.');
+      if (unsupportedFormat) addAttachmentError('Choose a PNG, JPG or WebP reference image.');
 
       if (newImages.length > 0) {
         // Merge into the latest draft: reading/compressing the files awaited,

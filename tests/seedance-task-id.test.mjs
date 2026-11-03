@@ -24,6 +24,7 @@ const seedance = (await bundle('api/seedance-video.ts', {
   'auth.js': `export const applyCors=()=>{};export const requireUser=async()=>({id:'u1'});export const createUserScopedClient=()=>({});${recorder}export const createServiceRoleClient=()=>({from});`,
   '/providerConfiguration.js': 'export const chooseProvider=(model,provider)=>provider||"fal";export const providerKey=()=>"synthetic";',
   '/imageStorage.js': 'export const signedMediaUrl=async()=>"";',
+  '/openaiGuard.js': 'export const startPaidRequest=async()=>({finish:async()=>{}});',
 })).default;
 const body = { videoModel: 'seedance-2.5', mode: 'reference_to_video', imageUrls: ['https://media.example/ref.png'], prompt: 'a fox', duration: 5, quality: '720p', aspectRatio: '16:9', generationId: 'gen-1' };
 const savedRow = op => ({ data: { id: 'gen-1', type: 'video' }, error: null });

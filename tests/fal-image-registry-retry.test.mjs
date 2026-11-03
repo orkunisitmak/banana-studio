@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // Real api/fal-image-generate.ts and api/fal-status.ts and real providerTasks.ts over an in-memory provider_tasks table; only auth and the database client are faked.
 const stubs = {
+  guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
   auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});
 export const createServiceRoleClient=()=>({from:()=>({
   select:()=>({limit:async()=>({error:null}),eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})}),
@@ -18,6 +19,7 @@ const load = async entry => {
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
       b.onResolve({ filter: /(^|\/)auth\.js$/ }, () => ({ path: 'auth', namespace: 'stub' }));
+      b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));
       b.onResolve({ filter: /^[^./]/ }, a => (a.path.startsWith('node:') ? undefined : { path: import.meta.resolve(a.path), external: true }));
     } }],

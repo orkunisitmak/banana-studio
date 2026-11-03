@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
@@ -54,6 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
 
   let acceptedTaskId: string | undefined;
+  let guard: PaidRequest = null;
   try {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -72,6 +74,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const registry = await prepareTaskRegistry(res);
       if (!registry) return;
+      guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
+      if (!guard) return;
       const response = await fetch(`${FAL_QUEUE_BASE}/${SCALE_ENDPOINT}`, {
         method: 'POST',
         headers: {
@@ -88,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           crf: 20,
         }),
       });
+      await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
       const data = await readJson(response);
       if (!response.ok) {
         return res.status(response.status).json({
@@ -151,6 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ status: 'RUNNING', stage: statusData?.status || 'IN_QUEUE' });
   } catch (error: any) {
+    await guard?.finish('failed');
     console.error('fal video scale error:', error.message);
     return res.status(500).json({ error: error.message || 'Video preprocessing failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }

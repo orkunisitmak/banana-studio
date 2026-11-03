@@ -4,6 +4,7 @@ const { build } = await import('esbuild');
 const { fileURLToPath } = await import('node:url');
 const stubs = {
   auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({});',
+  guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
   providerTasks: 'export const prepareTaskRegistry=async()=>({});export const registerProviderTask=async()=>{};export const requireProviderTask=async()=>true;',
   evolink: 'export default async()=>{throw new Error("evolink unused");};',
   imageStorage: 'export const signedMediaUrl=async()=>"https://signed";',
@@ -17,6 +18,7 @@ const compiled = await build({
       path: args.path.includes('providerTasks') ? 'providerTasks' : args.path.includes('imageStorage') ? 'imageStorage' : 'auth',
       namespace: 'stub',
     }));
+    b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
     b.onResolve({ filter: /\/evolink-generate\.js$/ }, () => ({ path: 'evolink', namespace: 'stub' }));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }));
     b.onResolve({ filter: /^[^./]/ }, args => (

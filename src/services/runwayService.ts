@@ -8,6 +8,7 @@ import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublic
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { getSeedanceFrameError, prepareSeedanceFramePrompt } from '../lib/video/seedanceFrames';
 import { prepareReferenceAudio } from '../lib/video/referenceAudio';
+import { formatRejectedDuration } from '../lib/video/rejectedDuration';
 import { buildH3MaxInput, H3_MAX_CAPABILITIES, type H3MaxMode } from '../lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxMode, getH3MaxReferenceImages, getH3MaxRequestBody, getKnownVideoDuration } from '../lib/video/h3MaxConfig';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
@@ -244,15 +245,6 @@ export const getNormalizedVideoDimensions = (
     else dimensions.height += 2;
   }
   return dimensions;
-};
-
-// Round for display without landing on the accepted range: 30.001 is shown as
-// 30.01 and 3.999 as 3.99, so the number never contradicts the refusal.
-const formatRejectedDuration = (duration: number, min: number, max: number): string => {
-  const shown = duration.toFixed(2);
-  if (duration < min && Number(shown) >= min) return (Math.floor(duration * 100) / 100).toFixed(2);
-  if (duration > max && Number(shown) <= max) return (Math.ceil(duration * 100) / 100).toFixed(2);
-  return shown;
 };
 
 export const validateEditSourceMetadata = (

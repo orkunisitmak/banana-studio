@@ -1,3 +1,5 @@
+import { formatRejectedDuration } from './rejectedDuration';
+
 export const MAX_REFERENCE_AUDIO_BYTES = 15 * 1024 * 1024;
 
 type PcmAudio = Pick<AudioBuffer, 'numberOfChannels' | 'length' | 'sampleRate' | 'getChannelData'>;
@@ -73,7 +75,7 @@ export const prepareReferenceAudio = async (
     throw new Error(`${label} could not be decoded. Choose a valid MP3 or WAV, or export this audio as MP3/WAV and attach it again.`);
   }
   if (!Number.isFinite(audio.duration) || audio.duration < minDuration || audio.duration > maxDuration) {
-    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds.${Number.isFinite(audio.duration) ? ` Current duration is ${audio.duration.toFixed(1)}s.` : ''}`);
+    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds.${Number.isFinite(audio.duration) ? ` Current duration is ${formatRejectedDuration(audio.duration, minDuration, maxDuration)}s.` : ''}`);
   }
   return encodeReferenceWav(audio);
 };

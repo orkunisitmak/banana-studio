@@ -34,6 +34,20 @@ test('media paths reject traversal and symlinks; access URLs follow the new loca
     assert.equal(f.store.mediaKey('https://example.com/storage/v1/object/authenticated/media/secret'),null);
   } finally{f.store.close();f.cleanup();}
 });
+test('replacing media that is open elsewhere waits for it and leaves no temporary copy',async()=>{
+  const f=fixture();try {
+    assert.equal((await f.store.upload('refs/open.png',Buffer.from('first'))).error,null);
+    const file=f.store.mediaPath('refs/open.png');let handle=fs.openSync(file,'r');setTimeout(()=>fs.closeSync(handle),150);
+    assert.equal((await f.store.upload('refs/open.png',Buffer.from('second'),{upsert:true})).error,null);
+    assert.equal(fs.readFileSync(file,'utf8'),'second');
+    if(process.platform==='win32') {
+      handle=fs.openSync(file,'r');
+      try{await assert.rejects(f.store.upload('refs/open.png',Buffer.from('third'),{upsert:true}),{code:'EPERM'});}finally{fs.closeSync(handle);}
+      assert.equal(fs.readFileSync(file,'utf8'),'second');
+    }
+    assert.deepEqual(fs.readdirSync(path.dirname(file)),['open.png']);
+  } finally{f.store.close();f.cleanup();}
+});
 test('Library people, references and templates survive restart with current local preview URLs',async()=>{
  const f=fixture();try{
   f.store.origin='http://127.0.0.1:12001';

@@ -84,7 +84,13 @@ export class LocalWorkspace {
   async upload(key,bytes,options={}) {
     const target=this.mediaPath(key);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
     if(fs.existsSync(target)&&!options.upsert)return fail('Media already exists.','23505');
-    const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});fs.renameSync(temp,target);
+    const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});
+    // Windows cannot replace a file while another handle has it open (the gallery streaming it, an antivirus scan).
+    // Retry briefly, as those handles close, and never leave the temporary copy behind.
+    for(let attempt=1;;attempt++) {
+      try{fs.renameSync(temp,target);break;}
+      catch(error){if(attempt<10&&['EPERM','EACCES','EBUSY'].includes(error.code)){await new Promise(resolve=>setTimeout(resolve,attempt*50));continue;}fs.rmSync(temp,{force:true});throw error;}
+    }
     return {data:{path:key},error:null};
   }
   storage() { return { upload:async(key,data,options)=>this.upload(key,Buffer.isBuffer(data)?data:Buffer.from(await data.arrayBuffer()),options),

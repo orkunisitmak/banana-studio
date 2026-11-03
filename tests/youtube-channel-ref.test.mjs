@@ -225,5 +225,9 @@ test('Escape closes the open YouTube reference panel and ignores other keys', as
   assert.ok(prevented, 'the handled Escape is marked so the Brainstorm panel stays open');
   assert.doesNotMatch(ui.text(), /YouTube Ref/);
   assert.equal(focused, 1, 'focus returns to the trigger');
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 1, 'closing the panel does not stack a second keydown listener');
+  await ui.click('YT');
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 1, 'reopening does not stack a second keydown listener');
   ui.unmount();
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 0, 'unmounting removes the keydown listener');
 });

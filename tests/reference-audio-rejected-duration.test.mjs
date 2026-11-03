@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // #238 made Video Edit print a rejected length that never rounds into the accepted range.
 // The reference-audio sibling (prepareReferenceAudio, used for M4A/AAC on Seedance and H3 Max)
-// still uses toFixed(1): a 15.04 s clip is refused with "must be 2-15 seconds. Current duration is 15.0s."
+// still uses toFixed(1): a 15.004 s clip is refused with "must be 2-15 seconds. Current duration is 15.0s."
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { build } = createRequire(root + 'package.json')('esbuild');
 const out = await build({ entryPoints: ['./src/lib/video/referenceAudio.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent' });
@@ -21,11 +21,11 @@ const shown = text => Number(text.match(/Current duration is ([\d.]+)s/)?.[1]);
 test('control: a clearly too long M4A reports its length', async () => {
   assert.equal(shown(await message(20)), 20);
 });
-test('a 15.04 s M4A is not reported as 15.0 s in a 2-15 s rule', async () => {
-  const text = await message(15.04);
+test('a 15.004 s M4A is not reported as 15.0 s in a 2-15 s rule', async () => {
+  const text = await message(15.004);
   assert.ok(shown(text) > 15, `refused with: ${text}`);
 });
-test('a 1.96 s M4A is not reported as 2.0 s in a 2-15 s rule', async () => {
-  const text = await message(1.96);
+test('a 1.996 s M4A is not reported as 2.0 s in a 2-15 s rule', async () => {
+  const text = await message(1.996);
   assert.ok(shown(text) < 2, `refused with: ${text}`);
 });

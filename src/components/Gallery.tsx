@@ -819,6 +819,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const createFolderDialogRef = useRef<HTMLDivElement>(null);
+  const createFolderOpenerRef = useRef<HTMLElement | null>(null);
 
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -1157,6 +1158,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     const handleModalKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isSavingFolder) {
         setIsCreatingFolder(false);
+        createFolderOpenerRef.current?.focus({ preventScroll: true });
         setNewFolderName("");
         setFolderCreateError(null);
         return;
@@ -1389,12 +1391,14 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsNotificationPanelOpen(false);
     setIsGridMenuOpen(false);
     setIsUserMenuOpen(false);
+    createFolderOpenerRef.current = document.activeElement as HTMLElement | null;
     setIsCreatingFolder(true);
   };
 
   const closeCreateFolderModal = () => {
     if (isSavingFolder) return;
     setIsCreatingFolder(false);
+    createFolderOpenerRef.current?.focus({ preventScroll: true });
     setNewFolderName("");
     setFolderCreateError(null);
   };
@@ -1416,6 +1420,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       setFolders(prev => [newFolder, ...prev]);
       setNewFolderName("");
       setIsCreatingFolder(false);
+      createFolderOpenerRef.current?.focus({ preventScroll: true });
     } catch (error: any) {
       setFolderCreateError(error?.message || 'The folder could not be created. Please try again.');
     } finally {

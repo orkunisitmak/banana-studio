@@ -1545,9 +1545,11 @@ export const Controls: React.FC<ControlsProps> = ({
               let release: () => void = () => {};
               galleryDropChainRef.current = new Promise<void>(resolve => { release = resolve; });
               setUploadingReferenceVideos(count => count + 1);
+              // Start reading now so slow drops overlap; the chain only orders the adds.
+              const durationRead = galleryVideoDuration(media);
               try {
                 await turn;
-                const duration = await galleryVideoDuration(media);
+                const duration = await durationRead;
                 if (epoch !== galleryDropEpochRef.current) return;
                 // Merge into the latest draft and its latest limit.
                 let full = false;
@@ -2001,7 +2003,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+    : uploadingReferenceVideos === 0 && !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
   if (isMinimized) {
     return (

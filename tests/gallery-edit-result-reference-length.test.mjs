@@ -191,3 +191,16 @@ test('Clear while a dropped video length is being read keeps the video out of th
   assert.equal(latest.prompt, '');
   assert.equal(latest.referenceVideos.length, 0);
 });
+
+test('slow length reads of several drops overlap instead of running one after another', async () => {
+  let latest = { ...editConfig, videoOperation: 'generate' };
+  const onChange = next => { latest = typeof next === 'function' ? next(latest) : next; };
+  dropHandler = undefined;
+  renderToStaticMarkup(React.createElement(Controls, props(latest, onChange)));
+  const drop = (id, url) => dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
+    dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id, url, videoDuration: -1 }) : '' } });
+  const start = Date.now();
+  await Promise.all([1, 2, 3].map(n => drop('s' + n, `https://example.supabase.co/media/slow-${n}.mp4`)));
+  assert.equal(latest.referenceVideos.length, 3);
+  assert.ok(Date.now() - start < 100, 'three 40 ms reads should take about 40 ms in total, not 120 ms');
+});

@@ -1546,9 +1546,11 @@ export const Controls: React.FC<ControlsProps> = ({
               let release: () => void = () => {};
               galleryDropChainRef.current = new Promise<void>(resolve => { release = resolve; });
               setUploadingReferenceVideos(count => count + 1);
+              // Start reading now so slow drops overlap; the chain only orders the adds.
+              const durationRead = galleryVideoDuration(media);
               try {
                 await turn;
-                const duration = await galleryVideoDuration(media);
+                const duration = await durationRead;
                 if (epoch !== galleryDropEpochRef.current) return;
                 // Merge into the latest draft and its latest limit.
                 let full = false;
@@ -2004,7 +2006,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+    : uploadingReferenceVideos === 0 && !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
   if (isMinimized) {
     return (

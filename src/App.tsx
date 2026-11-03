@@ -1349,9 +1349,10 @@ const AuthorizedWorkspace: React.FC<{
     } catch (e) {
       console.error("Move failed", e);
       toast.error('Move Failed', 'Could not move the selected items to the folder.');
-      // Rollback
+      // Roll back only the items the server did not move.
+      const moved = e instanceof workspaceStorage.MoveImagesError ? new Set(e.movedIds) : null;
       setGeneratedMedia(prev => prev.map(img => {
-        return originalFolders.has(img.id) && img.folderId === folderId
+        return originalFolders.has(img.id) && img.folderId === folderId && !moved?.has(img.id)
           ? { ...img, folderId: originalFolders.get(img.id) }
           : img;
       }));

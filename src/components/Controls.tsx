@@ -703,11 +703,13 @@ export const Controls: React.FC<ControlsProps> = ({
         if (String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WEBP') return 'image/webp';
         return '';
       };
+      // In image mode the first bytes decide the format, so a GIF named photo.jpg is refused too.
       // A file whose first bytes cannot be read counts as unrecognised, so it cannot reject the other files.
       const kinds = await Promise.all(files.map(async file => {
         const named = getMimeType(file, (file as File).name);
+        if (config.mode === 'image') return await sniffImageType(file).catch(() => '');
         if (named === 'application/octet-stream') return await sniffImageType(file).catch(() => '') || named;
-        return named === 'image/jpg' ? 'image/jpeg' : named;
+        return named;
       }));
       const supported = config.mode !== 'image' ? files : files.filter((_, index) => ['image/png', 'image/jpeg', 'image/webp'].includes(kinds[index]));
       const unsupportedFormat = supported.length < files.length;

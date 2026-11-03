@@ -25,6 +25,9 @@ const { code } = await transform(`export const create=(state)=>{
 };`, { loader: 'ts', format: 'esm' });
 const create = (await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))).create;
 
+const SIGNATURE = { 'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'image/jpeg': [0xff, 0xd8, 0xff, 0xe0, 0, 0x10], 'image/webp': [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50] };
+const image = (name, type, signature = type) => new File([new Uint8Array(SIGNATURE[signature] || [1, 2, 3])], name, { type });
+
 const attach = async file => {
   let draft = { mode: 'image', referenceImages: [] };
   const errors = [];
@@ -57,14 +60,14 @@ for (const [name, type] of [['loop.gif', 'image/gif'], ['photo.heic', 'image/hei
 }
 
 test('control: the composer attaches a PNG reference', async () => {
-  const result = await attach(new File([new Uint8Array([1, 2, 3])], 'photo.png', { type: 'image/png' }));
+  const result = await attach(image('photo.png', 'image/png'));
   assert.deepEqual(result.attached, ['image/png']);
   assert.deepEqual(result.errors, []);
 });
 
 test('control: a JPEG and a WebP reference are attached', async () => {
   for (const [name, type] of [['photo.jpg', 'image/jpeg'], ['photo.webp', 'image/webp']]) {
-    const result = await attach(new File([new Uint8Array([1, 2, 3])], name, { type }));
+    const result = await attach(image(name, type));
     assert.deepEqual(result.attached, [type]);
     assert.deepEqual(result.errors, []);
   }
@@ -78,7 +81,7 @@ test('an unsupported file does not use up the last free slot of a supported one'
     setAttachmentError() {}, addAttachmentError() {},
     readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
-  await processImageFiles([new File([new Uint8Array([1])], 'photo.heic', { type: 'image/heic' }), new File([new Uint8Array([1])], 'photo.jpg', { type: 'image/jpeg' })]);
+  await processImageFiles([new File([new Uint8Array([1])], 'photo.heic', { type: 'image/heic' }), image('photo.jpg', 'image/jpeg')]);
   assert.equal(draft.referenceImages.length, 14);
   assert.equal(draft.referenceImages[13].mimeType, 'image/jpeg');
 });
@@ -100,19 +103,50 @@ test('the format message and the slot limit message are both kept', async () => 
     setAttachmentError() {}, addAttachmentError: message => errors.push(message),
     readFileAsBase64: async (f, type) => `data:${type || f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
   });
-  const jpg = n => new File([new Uint8Array([1])], n, { type: 'image/jpeg' });
+  const jpg = n => image(n, 'image/jpeg');
   await processImageFiles([jpg('a.jpg'), jpg('b.jpg'), new File([new Uint8Array([1])], 'c.gif', { type: 'image/gif' })]);
   assert.equal(errors.length, 2);
   assert.ok(errors.some(m => /Limit reached/.test(m)) && errors.some(m => /PNG|WebP/.test(m)));
 });
 
+// The production reader, with the browser's FileReader reduced to what it does here: a data URL typed with the Blob's type.
+const { code: readerCode } = await transform(`export const read=${find('readFileAsBase64')};`, { loader: 'ts', format: 'esm' });
+const { read } = await import('data:text/javascript;base64,' + Buffer.from(readerCode).toString('base64'));
+globalThis.FileReader = class {
+  readAsDataURL(blob) {
+    blob.arrayBuffer().then(buffer => { this.result = `data:${blob.type};base64,${Buffer.from(buffer).toString('base64')}`; this.onload(); }, error => this.onerror(error));
+  }
+};
+
 test('a gallery download with no content type is stored as the type found in its bytes', async () => {
-  const png = await attach(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0])]));
+  const png = await attach(new Blob([new Uint8Array(SIGNATURE['image/png'])]));
   assert.ok(png.datas[0].startsWith('data:image/png;base64,'), png.datas[0]);
 });
 
+test('the production reader puts the detected type on the data URL when the Blob has none or another one', async () => {
+  const bytes = new Uint8Array(SIGNATURE['image/png']);
+  const base64 = Buffer.from(bytes).toString('base64');
+  assert.equal(await read(new Blob([bytes]), 'image/png'), `data:image/png;base64,${base64}`);
+  assert.equal(await read(new Blob([bytes], { type: 'application/octet-stream' }), 'image/png'), `data:image/png;base64,${base64}`);
+  assert.equal(await read(new Blob([bytes], { type: 'image/png' }), 'image/png'), `data:image/png;base64,${base64}`);
+  assert.equal(await read(new Blob([bytes], { type: 'video/mp4' })), `data:video/mp4;base64,${base64}`);
+});
+
+test('a GIF named photo.jpg is refused even though its name and type say JPEG', async () => {
+  const gif = new File([new Uint8Array([71, 73, 70, 56, 57, 97])], 'photo.jpg', { type: 'image/jpeg' });
+  const result = await attach(gif);
+  assert.deepEqual(result.attached, []);
+  assert.ok(result.errors.some(message => /PNG|JPE?G|WebP/i.test(message)), 'no format message was shown');
+});
+
+test('a PNG labelled image/jpeg is attached as the PNG it is', async () => {
+  const result = await attach(image('photo.jpg', 'image/jpeg', 'image/png'));
+  assert.deepEqual(result.attached, ['image/png']);
+  assert.ok(result.datas[0].startsWith('data:image/png;base64,'), result.datas[0]);
+});
+
 test('an image/jpg file is attached as image/jpeg', async () => {
-  const result = await attach(new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpg' }));
+  const result = await attach(image('photo.jpg', 'image/jpg', 'image/jpeg'));
   assert.deepEqual(result.attached, ['image/jpeg']);
   assert.deepEqual(result.errors, []);
 });
@@ -128,7 +162,7 @@ test('a file whose bytes cannot be read does not stop the valid file next to it'
   });
   const unreadable = new Blob([new Uint8Array([1])]);
   unreadable.slice = () => ({ arrayBuffer: () => Promise.reject(new Error('NotReadableError')) });
-  await processImageFiles([new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpeg' }), unreadable]);
+  await processImageFiles([image('photo.jpg', 'image/jpeg'), unreadable]);
   assert.deepEqual(draft.referenceImages.map(ref => ref.mimeType), ['image/jpeg']);
   assert.ok(errors.some(message => /PNG|JPE?G|WebP/i.test(message)));
 });

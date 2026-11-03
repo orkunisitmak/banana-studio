@@ -77,7 +77,7 @@ const determineMode = (
 
 const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
   if (img.data.startsWith('http')) return refreshMediaAccessUrl(img.data);
-  return uploadBase64ToPublicUrl(img.data, img.mimeType || 'image/jpeg', 'vref');
+  return uploadBase64ToPublicUrl(img.data, img.mimeType || '', 'vref', { throwOnError: true });
 };
 
 const isHttpUrl = (url: string): boolean => /^https?:\/\//i.test(url);

@@ -37,10 +37,19 @@ Bu uygulamaya ayrılmış boş bir proje kullan. Başlangıç SQL'i sabit adlarl
 1. [Başlangıç SQL dosyasını](../../supabase/migrations/20261019123903_banana_studio_baseline.sql) aç. GitHub'daki **Raw** veya kopyalama düğmesiyle **dosyanın tamamını** kopyala.
 2. Yeni Supabase projen içinde **SQL Editor → New query** aç.
 3. SQL'i yapıştır ve **Run** seç. Başlangıç dosyasını yeni projede bir kez çalıştır.
-4. **Table Editor** bölümünde `profiles`, `generations`, `folders`, `authorized_emails` gibi tabloları kontrol et.
-5. **Storage** bölümünde `media` alanının oluştuğunu ve **private / özel** olduğunu kontrol et. Dosyanın oluşturduğu erişim kurallarını koru.
+4. [supabase/migrations](../../supabase/migrations) altındaki sonraki dosyaları dosya adı sırasıyla, her birini ayrı SQL Editor sorgusunda çalıştır. Mevcut kurulumlarda yalnızca henüz uygulanmamış migration dosyalarını çalıştır; başlangıç dosyasını yeniden çalıştırma.
+5. **Table Editor** bölümünde `profiles`, `generations`, `folders`, `authorized_emails` gibi tabloları kontrol et.
+6. **Storage** bölümünde `media` alanının oluştuğunu ve **private / özel** olduğunu kontrol et. Migration dosyalarının oluşturduğu erişim kurallarını koru.
 
 **Kontrol:** SQL başarıyla çalıştı, tablolar var, `media` özel. Geliştiriciler CLI migration yolunu da kullanabilir; migration geçmişini eşleştirmeden aynı şemaya iki yöntemi birden uygulama.
+
+### Medya yükleme sınırları
+
+Medya sınırı migration'ı her dosyayı referans video sınırıyla uyumlu **500 MiB (524.288.000 bayt)** ile sınırlar. İzin listesi olmayan bucket için `image/*`, `video/*` ve `audio/*` MIME kısıtlarını ekler; mevcut özel MIME izin listesi ve daha küçük boyut sınırı korunur. Özel izin listelerini ayrıca gözden geçir; migration bunları değiştirmez. Mevcut dosyalar değiştirilmez veya silinmez.
+
+En büyük desteklenen videoları kabul etmek için projenin **global Storage dosya boyutu sınırı** da en az 500 MiB olmalıdır; bucket ayarı global sınırı yükseltemez. Bunu Storage Settings bölümünde ayarla. Supabase Free projelerinde üst sınır daha düşüktür; büyük videolar için uygun plan veya kendi barındırdığın Storage gerekir. [Supabase dosya sınırlarına](https://supabase.com/docs/guides/storage/uploads/file-limits) bak. Repodaki yerel Supabase ayarı 500 MiB kullanır.
+
+Storage bu sınırları doğrudan yüklemelerde de uygular, ancak bunlar kullanıcı/çalışma alanı toplam kotası değil, dosya başına sınırlardır. MIME kısıtları bildirilen içerik türünü kontrol eder; dosyanın güvenli veya gerçekten o türde olduğunu doğrulamaz. İçerik incelemesi ve toplam depolama kotasının yerini tutmaz; toplam kullanımı ayrıca takip et. Bağımsız masaüstü dosya deposu değişmez.
 
 ## 4. Kopyanı Vercel'e bağla
 

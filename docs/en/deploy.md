@@ -37,10 +37,19 @@ Use an empty project reserved for this application. The baseline creates tables 
 1. Open [the baseline SQL file](../../supabase/migrations/20261019123903_banana_studio_baseline.sql). On GitHub, use **Raw** or the copy button to copy the **entire file**.
 2. In your new Supabase project, open **SQL Editor → New query**.
 3. Paste the SQL and select **Run**. Run the baseline once on the new project.
-4. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
-5. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migration.
+4. Apply every later file in [supabase/migrations](../../supabase/migrations) in filename order, each in its own SQL Editor query. Existing installations should apply only migrations they have not already run; do not rerun the baseline.
+5. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
+6. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migrations.
 
 **Checkpoint:** SQL Editor reports success, the tables exist, and `media` is private. A CLI-based migration path is also possible for developers; do not apply both methods to the same schema without reconciling migration history.
+
+### Media upload limits
+
+The media-limit migration caps each object at **500 MiB (524,288,000 bytes)**, matching the reference-video limit. It adds `image/*`, `video/*` and `audio/*` MIME restrictions when the bucket has no allowlist; an existing explicit allowlist and any smaller size cap are preserved. Review custom allowlists yourself: they are not replaced by this migration. Existing objects are not modified or deleted.
+
+The project's **global Storage file-size limit** must also be at least 500 MiB to accept the largest supported videos; a bucket setting cannot raise the global limit. Configure it in Storage Settings. Supabase Free projects have a lower maximum, so large videos require a suitable plan or self-hosted Storage. See [Supabase file limits](https://supabase.com/docs/guides/storage/uploads/file-limits). The checked-in local Supabase configuration uses 500 MiB.
+
+These are per-object limits enforced by Storage, including direct uploads, not a total user/workspace quota. MIME restrictions check the supplied content type, not the safety or authenticity of the file contents. They do not replace content inspection or cumulative storage quotas; monitor total storage usage separately. The independent desktop file store is unchanged.
 
 ## 4. Import your fork into Vercel
 

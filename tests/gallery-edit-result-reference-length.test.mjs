@@ -62,11 +62,13 @@ globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {
     let src = '';
     Object.defineProperty(media, 'src', { get: () => src, set: value => {
       src = value;
-      if (value && kind === 'video' && value.includes('slow')) globalThis.slowReadsStarted = (globalThis.slowReadsStarted || 0) + 1;
-      if (value && kind === 'video') setTimeout(() => {
+      const finish = () => {
         if (value.includes('unreadable')) { media.onerror?.(); return; }
         media.duration = SOURCE_SECONDS; media.onloadedmetadata?.();
-      }, value.includes('slow') ? 40 : 1);
+      };
+      // A 'held' read finishes only when the test releases it, so the test decides what is still pending.
+      if (value && kind === 'video' && value.includes('held')) (globalThis.heldReads ||= []).push(finish);
+      else if (value && kind === 'video') setTimeout(finish, value.includes('slow') ? 40 : 1);
     } });
     return media;
   } };
@@ -200,11 +202,12 @@ test('slow length reads of several drops overlap instead of running one after an
   renderToStaticMarkup(React.createElement(Controls, props(latest, onChange)));
   const drop = (id, url) => dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
     dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id, url, videoDuration: -1 }) : '' } });
-  globalThis.slowReadsStarted = 0;
-  const drops = [1, 2, 3].map(n => drop('s' + n, `https://example.supabase.co/media/slow-${n}.mp4`));
-  // All three reads must have started while the first is still pending (each takes 40 ms), whatever the machine's speed.
-  for (let tick = 0; tick < 50 && globalThis.slowReadsStarted < 3; tick++) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(globalThis.slowReadsStarted, 3);
+  globalThis.heldReads = [];
+  const drops = [1, 2, 3].map(n => drop('s' + n, `https://example.supabase.co/media/held-${n}.mp4`));
+  // No read finishes until all three have started, so the reads can only overlap, whatever the machine's speed.
+  for (let tick = 0; tick < 50 && globalThis.heldReads.length < 3; tick++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(globalThis.heldReads.length, 3);
+  globalThis.heldReads.forEach(finish => finish());
   await Promise.all(drops);
   assert.equal(latest.referenceVideos.length, 3);
 });

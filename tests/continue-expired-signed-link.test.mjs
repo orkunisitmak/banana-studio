@@ -65,6 +65,10 @@ test('Continue from an expired link with another ratio extracts the last frame f
   const error = await run('https://x.supabase.co/storage/v1/object/sign/media/u1/v1.mp4?token=expired');
   assert.doesNotMatch(error?.message || '', /Could not load reference video/);
   assert.equal(sent.length, 1, 'the video request was never sent');
+  const renewed = loaded.filter(url => !url.includes('token=expired'));
+  assert.equal(renewed.length, 2, 'the renewed link is loaded for the ratio check and again for the last frame');
+  assert.equal(new Set(renewed).size, 1, 'both loads use the same renewed link');
+  assert.match(String(sent[0].body), /image_to_video/, 'the request continues from the extracted last frame');
 });
 
 test('control: the same Continue video with a live link reaches the server', async () => {

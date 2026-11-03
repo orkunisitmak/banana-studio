@@ -960,7 +960,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       }
     };
     const handleEscape = (event: KeyboardEvent) => {
-      if (!moveMenuOpen || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (!moveMenuOpen || isCreatingFolder || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       setMoveMenuOpen(false);
       moveButtonRef.current?.focus();
     };
@@ -970,7 +970,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen]);
+  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen, isCreatingFolder]);
 
   // --- Derived State ---
   const currentFolder = folders.find(f => f.id === currentFolderId);

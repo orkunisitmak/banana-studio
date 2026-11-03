@@ -820,6 +820,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
+  const moveButtonRef = useRef<HTMLButtonElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
   const [preparedPhotos, setPreparedPhotos] = useState<File[] | null>(null);
   const [isPreparingPhotos, setIsPreparingPhotos] = useState(false);
@@ -958,8 +959,17 @@ export const Gallery: React.FC<GalleryProps> = ({
         setMoveMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (!moveMenuOpen || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setMoveMenuOpen(false);
+      moveButtonRef.current?.focus();
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen]);
 
   // --- Derived State ---
@@ -2500,6 +2510,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               {!isReadOnly && <>
               <div ref={moveMenuRef} className="relative">
                 <button
+                  ref={moveButtonRef}
                   onClick={() => setMoveMenuOpen(!moveMenuOpen)}
                   disabled={isMoving}
                   onDragOver={(e) => {

@@ -1357,7 +1357,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // --- Actions ---
 
-  const openCreateFolderModal = () => {
+  const openCreateFolderModal = (event: React.MouseEvent<HTMLElement>) => {
     if (isReadOnly) return;
     setNewFolderName("");
     setFolderCreateError(null);
@@ -1365,7 +1365,8 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsNotificationPanelOpen(false);
     setIsGridMenuOpen(false);
     setIsUserMenuOpen(false);
-    createFolderOpenerRef.current = document.activeElement as HTMLElement | null;
+    // The button itself: Safari does not focus a clicked button, so document.activeElement could be elsewhere.
+    createFolderOpenerRef.current = event.currentTarget;
     setIsCreatingFolder(true);
   };
 
@@ -1971,7 +1972,10 @@ export const Gallery: React.FC<GalleryProps> = ({
         <div
           className="fixed inset-0 z-[310] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeCreateFolderModal();
+            if (event.target !== event.currentTarget) return;
+            // Without this the browser moves focus to the body after the handler, undoing the focus return.
+            event.preventDefault();
+            closeCreateFolderModal();
           }}
         >
           <div

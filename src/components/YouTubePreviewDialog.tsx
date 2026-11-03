@@ -171,6 +171,6 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
         </div>
       </div>
     </div>
-    <footer className="ytp-footer">YouTube web layout measured Sep 25, 2026 · Airrack, MrBeast &amp; Ryan Trahan examples from the same date · Your video's stats are placeholders. Layouts vary by account; use 100% browser zoom.</footer>
+    <footer className="ytp-footer">YouTube web layout measured Sep 25, 2026 · The other videos are fictional examples · Your video's stats are placeholders. Layouts vary by account; use 100% browser zoom.</footer>
   </div>, document.body);
 };

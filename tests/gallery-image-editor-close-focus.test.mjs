@@ -39,11 +39,14 @@ const mount = props => {
     useEffect(run, deps) { const i = cursor++; const prev = slots[i]; if (!prev || !deps || !same(prev.deps, deps)) effects.push(() => { prev?.cleanup?.(); slots[i] = { deps, cleanup: run() }; }); },
   };
   const focused = [];
+  const handlers = {};
   const walk = node => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) return node.forEach(walk);
+    if (node.props?.['aria-label'] === 'Close image edit') handlers.close = node.props.onClick;
+    if (node.props?.['data-gallery-image-editor'] !== undefined) handlers.keyDown = node.props.onKeyDown;
     if (node.props?.ref) node.props.ref.current = { focus: () => focused.push(node.props['aria-label']) }; walk(node.props?.children); };
   const render = () => { cursor = 0; effects = []; tree = GalleryImageEditor(props); walk(tree); effects.forEach(run => run()); };
   render();
-  return { focused, update: values => { Object.assign(props, values); render(); } };
+  return { focused, handlers, update: values => { Object.assign(props, values); render(); } };
 };
 
 test('closing the image editor focuses the Edit this image button', () => {
@@ -55,4 +58,22 @@ test('closing the image editor focuses the Edit this image button', () => {
   assert.deepEqual(ui.focused, [], 'opening without a selected area focuses nothing');
   ui.update({ isEditing: false });
   assert.deepEqual(ui.focused, ['Edit this image']);
+});
+
+test('the Close button and Escape both call onClose', () => {
+  globalThis.window = { innerWidth: 1200 };
+  const image = { id: 'a', url: 'https://example.com/a.png', prompt: 'cat', mediaType: 'image' };
+  let closed = 0;
+  const ui = mount({ image, images: [image], isEditing: true, onStart() {}, onGenerate: async () => [], onClose: () => { closed += 1; } });
+  ui.handlers.close();
+  assert.equal(closed, 1, 'Close button');
+  ui.handlers.keyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert.equal(closed, 2, 'Escape');
+});
+
+test('with the details pane hidden the editor is unmounted on close, so the Gallery moves focus to the Details toggle first', async () => {
+  const { readFileSync } = await import('node:fs');
+  const gallery = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
+  assert.match(gallery, /<button ref=\{detailsToggleRef\} type="button" data-gallery-details-toggle/);
+  assert.match(gallery, /onClose=\{\(\) => \{ if \(!isDetailsVisible\) detailsToggleRef\.current\?\.focus\(\{ preventScroll: true \}\); setEditingMediaId\(null\); \}\}/);
 });

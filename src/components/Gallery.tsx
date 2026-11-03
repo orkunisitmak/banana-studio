@@ -759,6 +759,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => { setIsYouTubePreviewOpen(false); }, [galleryOwner?.user_id, userProfile?.id]);
   const [searchRevealId, setSearchRevealId] = useState<string | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
 
   // Pagination State
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
@@ -3072,7 +3073,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             onClick={() => setSelectedMediaId(null)}
           >
             <div data-gallery-viewer-toolbar className={`${isEditingSelectedMedia ? 'mb-3 flex w-full shrink-0 justify-end' : 'absolute right-4 top-4 z-50 flex'} items-center gap-2`}>
-              <button type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
+              <button ref={detailsToggleRef} type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
                 onClick={event => { event.stopPropagation(); setIsDetailsVisible(visible => !visible); }}
                 className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 text-xs font-medium text-gray-200 backdrop-blur-sm transition-colors hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/50">
                 {isDetailsVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}Details
@@ -3151,7 +3152,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
               <LazyDialogErrorBoundary inline>
                 <React.Suspense fallback={<div role="status" className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading edit controls…</div>}>
-                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => { if (!isDetailsVisible) detailsToggleRef.current?.focus({ preventScroll: true }); setEditingMediaId(null); }} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
                 </React.Suspense>
               </LazyDialogErrorBoundary>
             </div>}

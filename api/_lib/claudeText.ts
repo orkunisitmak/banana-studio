@@ -26,11 +26,19 @@ const candidateDirectories = () => {
   ].filter(Boolean);
 };
 
+const isUsableBinary = (file: string): boolean => {
+  try {
+    if (!fs.statSync(file).isFile()) return false;
+    if (process.platform !== 'win32') fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch { return false; }
+};
+
 /** The user's installed Claude Code, else the SDK's own native build when it ships beside the app. */
 export const findClaudeBinary = (): string | null => {
   const configured = process.env.CLAUDE_BIN?.trim();
   // Windows .cmd/.bat shims cannot be started without a shell, and the prompt must never pass through one.
-  if (configured) return path.isAbsolute(configured) && !/\.(cmd|bat)$/i.test(configured) && fs.existsSync(configured) ? configured : null;
+  if (configured) return path.isAbsolute(configured) && !/\.(cmd|bat)$/i.test(configured) && isUsableBinary(configured) ? configured : null;
   for (const directory of candidateDirectories()) {
     const file = path.join(directory, exe);
     try { if (fs.statSync(file).isFile()) return file; } catch { /* Not installed here. */ }

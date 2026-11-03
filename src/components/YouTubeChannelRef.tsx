@@ -190,6 +190,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     };
     const handleEscape = (e: KeyboardEvent) => {
       if (!isOpen || e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      e.preventDefault();
       close();
       buttonRef.current?.focus();
     };

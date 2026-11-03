@@ -221,7 +221,8 @@ test('Escape closes the open YouTube reference panel and ignores other keys', as
   await press({ key: 'Escape', defaultPrevented: true });
   assert.match(ui.text(), /YouTube Ref/);
   assert.equal(focused, 0);
-  await press({ key: 'Escape' });
+  let prevented = false; await press({ key: 'Escape', preventDefault() { prevented = true; } });
+  assert.ok(prevented, 'the handled Escape is marked so the Brainstorm panel stays open');
   assert.doesNotMatch(ui.text(), /YouTube Ref/);
   assert.equal(focused, 1, 'focus returns to the trigger');
   ui.unmount();

@@ -57,7 +57,7 @@ test('Clear All is not offered when it would remove nothing (only running genera
   toast = hook();
   const before = toast.toasts.map(t => t.id);
   toast.dismissAll(); toast = hook();
-  const removed = before.length - toast.toasts.length;
-  const shown = />Clear All</.test(panel(toast.toasts));
-  assert.ok(!(shown && removed === 0), `panel with ${before.length} running generation shows Clear All: ${shown}; clicking it removed ${removed} entries`);
+  assert.ok(before.length > 0, 'a running generation is listed');
+  assert.deepEqual(toast.toasts.map(t => t.id), before, 'Clear All keeps the running generation');
+  assert.ok(!/>Clear All</.test(panel(toast.toasts)), 'Clear All is not offered when only running generations are listed');
 });

@@ -2136,7 +2136,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
               <div ref={gridMenuRef} className="relative hidden sm:block">
                 <button
-                  onClick={() => setIsGridMenuOpen(!isGridMenuOpen)}
+                  onClick={() => { setIsGridMenuOpen(!isGridMenuOpen); setIsNotificationPanelOpen(false); setIsUserMenuOpen(false); }}
                   aria-label="Grid density"
                   aria-expanded={isGridMenuOpen}
                   className={`relative grid h-10 w-10 place-items-center rounded-xl border transition-colors ${isGridMenuOpen ? 'border-violet-400/60 bg-violet-600 text-white' : 'border-white/[0.08] bg-[#161b22] text-gray-400 hover:border-white/15 hover:text-white'}`}

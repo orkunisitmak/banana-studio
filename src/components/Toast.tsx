@@ -190,8 +190,9 @@ export const useToast = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // A running generation has no per-item dismiss, so Clear All must keep its progress entry too.
   const dismissAll = () => {
-    setToasts([]);
+    setToasts((prev) => prev.filter((t) => t.type === 'loading'));
   };
 
   const updateToast = (id: string, updates: Partial<Toast>) => {

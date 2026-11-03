@@ -307,6 +307,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { endpoint: selectedQueueEndpoint, data: statusData } = selectedStatus;
     if (statusData?.status === 'COMPLETED') {
+      // fal reports a failed request as COMPLETED with `error`; its result
+      // route repeats the model's error status instead of returning a video.
+      if (statusData?.error) return terminalFailure('ERROR', extractFalErrorMessage(statusData.error));
       const resultResponse = await fetch(
         // Match @fal-ai/client's queue.result() lifecycle route. The REST
         // submit payload may expose a convenience response_url ending in

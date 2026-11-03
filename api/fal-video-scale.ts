@@ -118,6 +118,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (statusData?.status === 'COMPLETED') {
+      // fal reports a failed request as COMPLETED with `error`; its result
+      // route repeats the model's error status instead of returning a video.
+      if (statusData?.error) {
+        return res.status(200).json({ status: 'FAILED', error: extractFalErrorMessage(statusData.error) });
+      }
       const resultResponse = await fetch(
         `${FAL_QUEUE_BASE}/${SCALE_QUEUE_APP}/requests/${encodeURIComponent(requestId)}`,
         { headers: { Authorization: `Key ${apiKey}` } },

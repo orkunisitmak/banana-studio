@@ -17,3 +17,7 @@ test('Escape closes the Gallery notification panel, grid menu and account menu a
 test('the handler is registered and removed with the outside-click listener', () => {
   assert.match(src, /document\.addEventListener\('keydown', handlePopupEscape\);\r?\n\s*return \(\) => \{\r?\n\s*document\.removeEventListener\('mousedown', handleClickOutside\);\r?\n\s*document\.removeEventListener\('keydown', handleEscape\);\r?\n\s*document\.removeEventListener\('keydown', handlePopupEscape\);/);
 });
+
+test('opening the grid menu from the keyboard closes the notification panel and account menu', () => {
+  assert.match(src, /onClick=\{\(\) => \{ setIsGridMenuOpen\(!isGridMenuOpen\); setIsNotificationPanelOpen\(false\); setIsUserMenuOpen\(false\); \}\}/);
+});

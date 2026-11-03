@@ -978,11 +978,21 @@ export const Gallery: React.FC<GalleryProps> = ({
       setMoveMenuOpen(false);
       moveButtonRef.current?.focus();
     };
+    // The Move menu and its New Folder dialog sit on top of the header popups, so they get Escape first.
+    const handlePopupEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !moveMenuOpen && !isCreatingFolder) {
+        if (isNotificationPanelOpen) { setIsNotificationPanelOpen(false); notificationButtonRef.current?.focus(); }
+        else if (isGridMenuOpen) { setIsGridMenuOpen(false); gridMenuRef.current?.querySelector('button')?.focus(); }
+        else if (isUserMenuOpen) { setIsUserMenuOpen(false); userMenuRef.current?.querySelector('button')?.focus(); }
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handlePopupEscape);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handlePopupEscape);
     };
   }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen, isCreatingFolder]);
 

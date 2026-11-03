@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const req = createRequire(import.meta.url);
@@ -8,7 +9,7 @@ const React = req('react');
 const { renderToStaticMarkup } = req('react-dom/server');
 const out = await build({
   entryPoints: ['./src/components/HistoryPanel.tsx'],
-  absWorkingDir: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
+  absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'cjs', platform: 'node', external: ['react', 'lucide-react'], logLevel: 'silent',
 });
 const mod = { exports: {} };

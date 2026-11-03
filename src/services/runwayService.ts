@@ -564,13 +564,13 @@ const prepareReferenceVideos = async (
     persistedVideos.push(persistedRef);
 
     if (videoModel !== 'minimax-h3' && operation === 'generate' && ref.isContinuation && targetAspectRatio !== 'adaptive') {
-      const matchesTarget = await videoAspectMatchesTarget(ref.url, targetAspectRatio);
+      const matchesTarget = await videoAspectMatchesTarget(publicUrl, targetAspectRatio);
       if (!matchesTarget) {
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
         assertRoomForFrames(generatedFirstFrames.length + 1);
-        generatedFirstFrames.push(await extractContinuationFirstFrame(ref.url, targetAspectRatio, quality, label));
+        generatedFirstFrames.push(await extractContinuationFirstFrame(publicUrl, targetAspectRatio, quality, label));
         extractedVideoIndices.push(i);
         continue;
       }

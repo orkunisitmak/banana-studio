@@ -207,3 +207,19 @@ test('an abandoned thumbnail rejection leaves the new request active and retryab
   requests.find(request => request.url === 'B0').resolve(); await ui.settle();
   assert.deepEqual(added.map(ref => ref.data), ['data:image/jpeg;base64,B0']);
 });
+
+test('Escape closes the open YouTube reference panel and ignores other keys', async () => {
+  const listeners = [];
+  globalThis.document = { addEventListener: (type, fn) => listeners.push([type, fn]), removeEventListener(type, fn) { const i = listeners.findIndex(l => l[0] === type && l[1] === fn); if (i >= 0) listeners.splice(i, 1); } };
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  const ui = mount({ onAddReferences() {}, onPrepareBrainstorm() {}, draftKey: 'k', remainingSlots: 14 });
+  await ui.settle(); await ui.click('YT');
+  assert.match(ui.text(), /YouTube Ref/);
+  const press = async event => { listeners.filter(l => l[0] === 'keydown').forEach(l => l[1](event)); await ui.settle(); };
+  await press({ key: 'Enter' });
+  await press({ key: 'Escape', defaultPrevented: true });
+  assert.match(ui.text(), /YouTube Ref/);
+  await press({ key: 'Escape' });
+  assert.doesNotMatch(ui.text(), /YouTube Ref/);
+  ui.unmount();
+});

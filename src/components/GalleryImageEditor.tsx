@@ -58,6 +58,8 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const enhancementAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const startButtonRef = useRef<HTMLButtonElement>(null);
+  const wasEditingRef = useRef(isEditing);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const pendingCaretRef = useRef<number>();
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -98,6 +100,11 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   useEffect(() => {
     if (hasArea && isEditing) promptRef.current?.focus({ preventScroll: true });
   }, [hasArea, isEditing]);
+  useEffect(() => {
+    // Closing swaps the editor for a new Edit button, so focus would otherwise fall to the page.
+    if (wasEditingRef.current && !isEditing) startButtonRef.current?.focus({ preventScroll: true });
+    wasEditingRef.current = isEditing;
+  }, [isEditing]);
   useEffect(() => {
     // Keep the mobile composer in view for repeated submissions. On desktop,
     // reveal the result strip within the independently scrolling image pane.
@@ -202,7 +209,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
 
   if (!isEditing) return <div className="mt-4 flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-[#161b22] px-4 py-3" data-gallery-edit-controller>
     <div className="flex min-w-0 items-center gap-2.5 text-sm text-gray-300"><Pencil className="h-4 w-4 shrink-0 text-lime-400" /><span className="truncate">Change part of this image</span></div>
-    <button type="button" onClick={onStart} aria-label="Edit this image" className="flex shrink-0 items-center gap-2 rounded-xl bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400">Edit image <ArrowRight className="h-3.5 w-3.5" /></button>
+    <button ref={startButtonRef} type="button" onClick={onStart} aria-label="Edit this image" className="flex shrink-0 items-center gap-2 rounded-xl bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400">Edit image <ArrowRight className="h-3.5 w-3.5" /></button>
   </div>;
 
   return <section className="w-full min-w-0 shrink-0 space-y-3" aria-label="Edit image" aria-busy={busy} data-gallery-image-editor onClick={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()} onTouchMove={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()} onKeyDown={event => {

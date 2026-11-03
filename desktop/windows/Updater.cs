@@ -8,6 +8,12 @@ using System.Text.RegularExpressions;
 
 namespace BananaStudio;
 
+// The rollback itself failed. The previous install is intact at Backup, outside the app folder.
+internal sealed class RollbackFailedException(string backup, Exception inner) : IOException("The previous version could not be restored.", inner)
+{
+    internal string Backup { get; } = backup;
+}
+
 internal sealed record WindowsUpdate(string Version, string SourceCommit, string Url, long Size, string Sha256, string Signature);
 
 // Verified Windows updates. The maintainer signs windows-update.json with
@@ -190,6 +196,13 @@ internal static partial class Updater
             }
             return ok ? 0 : 1;
         }
+        catch (RollbackFailedException error)
+        {
+            MessageBox.Show($"The update could not start, and the previous version could not be put back in its folder. It is safe here:\n{error.Backup}\n\nBanana Studio will now open from there. Your gallery was not changed.\n\nTo tidy up later, quit Banana Studio, delete this folder if it is still there:\n{target}\nand rename the safe copy to that name.", "Banana Studio");
+            try { Process.Start(new ProcessStartInfo(Path.Combine(error.Backup, ExecutableName)) { UseShellExecute = false, WorkingDirectory = error.Backup })?.Dispose(); }
+            catch (Exception launch) when (launch is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+            return 1;
+        }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             MessageBox.Show("The update could not be installed: " + error.Message, "Banana Studio");
@@ -199,11 +212,15 @@ internal static partial class Updater
 
     // Moves the install aside, copies the new files and keeps them only once the new
     // version reports a working workspace. Any failure puts the previous install back.
-    internal static bool Apply(string target, string payloadApp, Func<Action> launch, Func<bool> healthy, TimeSpan timeout)
+    // Rollback failures surface as RollbackFailedException, carrying the intact backup. The file
+    // operations can be replaced only by the isolated test.
+    internal static bool Apply(string target, string payloadApp, Func<Action> launch, Func<bool> healthy, TimeSpan timeout, Action<string>? delete = null, Action<string, string>? move = null)
     {
+        delete ??= DeleteWithRetry;
+        move ??= MoveWithRetry;
         var parent = Path.GetDirectoryName(target) ?? throw new IOException("The application folder is not expected.");
         var backup = Path.Combine(parent, Path.GetFileName(target) + ".previous-" + Guid.NewGuid().ToString("N"));
-        MoveWithRetry(target, backup);
+        move(target, backup);
         Action stop = () => { };
         try
         {
@@ -218,8 +235,8 @@ internal static partial class Updater
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException) { }
         stop();
-        DeleteWithRetry(target);
-        MoveWithRetry(backup, target);
+        try { delete(target); move(backup, target); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { throw new RollbackFailedException(backup, error); }
         return false;
     }
 
@@ -390,6 +407,23 @@ internal static partial class Updater
             var refused = Install("refused", "old");
             Require(!Apply(refused, Install("refusedNew", "new"), () => throw new InvalidOperationException("no start"), () => true, TimeSpan.FromSeconds(5)), "failed launch");
             Require(Marker(refused) == "old" && !Backups("refused"), "failed launch restored");
+
+            // The last rollback step fails: the backup must survive and be reported, never deleted.
+            void RollbackFails(string name, Action<string>? delete, Action<string, string>? move)
+            {
+                var install = Install(name, "old");
+                var stoppedNew = false;
+                RollbackFailedException? failure = null;
+                try { Apply(install, Install(name + "New", "new"), () => () => stoppedNew = true, () => false, TimeSpan.FromMilliseconds(300), delete, move); }
+                catch (RollbackFailedException error) { failure = error; }
+                Require(failure != null && stoppedNew, name + " reported");
+                Require(Directory.Exists(failure!.Backup) && Marker(failure.Backup) == "old", name + " backup intact");
+            }
+            var moves = 0;
+            RollbackFails("moveBack", null, (source, destination) => { if (++moves == 2) throw new IOException("locked"); Directory.Move(source, destination); });
+            Require(!Directory.Exists(Path.Combine(directory, "moveBack")), "moveBack left no partial install");
+            RollbackFails("deleteNew", _ => throw new UnauthorizedAccessException("locked"), null);
+            Require(Marker(Path.Combine(directory, "deleteNew")) == "new", "deleteNew kept the new copy in place");
         }
         finally { TryDeleteDirectory(directory); }
     }

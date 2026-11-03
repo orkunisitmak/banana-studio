@@ -27,10 +27,11 @@ export function ProviderRouteControl() { return null; }
 export function ProviderRoutingSettings() { return null; }`;
 
 // Record the composer bar's drop handler while rendering.
-let dropHandler;
+let dropHandler, clearHandler;
 const recordingRuntime = { ...jsxRuntime };
 for (const name of ['jsx', 'jsxs', 'jsxDEV']) if (jsxRuntime[name]) recordingRuntime[name] = (type, props, ...rest) => {
   if (type === 'div' && props?.onDrop && props?.onPaste) dropHandler = props.onDrop;
+  if (type === 'button' && props?.title === 'Clear Prompt & Images') clearHandler = props.onClick;
   return jsxRuntime[name](type, props, ...rest);
 };
 const bundleRequire = id => id === 'react/jsx-runtime' || id === 'react/jsx-dev-runtime' ? recordingRuntime : req(id);
@@ -64,7 +65,7 @@ globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {
       if (value && kind === 'video') setTimeout(() => {
         if (value.includes('unreadable')) { media.onerror?.(); return; }
         media.duration = SOURCE_SECONDS; media.onloadedmetadata?.();
-      }, 1);
+      }, value.includes('slow') ? 40 : 1);
     } });
     return media;
   } };
@@ -163,4 +164,30 @@ test('two drops that finish reading together attach only one video when the acti
     dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id }) : '' } });
   await Promise.all([drop('a'), drop('b')]);
   assert.equal(latest.referenceVideos.length, 1);
+});
+
+test('drops are attached in the order they were dropped, even when the first one reads slower', async () => {
+  let latest = { ...editConfig, videoOperation: 'generate' };
+  const onChange = next => { latest = typeof next === 'function' ? next(latest) : next; };
+  dropHandler = undefined;
+  renderToStaticMarkup(React.createElement(Controls, props(latest, onChange)));
+  const drop = (id, url) => dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
+    dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id, url, videoDuration: -1 }) : '' } });
+  await Promise.all([drop('a', 'https://example.supabase.co/media/slow-a.mp4'), drop('b', 'https://example.supabase.co/media/b.mp4')]);
+  assert.deepEqual(latest.referenceVideos.map(video => video.url.split('/').pop()), ['slow-a.mp4', 'b.mp4']);
+});
+
+test('Clear while a dropped video length is being read keeps the video out of the cleared draft', async () => {
+  let latest = editConfig;
+  const onChange = next => { latest = typeof next === 'function' ? next(latest) : next; };
+  dropHandler = undefined; clearHandler = undefined;
+  renderToStaticMarkup(React.createElement(Controls, props(editConfig, onChange)));
+  assert.ok(clearHandler, 'clear button found');
+  const payload = JSON.stringify({ ...galleryEditResult, url: 'https://example.supabase.co/media/slow-c.mp4' });
+  const pending = dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
+    dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? payload : '' } });
+  clearHandler();
+  await pending;
+  assert.equal(latest.prompt, '');
+  assert.equal(latest.referenceVideos.length, 0);
 });

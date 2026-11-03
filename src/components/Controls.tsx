@@ -423,6 +423,8 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
+  const galleryDropEpochRef = useRef(0);
+  const galleryDropChainRef = useRef<Promise<void>>(Promise.resolve());
   const insertSourceUploadRef = useRef(false);
 
   useLayoutEffect(() => {
@@ -978,6 +980,7 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleClearAll = () => {
+    galleryDropEpochRef.current += 1;
     if (config.prompt || config.referenceImages.length > 0 || config.personGroups?.length || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0) {
         setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions, clearedConfig: config }]);
         onChange({
@@ -1535,24 +1538,38 @@ export const Controls: React.FC<ControlsProps> = ({
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
                 return;
               }
-              const duration = await galleryVideoDuration(media);
-              // Reading the length can take seconds; merge into the latest draft and its latest limit.
-              let full = false;
-              flushSync(() => onChange(previous => {
-                if ((previous.referenceVideos?.length || 0) >= attachLimitsRef.current.videos) {
-                  full = true;
-                  return previous;
-                }
-                return {
-                  ...previous,
-                  referenceVideos: [
-                    ...(previous.referenceVideos || []),
-                    { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration }
-                  ],
-                  mode: 'video',
-                };
-              }));
-              if (full) setAttachmentError(`Maximum of ${attachLimitsRef.current.videos} videos allowed for the selected action.`);
+              // Reading the length can take seconds: hold Generate meanwhile, add drops in the order they were dropped,
+              // and skip the add if Clear ran while waiting.
+              const epoch = galleryDropEpochRef.current;
+              const turn = galleryDropChainRef.current;
+              let release: () => void = () => {};
+              galleryDropChainRef.current = new Promise<void>(resolve => { release = resolve; });
+              setUploadingReferenceVideos(count => count + 1);
+              try {
+                await turn;
+                const duration = await galleryVideoDuration(media);
+                if (epoch !== galleryDropEpochRef.current) return;
+                // Merge into the latest draft and its latest limit.
+                let full = false;
+                flushSync(() => onChange(previous => {
+                  if ((previous.referenceVideos?.length || 0) >= attachLimitsRef.current.videos) {
+                    full = true;
+                    return previous;
+                  }
+                  return {
+                    ...previous,
+                    referenceVideos: [
+                      ...(previous.referenceVideos || []),
+                      { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration }
+                    ],
+                    mode: 'video',
+                  };
+                }));
+                if (full) setAttachmentError(`Maximum of ${attachLimitsRef.current.videos} videos allowed for the selected action.`);
+              } finally {
+                release();
+                setUploadingReferenceVideos(count => count - 1);
+              }
               return;
             }
             const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));

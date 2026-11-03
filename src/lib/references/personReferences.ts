@@ -1,5 +1,5 @@
 import { bindImageReferences, getStableImageTag, mapUnquotedPrompt, resolveStableImageReferences } from './referenceTokens.js';
-import { normalizeSearch } from '../normalizeSearch.js';
+import { normalizeSearch } from '../../components/gallerySearch.js';
 import type { GenerationConfig, PersonGroupDefinition, ReferenceImage, SavedPerson } from '../../types.js';
 
 /** Stable identity numbers; legacy Me/2nd flags remain readable without a migration. */

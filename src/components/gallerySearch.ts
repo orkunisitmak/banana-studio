@@ -1,5 +1,4 @@
 import { getImageModelLabel, VIDEO_MODEL_OPTIONS, type Folder, type GeneratedMedia } from '../types';
-import { normalizeSearch } from '../lib/normalizeSearch';
 import { cleanPersonName, getPersonId } from '../lib/references/personReferences';
 
 export type SearchPeople = Record<string, string[]>;
@@ -13,7 +12,7 @@ export type SearchFilters = {
   status: 'all' | 'completed' | 'running' | 'failed';
 };
 export const EMPTY_SEARCH_FILTERS: SearchFilters = { type: 'all', person: '', model: '', folder: '', favorites: false, days: 0, status: 'all' };
-export { normalizeSearch };
+export const normalizeSearch = (value: string): string => value.toLowerCase().replace(/ı/g, 'i').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 const timestamp = (value: number | string): number => typeof value === 'number' ? value : Number(value) || Date.parse(value) || 0;
 
 // Person numbers are local to a generation, not identities across the library.

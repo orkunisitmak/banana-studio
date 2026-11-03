@@ -36,3 +36,9 @@ test('a failed edit next to a completed one still reports the saved result', () 
   const s = status([job('e1', { url: 'https://x/e1.png', status: 'completed' }), job('e2', { status: 'failed', error: 'Gemini returned no image.' })]);
   assert.deepEqual(s, { header: '1 ready · 1 failed', live: 'Saved in gallery' });
 });
+
+test('a pending edit reads as generating in the background, not saved', () => {
+  const s = status([job('e1', { status: 'pending' })]);
+  assert.equal(s.header, '0 ready');
+  assert.match(s.live, /1 generating in background/);
+});

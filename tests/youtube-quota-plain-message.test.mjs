@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const out = await build({
   entryPoints: ['./api/youtube.ts'],
-  absWorkingDir: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
+  absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
   plugins: [{ name: 'stub', setup(b) {
     b.onResolve({ filter: /[\\/]_lib[\\/]auth(\.js)?$/ }, () => ({ path: 'auth', namespace: 'stub' }));

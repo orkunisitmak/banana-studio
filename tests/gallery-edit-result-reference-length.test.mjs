@@ -62,6 +62,7 @@ globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {
     let src = '';
     Object.defineProperty(media, 'src', { get: () => src, set: value => {
       src = value;
+      if (value && kind === 'video' && value.includes('slow')) globalThis.slowReadsStarted = (globalThis.slowReadsStarted || 0) + 1;
       if (value && kind === 'video') setTimeout(() => {
         if (value.includes('unreadable')) { media.onerror?.(); return; }
         media.duration = SOURCE_SECONDS; media.onloadedmetadata?.();
@@ -199,8 +200,11 @@ test('slow length reads of several drops overlap instead of running one after an
   renderToStaticMarkup(React.createElement(Controls, props(latest, onChange)));
   const drop = (id, url) => dropHandler({ preventDefault() {}, stopPropagation() {}, target: {}, currentTarget: { contains: () => false },
     dataTransfer: { types: ['application/nanogen-media'], files: [], getData: type => type === 'application/nanogen-media' ? JSON.stringify({ ...galleryEditResult, id, url, videoDuration: -1 }) : '' } });
-  const start = Date.now();
-  await Promise.all([1, 2, 3].map(n => drop('s' + n, `https://example.supabase.co/media/slow-${n}.mp4`)));
+  globalThis.slowReadsStarted = 0;
+  const drops = [1, 2, 3].map(n => drop('s' + n, `https://example.supabase.co/media/slow-${n}.mp4`));
+  // All three reads must have started while the first is still pending (each takes 40 ms), whatever the machine's speed.
+  for (let tick = 0; tick < 50 && globalThis.slowReadsStarted < 3; tick++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(globalThis.slowReadsStarted, 3);
+  await Promise.all(drops);
   assert.equal(latest.referenceVideos.length, 3);
-  assert.ok(Date.now() - start < 100, 'three 40 ms reads should take about 40 ms in total, not 120 ms');
 });

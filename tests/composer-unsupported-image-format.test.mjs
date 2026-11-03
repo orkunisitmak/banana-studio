@@ -61,3 +61,24 @@ test('control: the composer attaches a PNG reference', async () => {
   assert.deepEqual(result.attached, ['image/png']);
   assert.deepEqual(result.errors, []);
 });
+
+test('control: a JPEG and a WebP reference are attached', async () => {
+  for (const [name, type] of [['photo.jpg', 'image/jpeg'], ['photo.webp', 'image/webp']]) {
+    const result = await attach(new File([new Uint8Array([1, 2, 3])], name, { type }));
+    assert.deepEqual(result.attached, [type]);
+    assert.deepEqual(result.errors, []);
+  }
+});
+
+test('an unsupported file does not use up the last free slot of a supported one', async () => {
+  let draft = { mode: 'image', referenceImages: Array.from({ length: 13 }, (_, i) => ({ id: String(i), data: 'x', mimeType: 'image/png' })) };
+  const processImageFiles = create({
+    config: draft, maxReferenceImages: 14, attachLimitsRef: { current: { images: 14 } },
+    onChange: update => { draft = typeof update === 'function' ? update(draft) : update; },
+    setAttachmentError() {},
+    readFileAsBase64: async f => `data:${f.type};base64,AAAA`, estimateBase64Size: () => 10, compressImage: async d => d, flushSync: fn => fn(),
+  });
+  await processImageFiles([new File([new Uint8Array([1])], 'photo.heic', { type: 'image/heic' }), new File([new Uint8Array([1])], 'photo.jpg', { type: 'image/jpeg' })]);
+  assert.equal(draft.referenceImages.length, 14);
+  assert.equal(draft.referenceImages[13].mimeType, 'image/jpeg');
+});

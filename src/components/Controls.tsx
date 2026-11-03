@@ -692,22 +692,21 @@ export const Controls: React.FC<ControlsProps> = ({
       const currentImages = config.referenceImages || [];
       const remainingSlots = Math.max(0, MAX_IMAGES - currentImages.length);
 
-      if (files.length > remainingSlots) {
+      // Image providers only read these formats; the Gallery editor refuses the rest up front too.
+      // Drop unsupported files before counting slots, so one of them cannot use up the slot a valid file needs.
+      const supported = config.mode !== 'image' ? files : files.filter(file => ['image/png', 'image/jpeg', 'image/webp'].includes(getMimeType(file, (file as File).name)));
+      const unsupportedFormat = supported.length < files.length;
+
+      if (supported.length > remainingSlots) {
         setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       }
 
-      const filesToProcess = files.slice(0, remainingSlots);
+      const filesToProcess = supported.slice(0, remainingSlots);
       const newImages: ReferenceImage[] = [];
 
-      let unsupportedFormat = false;
       for (const file of filesToProcess) {
           const name = (file as File).name;
           let mimeType = getMimeType(file, name);
-          // Image providers only read these formats; the Gallery editor refuses the rest up front too.
-          if (config.mode === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
-            unsupportedFormat = true;
-            continue;
-          }
           let data = await readFileAsBase64(file);
 
           // Keep image-edit sources intact, including imports made before the

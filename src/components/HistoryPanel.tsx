@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, RotateCcw, X, Image as ImageIcon, Layers } from 'lucide-react';
+import { Clock, RotateCcw, X, Image as ImageIcon, Layers, AlertCircle } from 'lucide-react';
 import { GeneratedImage } from '../types';
 import { getImageOutputRatio, getImageResolutionLabel } from '../lib/images/openaiImage';
 
@@ -63,11 +63,21 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             >
               <div className="flex gap-3 mb-3">
                 <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-gray-900 border border-gray-700 relative">
-                  <img 
-                    src={img.thumbnailUrl || img.url} 
-                    alt="Thumbnail" 
-                    className="w-full h-full object-cover"
-                  />
+                  {img.status === 'failed' || !(img.thumbnailUrl || img.url) ? (
+                    <span
+                      title={img.error || 'Generation failed'}
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] text-gray-400"
+                    >
+                      <AlertCircle className="w-4 h-4 text-red-400" />
+                      Failed
+                    </span>
+                  ) : (
+                    <img 
+                      src={img.thumbnailUrl || img.url} 
+                      alt="Thumbnail" 
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 line-clamp-2 mb-1">

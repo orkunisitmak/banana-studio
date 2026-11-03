@@ -40,13 +40,28 @@ test('replacing media that is open elsewhere waits for it and leaves no temporar
     const file=f.store.mediaPath('refs/open.png');let handle=fs.openSync(file,'r');setTimeout(()=>fs.closeSync(handle),150);
     assert.equal((await f.store.upload('refs/open.png',Buffer.from('second'),{upsert:true})).error,null);
     assert.equal(fs.readFileSync(file,'utf8'),'second');
-    if(process.platform==='win32') {
-      handle=fs.openSync(file,'r');
-      try{await assert.rejects(f.store.upload('refs/open.png',Buffer.from('third'),{upsert:true}),{code:'EPERM'});}finally{fs.closeSync(handle);}
-      assert.equal(fs.readFileSync(file,'utf8'),'second');
-    }
     assert.deepEqual(fs.readdirSync(path.dirname(file)),['open.png']);
   } finally{f.store.close();f.cleanup();}
+});
+test('on Windows, media that stays open keeps its bytes and the failed replacement leaves no temporary copy',{skip:process.platform!=='win32'&&'POSIX replaces open files'},async()=>{
+  const f=fixture();try {
+    assert.equal((await f.store.upload('refs/open.png',Buffer.from('first'))).error,null);
+    const file=f.store.mediaPath('refs/open.png'),handle=fs.openSync(file,'r');
+    try{await assert.rejects(f.store.upload('refs/open.png',Buffer.from('second'),{upsert:true}),{code:'EPERM'});}finally{fs.closeSync(handle);}
+    assert.equal(fs.readFileSync(file,'utf8'),'first');
+    assert.deepEqual(fs.readdirSync(path.dirname(file)),['open.png']);
+  } finally{f.store.close();f.cleanup();}
+});
+test('an upload waiting to rename never overwrites media another upload created meanwhile',async()=>{
+  const f=fixture(),rename=fs.renameSync;let busy=true;
+  fs.renameSync=(from,to)=>{if(busy&&to.endsWith('race.png')){busy=false;throw Object.assign(new Error('Synthetic busy file.'),{code:'EBUSY'});}return rename(from,to);};
+  try {
+    const waiting=f.store.upload('refs/race.png',Buffer.from('waiting'));
+    assert.equal((await f.store.upload('refs/race.png',Buffer.from('winner'))).error,null);
+    assert.equal((await waiting).error.code,'23505');
+    const file=f.store.mediaPath('refs/race.png');assert.equal(fs.readFileSync(file,'utf8'),'winner');
+    assert.deepEqual(fs.readdirSync(path.dirname(file)),['race.png']);
+  } finally{fs.renameSync=rename;f.store.close();f.cleanup();}
 });
 test('Library people, references and templates survive restart with current local preview URLs',async()=>{
  const f=fixture();try{

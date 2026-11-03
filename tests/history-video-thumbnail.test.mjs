@@ -25,8 +25,7 @@ test('control: a video with a saved poster shows the poster image', () => {
 
 test('History row for a video without a poster does not load the video file into an <img>', () => {
   const html = render(video);
-  const imgs = [...html.matchAll(/<img[^>]*src="([^"]*)"/g)].map(m => m[1]);
-  assert.ok(!imgs.some(src => /\.mp4(\?|$)/.test(src)), `History thumbnail <img> sources: ${imgs.join(', ')}`);
+  assert.doesNotMatch(html, /<img[\s>]/, 'History row rendered an <img> for a video with no poster');
 });
 
 test('History row for a video without a poster previews the video file in a <video>', () => {

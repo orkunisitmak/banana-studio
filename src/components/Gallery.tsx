@@ -958,8 +958,19 @@ export const Gallery: React.FC<GalleryProps> = ({
         setMoveMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) {
+        if (isNotificationPanelOpen) { setIsNotificationPanelOpen(false); notificationButtonRef.current?.focus(); }
+        else if (isGridMenuOpen) { setIsGridMenuOpen(false); gridMenuRef.current?.querySelector('button')?.focus(); }
+        else if (isUserMenuOpen) { setIsUserMenuOpen(false); userMenuRef.current?.querySelector('button')?.focus(); }
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen]);
 
   // --- Derived State ---

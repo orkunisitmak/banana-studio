@@ -1,6 +1,7 @@
 import type { ReferenceAudio, ReferenceImage, ReferenceVideo } from '../../types';
 import { isH3MaxModeAvailable, type H3MaxMode, type H3MaxOptions } from './h3Max';
 import { getPersonId } from '../references/personReferences';
+import { mapUnquotedPrompt } from '../references/referenceTokens';
 
 /** Source guide covers generation; transformation behavior follows the live
  * endpoint schemas, which now expose more inputs than the original guide. */
@@ -97,7 +98,7 @@ export const normalizeH3MaxPromptLanguage = (value: string, context: H3MaxEnhanc
     ? `Audio ${index}` : references.audios.length ? 'the supplied soundtrack' : 'the requested sound';
   const person = (id: number): string => mode === 'reference_to_video' ? groupPhotos(numberedImages, id)
     : hasStart ? 'the people in the start image' : 'the described people';
-  return value.replace(/\\_/g, '_')
+  return mapUnquotedPrompt(value, text => text.replace(/\\_/g, '_')
     .replace(/@FIRST[_ ]?FRAME\b/gi, hasStart ? 'the start image' : 'the opening scene')
     .replace(/@LAST[_ ]?FRAME\b/gi, hasEnd ? 'the end image' : 'the closing scene')
     .replace(/@REF[_ ]?IMAGE[_ ]?(\d+)\b/gi, (_match, index) => editorImage(Number(index)))
@@ -111,7 +112,7 @@ export const normalizeH3MaxPromptLanguage = (value: string, context: H3MaxEnhanc
     .replace(/\bvideo\s+(\d+)\b/gi, (_match, index) => video(Number(index)))
     .replace(/\baudio\s+(\d+)\b/gi, (_match, index) => audio(Number(index)))
     .replace(/\[REFERENCE ROLES\]/gi, mode === 'reference_to_video' ? '[REFERENCE GUIDANCE]' : '[FRAME GUIDANCE]')
-    .replace(/\[EDIT DIRECTION\]/gi, '[VIDEO DIRECTION]');
+    .replace(/\[EDIT DIRECTION\]/gi, '[VIDEO DIRECTION]'));
 };
 
 export const buildH3MaxPromptGuide = (context: H3MaxEnhancementContext, references: H3PromptReferences, duration: number): string => {

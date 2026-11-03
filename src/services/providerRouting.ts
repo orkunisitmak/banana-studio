@@ -4,6 +4,9 @@ import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 
 // Preferences contain only route names. Credentials stay in the native vault/server.
 const storageKey = (userId: string) => `banana-provider-routes-v1:${userId}`;
+const readStoredPreferences = (userId: string): Record<string, ProviderChoice> => {
+  try { return JSON.parse(localStorage.getItem(storageKey(userId)) || '{}'); } catch { return {}; }
+};
 export async function getProviderPreferences(): Promise<Record<string, ProviderChoice>> {
   const { data } = await supabase.auth.getSession();
   if (!data.session?.user.id) return {};
@@ -12,7 +15,7 @@ export async function getProviderPreferences(): Promise<Record<string, ProviderC
     if (result.error) throw new Error('Provider preferences could not be loaded.');
     return result.data || {};
   }
-  try { return JSON.parse(localStorage.getItem(storageKey(data.session.user.id)) || '{}'); } catch { return {}; }
+  return readStoredPreferences(data.session.user.id);
 }
 export async function saveProviderPreference(model: string, value: ProviderChoice) {
   const { data } = await supabase.auth.getSession();
@@ -22,7 +25,8 @@ export async function saveProviderPreference(model: string, value: ProviderChoic
     if (result.error) throw new Error('Provider preferences could not be saved.');
     return;
   }
-  const preferences = await getProviderPreferences();
+  // Merge and persist in one turn so overlapping model saves keep each other.
+  const preferences = readStoredPreferences(data.session.user.id);
   localStorage.setItem(storageKey(data.session.user.id), JSON.stringify({ ...preferences, [model]: value }));
 }
 export async function getProviderAvailability(signal?: AbortSignal): Promise<ProviderAvailability> {

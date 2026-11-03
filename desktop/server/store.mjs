@@ -35,6 +35,12 @@ const filter = (row, { column, operator, value }) => {
     default: throw new Error('Unsupported filter.');
   }
 };
+// Match the gallery's named-person facets, excluding non-identity reference roles.
+const searchPeople = references => [...new Set((Array.isArray(references) ? references : [])
+  .filter(ref => ref && !ref.isFirstFrame && !ref.isLastFrame && !ref.isDraftImage && !ref.isVideoContext
+    && ((Number.isInteger(ref.personId) && ref.personId > 0 && ref.personId <= 9999) || ref.isSubjectImage || ref.isSecondPerson))
+  .map(ref => typeof ref.personName === 'string' ? ref.personName.replace(/[\r\n\t]/g, ' ').trim().slice(0, 40) : '')
+  .filter(Boolean))];
 const project = (row, columns = '*') => {
   if (columns === '*') return row;
   if (typeof columns !== 'string' || columns.length > 4000) throw new Error('Invalid selection.');
@@ -121,7 +127,7 @@ export class LocalWorkspace {
       if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
       return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
     }
-    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:[...new Set((row.reference_images||[]).map(r=>r.personName).filter(Boolean))]}));
+    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');
     return this.workerRpc(name,args);
   }

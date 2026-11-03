@@ -1,4 +1,5 @@
 import { selectProvider } from './providerRouting';
+import { videoProviderName } from '../lib/video/videoProviderName';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
@@ -8,8 +9,7 @@ import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/m
 import { getSeedanceFrameError, prepareSeedanceFramePrompt } from '../lib/video/seedanceFrames';
 import { prepareReferenceAudio } from '../lib/video/referenceAudio';
 import { buildH3MaxInput, H3_MAX_CAPABILITIES, type H3MaxMode } from '../lib/video/h3Max';
-import { getH3MaxConfigError, getH3MaxMode, getH3MaxReferenceImages, getH3MaxRequestBody } from '../lib/video/h3MaxConfig';
-import { normalizeH3MaxPromptLanguage } from '../lib/video/h3MaxPromptGuide';
+import { getH3MaxConfigError, getH3MaxMode, getH3MaxReferenceImages, getH3MaxRequestBody, getKnownVideoDuration } from '../lib/video/h3MaxConfig';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
 import { hydrateH3MaxReferenceDimensions } from '../lib/video/h3MaxReferenceMetadata';
 export { hydrateH3MaxReferenceDimensions } from '../lib/video/h3MaxReferenceMetadata';
@@ -246,6 +246,15 @@ export const getNormalizedVideoDimensions = (
   return dimensions;
 };
 
+// Round for display without landing on the accepted range: 30.001 is shown as
+// 30.01 and 3.999 as 3.99, so the number never contradicts the refusal.
+const formatRejectedDuration = (duration: number, min: number, max: number): string => {
+  const shown = duration.toFixed(2);
+  if (duration < min && Number(shown) >= min) return (Math.floor(duration * 100) / 100).toFixed(2);
+  if (duration > max && Number(shown) <= max) return (Math.ceil(duration * 100) / 100).toFixed(2);
+  return shown;
+};
+
 export const validateEditSourceMetadata = (
   metadata: { duration: number | null; width: number; height: number },
   label: string,
@@ -253,7 +262,7 @@ export const validateEditSourceMetadata = (
 ): void => {
   const { duration, width, height } = metadata;
   if (duration == null || !Number.isFinite(duration) || duration < 4 || duration > 30) {
-    throw new Error(`${label} must be 4-30 seconds for Video Edit.${duration != null && Number.isFinite(duration) ? ` Current duration is ${duration.toFixed(1)}s.` : ' Could not detect its duration.'}`);
+    throw new Error(`${label} must be 4-30 seconds for Video Edit.${duration != null && Number.isFinite(duration) ? ` Current duration is ${formatRejectedDuration(duration, 4, 30)}s.` : ' Could not detect its duration.'}`);
   }
   const aspect = width / height;
   if (!Number.isFinite(aspect) || width < 300 || height < 300 || aspect < 0.4 || aspect > 2.5 || width * height < 409600) {
@@ -281,17 +290,33 @@ const normalizeVideoForEdit = async (
   }
 
   const startedAt = Date.now();
+  // The scale job is already paid for; ride out brief poll failures like the other task pollers.
+  let transientErrors = 0;
   while (Date.now() - startedAt < VIDEO_PREPROCESS_TIMEOUT) {
     await new Promise(resolve => setTimeout(resolve, VIDEO_PREPROCESS_POLL_INTERVAL));
     const pollHeaders = await getServerAuthHeaders();
-    const statusResponse = await fetch(
-      `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
-      { headers: pollHeaders },
-    );
+    let statusResponse: Response;
+    try {
+      statusResponse = await fetch(
+        `/api/fal-video-scale?requestId=${encodeURIComponent(submitData.requestId)}`,
+        { headers: pollHeaders },
+      );
+    } catch (error) {
+      if (++transientErrors >= 5) throw error;
+      continue;
+    }
     const statusData = await statusResponse.json().catch(() => null);
     if (!statusResponse.ok) {
+      const transient = statusResponse.status === 408 || statusResponse.status === 429 || statusResponse.status >= 500;
+      if (transient && ++transientErrors < 5) continue;
       throw new Error(statusData?.error || 'Source-video compatibility preprocessing failed.');
     }
+    // An unreadable 200 body is a failed poll too; reset only after a readable status.
+    if (!statusData) {
+      if (++transientErrors >= 5) throw new Error('Source-video compatibility preprocessing status could not be read.');
+      continue;
+    }
+    transientErrors = 0;
     if (statusData?.status === 'SUCCEEDED' && typeof statusData.videoUrl === 'string') {
       return statusData.videoUrl;
     }
@@ -350,7 +375,7 @@ const validateLocalReferenceMedia = async (
 
   const duration = await getMediaDuration(url, kind);
   if (duration != null && (duration < minDuration || duration > maxDuration)) {
-    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds. Current duration is ${duration.toFixed(1)}s.`);
+    throw new Error(`${label} must be ${minDuration}-${maxDuration} seconds. Current duration is ${formatRejectedDuration(duration, minDuration, maxDuration)}s.`);
   }
 };
 
@@ -497,6 +522,7 @@ const prepareReferenceVideos = async (
   videoModel: VideoModelId,
   operation: VideoOperation,
   hasManualFirstFrame = false,
+  assertRoomForFrames: (frameCount: number) => void = () => {},
 ): Promise<{
   requestVideos: ReferenceVideo[];
   persistedVideos: ReferenceVideo[];
@@ -543,6 +569,7 @@ const prepareReferenceVideos = async (
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
+        assertRoomForFrames(generatedFirstFrames.length + 1);
         generatedFirstFrames.push(await extractContinuationFirstFrame(ref.url, targetAspectRatio, quality, label));
         extractedVideoIndices.push(i);
         continue;
@@ -722,6 +749,12 @@ export const prepareSeedanceReferenceGenerationPrompt = (
 // Convert app-internal @ tags (and user-entered @/# aliases) to each
 // provider's accepted prompt language. H3 Max receives ordered start/end
 // images rather than numbered media references, so no @ marker survives.
+const findPersonGroup = (refs: ReferenceImage[], id: number) => {
+  const group = getPersonGroups(refs).find(person => person.id === id);
+  if (!group) throw new Error(`Person ${id} için ekli referans yok.`);
+  return group;
+};
+
 const cleanPromptForVideoModel = (
   prompt: string,
   videoModel: VideoModelId,
@@ -767,8 +800,7 @@ const cleanPromptForVideoModel = (
 
   cleaned = cleaned.replace(/@PERSON_(\d+)\b/gi, (_tag, number) => {
     const id = Number(number);
-    const group = getPersonGroups(refs).find(person => person.id === id);
-    if (!group) throw new Error(`Person ${id} için ekli referans yok.`);
+    const group = findPersonGroup(refs, id);
     return `person ${id} shown in ${group.images.map(image => `@image${refs.indexOf(image) + 1}`).join(' and ')} (the SAME single person)`;
   });
   if (getPersonGroups(refs).some(group => group.id > 2)) cleaned += `\n${buildPersonIdentityContract(refs, index => `@image${index + 1}`)}`;
@@ -818,7 +850,7 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
   const referenceVideos=await Promise.all((config.referenceVideos||[]).map(async(ref,index)=>{
     const isSupplemental=mode==='insert_video'&&index>0;
     const url=await resolveReferenceMediaUrl(ref.url,ref.mimeType,`H3 Max video ${index+1}`,'h3_video','mp4','video',isSupplemental?2:videoLimits[0],isSupplemental?15:videoLimits[1],true);
-    const duration=ref.duration??await getMediaDuration(url,'video')??undefined;
+    const duration=getKnownVideoDuration(ref.duration)??await getMediaDuration(url,'video')??undefined;
     return {...ref,url,duration};
   }));
   const referenceAudios=await Promise.all((config.referenceAudios||[]).map(async(ref,index)=>{
@@ -835,7 +867,6 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     images:getH3MaxReferenceImages(resolved).map(image=>({width:image.width,height:image.height})),
     videos:resolved.referenceVideos.map(video=>({duration:video.duration,width:video.width,height:video.height,size:video.size})),
   }};
-  if(H3_MAX_CAPABILITIES[mode].prompt!=='unsupported')body.prompt=normalizeH3MaxPromptLanguage(config.prompt,{mode,options:config.h3MaxOptions},{images:config.referenceImages,videos:referenceVideos,audios:referenceAudios});
   const submissionBody={...body,...(context?.id?{generationId:context.id}:{})};
   // Validate final URLs and hydrated duration limits immediately before admission.
   buildH3MaxInput(body);
@@ -898,6 +929,19 @@ export const createVideoTask = async (
   });
   if (routeError) throw new Error(routeError);
 
+  // Same person-tag check cleanPromptForVideoModel runs later, moved ahead of
+  // the paid video preparation and the image uploads.
+  if (!(videoModel === 'seedance-2.5' && determineMode(referenceImages, refVids, refAudios, videoOperation) === 'image_to_video')) {
+    for (const [, id] of (prompt || '').matchAll(/@PERSON_(\d+)\b/gi)) findPersonGroup(referenceImages, Number(id));
+  }
+
+  // Audio size, format and length checks are cheap; run them before the paid
+  // fal.ai source-video scaling that prepareReferenceVideos can submit.
+  const maximumReferenceDuration = videoModel === 'seedance-2.5' ? 30 : 15;
+  const audioUrls = await Promise.all(refAudios.map((a, i) =>
+    resolveReferenceMediaUrl(a.url, a.mimeType, `reference audio ${i + 1}`, 'vref_audio', 'mp3', 'audio', 2, maximumReferenceDuration)
+  ));
+
   const preparedVideos = await prepareReferenceVideos(
     refVids,
     videoAspectRatio,
@@ -905,11 +949,18 @@ export const createVideoTask = async (
     videoModel,
     videoOperation,
     referenceImages.some(image => image.isFirstFrame),
+    // The extracted frame becomes one more image reference; stop before extracting if that exceeds the route limit.
+    frameCount => {
+      const frames = Array.from({ length: frameCount }, () => ({ isFirstFrame: true }) as ReferenceImage);
+      const frameRouteError = seedanceProviderError(selectedProvider, {
+        videoModel, mode: determineMode([...referenceImages, ...frames], refVids.slice(frameCount), refAudios, videoOperation),
+        duration: videoDuration, quality: videoQuality, aspectRatio: videoAspectRatio,
+        imageUrls: Array.from({ length: referenceImages.length + frameCount }, () => ''),
+        videoUrls: refVids.slice(frameCount).map(() => ''), audioUrls: refAudios.map(() => ''),
+      });
+      if (frameRouteError) throw new Error(`Continue turns the previous video into a first-frame image, which needs one more image slot than is free. Remove a reference image or disable Continue.`);
+    },
   );
-  const maximumReferenceDuration = videoModel === 'seedance-2.5' ? 30 : 15;
-  const audioUrls = await Promise.all(refAudios.map((a, i) =>
-    resolveReferenceMediaUrl(a.url, a.mimeType, `reference audio ${i + 1}`, 'vref_audio', 'mp3', 'audio', 2, maximumReferenceDuration)
-  ));
   const effectiveReferenceImages = [...referenceImages, ...preparedVideos.generatedFirstFrames];
   const requestReferenceImages=effectiveReferenceImages;
   const mode=determineMode(requestReferenceImages,preparedVideos.requestVideos,refAudios,videoOperation);
@@ -1086,7 +1137,7 @@ export const pollVideoTask = async (
     || effectiveQueueEndpoint === 'minimax/h3-max'
   );
   const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_');
-  const providerName = isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+  const providerName = videoProviderName(taskId, isH3);
   let consecutiveErrors = 0;
   const MAX_ERRORS = 5;
   let retryableStatusErrors = 0;

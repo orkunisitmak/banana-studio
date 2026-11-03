@@ -3,7 +3,7 @@ import { cleanPersonName, getPersonId, getPersonGroups, getPersonDescription, no
 import type { BrainstormCategory, GenerationConfig, ReferenceImage } from '../../types.js';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, SUNBURST_MODEL } from './openaiImage.js';
 import { COMPACT_SOURCE_BRIEF_FOOTER, COMPACT_THUMBNAIL_SOURCE_BRIEF_FOOTER, EPISODE_SOURCE_BRIEF_FOOTER, SOURCE_BRIEF_FOOTER, THUMBNAIL_SOURCE_BRIEF_HEADER, THUMBNAIL_SOURCE_BRIEF_FOOTER, getOriginalImagePrompt, flattenPreparedImageBrief } from '../prompts/promptHistory.js';
-import { getStableImageTag, mapUnquotedPrompt, resolveStableImageReferences } from '../references/referenceTokens.js';
+import { getQuotedPromptPattern, getStableImageTag, mapUnquotedPrompt, resolveStableImageReferences } from '../references/referenceTokens.js';
 import { EPISODE_THUMBNAIL_GUIDANCE, hasYouTubeEpisodeContext } from '../youtube/youtubeEditorial.js';
 import { buildReferenceGenerationRule, compactReferenceRoles, IDENTITY_MEDIUM_RULE, CARTOON_3D_IDENTITY_RULE, SUNBURST_PROMPT_GUIDE } from './sunburstPromptGuide.js';
 export { buildReferenceGenerationRule } from './sunburstPromptGuide.js';
@@ -66,7 +66,7 @@ const normalizeEditImageMentions = (brief: string): string => {
     .replace(/(?:photo|picture|görsel|gorsel|fotoğraf|fotograf|resim)\s*(\d+)/giu, 'image $1');
 };
 
-const withoutQuotedCopy = (prompt: string): string => prompt.replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)/g, '');
+const withoutQuotedCopy = (prompt: string): string => prompt.replace(getQuotedPromptPattern(), '');
 
 /** Reinforce an explicitly requested transformation, never infer a new medium
  * from the generated scene, literal printed copy or an old category. */

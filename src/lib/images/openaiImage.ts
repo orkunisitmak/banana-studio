@@ -151,5 +151,7 @@ export const getImageResolutionLabel = (media: Pick<GeneratedMedia, 'imageModel'
   return 'Size unavailable';
 };
 
+export const isImagePresetLabel = (size?: string): boolean => Boolean(size?.includes('·'));
+
 export const hasImageSizeMismatch = (media: Pick<GeneratedMedia, 'imageRequestedSize' | 'imageOutputSize'>): boolean =>
-  Boolean(media.imageOutputSize && media.imageRequestedSize && media.imageRequestedSize !== 'auto' && media.imageRequestedSize !== media.imageOutputSize);
+  Boolean(media.imageOutputSize && media.imageRequestedSize && media.imageRequestedSize !== 'auto' && !isImagePresetLabel(media.imageRequestedSize) && media.imageRequestedSize !== media.imageOutputSize);

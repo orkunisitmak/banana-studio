@@ -21,8 +21,8 @@ export const SavedReferenceImages: React.FC<{
     if (!editing || busy) return;
     setBusy(true); setError('');
     try {
-      await saveReferenceImage(editing);
-      if (mounted.current) { onSaved(editing); setEditing(null); }
+      const saved = await saveReferenceImage(editing);
+      if (mounted.current) { onSaved(saved); setEditing(null); }
     } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : 'Could not save reference.'); }
     finally { if (mounted.current) setBusy(false); }
   };

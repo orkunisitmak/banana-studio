@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, requestCodexImage } from '../api/_lib/codexImage.ts';
+import { codexArguments, codexAvailable, codexImagePrompt, findCodexBinary, hasChatGPTLogin, npmCodexExecutable, requestCodexImage } from '../api/_lib/codexImage.ts';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 const withEnv = async (values, run) => {
@@ -61,6 +61,51 @@ test('Codex is offered only in the desktop runtime with a ChatGPT sign-in', { sk
     await withEnv({ CODEX_BIN: shim }, () => assert.equal(findCodexBinary(), null));
     await withEnv({ CODEX_BIN: 'codex' }, () => assert.equal(findCodexBinary(), null));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+// The layout `npm install -g @openai/codex` leaves on Windows: shims only, the executable inside the platform package.
+const npmInstall = (directory, { arch = 'x64', hoisted = false } = {}) => {
+  const [triple, platformPackage] = arch === 'arm64' ? ['aarch64-pc-windows-msvc', 'codex-win32-arm64'] : ['x86_64-pc-windows-msvc', 'codex-win32-x64'];
+  for (const shim of ['codex', 'codex.cmd', 'codex.ps1']) fs.writeFileSync(path.join(directory, shim), '');
+  const scope = path.join(directory, 'node_modules', '@openai');
+  const bin = path.join(hoisted ? scope : path.join(scope, 'codex', 'node_modules', '@openai'), platformPackage, 'vendor', triple, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'codex.exe'), '');
+  return path.join(bin, 'codex.exe');
+};
+
+test('the native executable is found inside a Windows npm install', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-codex-npm-'));
+  try {
+    assert.equal(npmCodexExecutable(directory), null);
+    const nested = npmInstall(directory);
+    assert.equal(npmCodexExecutable(directory, 'x64'), nested);
+    // An x64 package never stands in for the arm64 executable.
+    assert.equal(npmCodexExecutable(directory, 'arm64'), null);
+    const arm = npmInstall(directory, { arch: 'arm64', hoisted: true });
+    assert.equal(npmCodexExecutable(directory, 'arm64'), arm);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('Windows finds Codex behind npm shims on PATH and through CODEX_BIN', { skip: process.platform !== 'win32' }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-codex-npm-'));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-codex-empty-'));
+  try {
+    const native = npmInstall(directory, { arch: process.arch });
+    await withEnv({ CODEX_BIN: undefined, PATH: directory, APPDATA: empty, LOCALAPPDATA: empty }, () => assert.equal(findCodexBinary(), native));
+    // A shim given as CODEX_BIN starts the package's executable, never the shim itself.
+    await withEnv({ CODEX_BIN: path.join(directory, 'codex.cmd') }, () => assert.equal(findCodexBinary(), native));
+    await withEnv({ CODEX_BIN: path.join(empty, 'codex.cmd') }, () => assert.equal(findCodexBinary(), null));
+    // Shims without the package are not Codex.
+    await withEnv({ CODEX_BIN: undefined, PATH: empty, APPDATA: empty, LOCALAPPDATA: empty }, () => assert.equal(findCodexBinary(), null));
+  } finally { for (const d of [directory, empty]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test('the Windows shell passes Codex discovery variables to the workspace', () => {
+  const source = fs.readFileSync(new URL('../desktop/windows/WorkspaceProcess.cs', import.meta.url), 'utf8');
+  const allowed = source.match(/foreach \(var key in new\[\] \{([^}]*)\}\)/)[1];
+  for (const key of ['PATH', 'CODEX_HOME', 'CODEX_BIN']) assert.match(allowed, new RegExp(`"${key}"`));
+  for (const key of ['NODE_OPTIONS', 'OPENAI_API_KEY', 'HTTPS_PROXY']) assert.doesNotMatch(allowed, new RegExp(`"${key}"`));
 });
 
 test('Codex runs read-only without user config and receives the prompt on stdin', () => {

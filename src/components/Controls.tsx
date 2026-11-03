@@ -1,3 +1,6 @@
+import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
+import { submitOnEnter } from './submitOnEnter';
+import { getReferenceImageLimit } from '../lib/images/imageReferences';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
@@ -415,6 +418,7 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
+  const insertSourceUploadRef = useRef(false);
 
   useLayoutEffect(() => {
     const element = generationBarRef.current;
@@ -489,8 +493,8 @@ export const Controls: React.FC<ControlsProps> = ({
   const galleryDropdownRef = useRef<HTMLDivElement>(null); // New ref for the portal content
   const [refGalleryPos, setRefGalleryPos] = useState({ bottom: 0, left: 0 });
 
-  // Undo State for removed images
-  const [undoStack, setUndoStack] = useState<{ images: ReferenceImage[]; positions?: number[]; prompt?: string; imagePromptCategory?: GenerationConfig['imagePromptCategory']; promptPreparation?: GenerationConfig['promptPreparation']; youtubeSource?: GenerationConfig['youtubeSource']; personGroups?: GenerationConfig['personGroups']; h3MaxOptions?: GenerationConfig['h3MaxOptions'] }[]>([]);
+  // Undo state for reference removal and clearing the composer.
+  const [undoStack, setUndoStack] = useState<{ images: ReferenceImage[]; positions?: number[]; prompt?: string; imagePromptCategory?: GenerationConfig['imagePromptCategory']; promptPreparation?: GenerationConfig['promptPreparation']; youtubeSource?: GenerationConfig['youtubeSource']; personGroups?: GenerationConfig['personGroups']; h3MaxOptions?: GenerationConfig['h3MaxOptions']; clearedConfig?: GenerationConfig }[]>([]);
 
   // Reference tile action popover state
   type RefPopoverKind = 'image' | 'video' | 'audio';
@@ -591,19 +595,7 @@ export const Controls: React.FC<ControlsProps> = ({
     ? (config.videoOperation === 'edit' || config.videoOperation === 'extend' ? 1 : 10)
     : 3;
   const maxReferenceAudios = isH3VideoConfig ? (h3State.available ? h3State.capabilities.audios.max : 0) : config.videoModel === 'seedance-2.5' ? 10 : 3;
-  const seedanceFrameOnly = config.videoModel === 'seedance-2.5'
-    && (config.videoOperation || 'generate') === 'generate'
-    && currentReferenceVideos.length === 0
-    && currentReferenceAudios.length === 0
-    && (config.referenceImages || []).length > 0
-    && (config.referenceImages || []).some(image => image.isFirstFrame || image.isLastFrame);
-  const maxReferenceImages = isH3VideoConfig
-    ? h3State.imageLimit
-    : config.mode === 'video' && config.videoModel === 'seedance-2.5'
-      ? (seedanceFrameOnly ? 2 : 30)
-      // Seedance 2.0 accepts at most 9 reference images (seedanceProviderError, EvoLink).
-      : config.mode === 'video' && config.videoModel === 'seedance-2.0' ? 9
-      : config.mode === 'image' && config.imageModel === SUNBURST_MODEL ? 16 : 14;
+  const maxReferenceImages = getReferenceImageLimit(config);
   // Attachments finish after awaits; they use the limits of the latest committed draft.
   const attachLimitsRef = useRef({ images: maxReferenceImages, audios: maxReferenceAudios, videos: maxReferenceVideos, config });
   useLayoutEffect(() => { attachLimitsRef.current = { images: maxReferenceImages, audios: maxReferenceAudios, videos: maxReferenceVideos, config }; });
@@ -664,7 +656,7 @@ export const Controls: React.FC<ControlsProps> = ({
         : isSeedanceQuality ? config.videoQuality : '720p',
       videoAspectRatio: isH3
         ? config.referenceImages.length > 0 ? 'adaptive' : config.videoAspectRatio === 'adaptive' ? '16:9' : config.videoAspectRatio
-        : config.videoAspectRatio,
+        : nextOperation === 'edit' || nextOperation === 'extend' ? 'adaptive' : config.videoAspectRatio,
       audioEnabled: isH3 ? true : config.audioEnabled,
       videoPromptExpansionMode: isH3 ? config.h3MaxOptions?.promptExpansionMode || 'balanced' : config.videoPromptExpansionMode,
     };
@@ -759,6 +751,13 @@ export const Controls: React.FC<ControlsProps> = ({
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
     if (files.length === 0) return;
     setAttachmentError(null);
+    const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
+    const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
+    const needsSource = isInsert && !sourceId;
+    if (needsSource && insertSourceUploadRef.current) {
+      addAttachmentError('Wait for the Insert source video to finish uploading before adding more clips.');
+      return;
+    }
     if (isH3VideoConfig && h3State.mode === 'insert_video' && currentReferenceVideos.length === 0 && files[0].size > 50 * 1024 * 1024) {
       // Dropping the first file would turn a supplemental reference into the
       // source. Keep the entire selection untouched until its source is valid.
@@ -771,9 +770,20 @@ export const Controls: React.FC<ControlsProps> = ({
       files = files.filter(file => file.size <= 50 * 1024 * 1024);
       if (!files.length) return;
     }
+    if (needsSource) insertSourceUploadRef.current = true;
     setUploadingReferenceVideos(count => count + files.length);
     try {
-      const results = await Promise.allSettled(files.map(file => uploadReferenceVideo(file, isH3VideoConfig)));
+      const results: PromiseSettledResult<ReferenceVideo>[] = [];
+      if (needsSource) {
+        // Supplemental clips must never become the source after its upload fails.
+        const source = await Promise.allSettled([uploadReferenceVideo(files[0], isH3VideoConfig)]);
+        if (source[0].status === 'rejected') {
+          setAttachmentError(source[0].reason instanceof Error ? source[0].reason.message : 'Source video upload failed.');
+          return;
+        }
+        results.push(...source);
+      }
+      results.push(...await Promise.allSettled(files.slice(needsSource ? 1 : 0).map(file => uploadReferenceVideo(file, isH3VideoConfig))));
       const newRefs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failures = results.flatMap(result =>
         result.status === 'rejected'
@@ -781,12 +791,16 @@ export const Controls: React.FC<ControlsProps> = ({
           : []
       );
 
-      let dropped = 0;
+      let dropped = 0, sourceChanged = false;
       if (newRefs.length > 0) {
         // Never exceed the latest limit (the operation may have changed while uploading),
         // even if another selection finished first. flushSync applies the update now,
         // so the warning reflects what it kept.
         flushSync(() => onChange(previous => {
+          if (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length)) {
+            sourceChanged = true;
+            return previous;
+          }
           const kept = newRefs.slice(0, Math.max(0, attachLimitsRef.current.videos - (previous.referenceVideos?.length || 0)));
           dropped = newRefs.length - kept.length;
           return {
@@ -799,14 +813,17 @@ export const Controls: React.FC<ControlsProps> = ({
       if (failures.length > 0) {
         setAttachmentError(failures.join('\n'));
       }
+      if (sourceChanged) addAttachmentError('The Insert source video changed while uploading. Add the clips again for the current source.');
       if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} videos max.`);
     } finally {
+      if (needsSource) insertSourceUploadRef.current = false;
       setUploadingReferenceVideos(count => Math.max(0, count - files.length));
     }
   };
 
   // Several attachment problems in one action are all shown.
-  const addAttachmentError = (message: string) => setAttachmentError(previous => previous?.includes(message) ? previous : previous ? `${previous} ${message}` : message);
+  // A file name can hold a line break; keep each message on one line so the line checks stay exact.
+  const addAttachmentError = (rawMessage: string) => { const message = rawMessage.replace(/[\r\n]+/g, ' '); setAttachmentError(previous => previous?.split('\n').includes(message) ? previous : previous ? `${previous}\n${message}` : message); };
 
   const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -957,7 +974,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const handleClearAll = () => {
     if (config.prompt || config.referenceImages.length > 0 || config.personGroups?.length || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0) {
-        setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions }]);
+        setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions, clearedConfig: config }]);
         onChange({
           ...config,
           prompt: '',
@@ -1007,9 +1024,31 @@ export const Controls: React.FC<ControlsProps> = ({
   const handleUndo = () => {
     if (undoStack.length === 0) return;
     const lastEntry = undoStack[undoStack.length - 1];
-    setUndoStack(prev => prev.slice(0, -1));
-    
     const updatedConfig = { ...config };
+    if (lastEntry.clearedConfig) {
+      const cleared = lastEntry.clearedConfig;
+      const videos = [...(config.referenceVideos || [])];
+      (cleared.referenceVideos || []).forEach((video, index) => {
+        if (!videos.some(current => current.id === video.id)) videos.splice(index, 0, video);
+      });
+      const audios = [...(config.referenceAudios || [])];
+      (cleared.referenceAudios || []).forEach((audio, index) => {
+        if (!audios.some(current => current.id === audio.id)) audios.splice(index, 0, audio);
+      });
+      Object.assign(updatedConfig, {
+        referenceVideos: videos,
+        referenceAudios: audios,
+        originalPrompt: cleared.originalPrompt,
+        enhancedForMode: cleared.enhancedForMode,
+        enhancedForImageModel: cleared.enhancedForImageModel,
+        enhancedForImageContextKey: cleared.enhancedForImageContextKey,
+        enhancedForVideoModel: cleared.enhancedForVideoModel,
+        enhancedForVideoOperation: cleared.enhancedForVideoOperation,
+        enhancedForVideoReferenceKey: cleared.enhancedForVideoReferenceKey,
+        enhancedForH3MaxMode: cleared.enhancedForH3MaxMode,
+        enhancedForH3MaxOptionsKey: cleared.enhancedForH3MaxOptionsKey,
+      });
+    }
     if (lastEntry.images.length > 0) {
       const restored = [...config.referenceImages];
       lastEntry.images.forEach((image, index) => {
@@ -1028,6 +1067,29 @@ export const Controls: React.FC<ControlsProps> = ({
     if (lastEntry.personGroups) {
       updatedConfig.personGroups = getPersonDefinitions({ referenceImages: updatedConfig.referenceImages, personGroups: [...(config.personGroups || []), ...lastEntry.personGroups] });
     }
+    if (lastEntry.clearedConfig) {
+      // Auto H3 actions resolve from the restored inputs, not the empty draft.
+      const restoredH3 = isH3VideoConfig ? getH3MaxUIState(updatedConfig) : null;
+      const videoLimit = restoredH3 ? (restoredH3.available ? restoredH3.capabilities.videos.max : 0) : maxReferenceVideos;
+      const audioLimit = restoredH3 ? (restoredH3.available ? restoredH3.capabilities.audios.max : 0) : maxReferenceAudios;
+      const imageLimit = getReferenceImageLimit(updatedConfig);
+      if (updatedConfig.referenceImages.length > imageLimit
+        || (updatedConfig.referenceVideos?.length || 0) > videoLimit
+        || (updatedConfig.referenceAudios?.length || 0) > audioLimit) {
+        setAttachmentError('Could not undo Clear: the current action has no room for the previous media references. Remove references or choose the previous action, then try Undo again.');
+        return;
+      }
+      setAttachmentError(null);
+    }
+    const undoFullMessage = 'Could not undo: the composer has no room for the removed reference image. Undo after removing another image reference restores that image first.';
+    if (!lastEntry.clearedConfig && updatedConfig.referenceImages.length > getReferenceImageLimit(updatedConfig)) {
+      // Keep an upload error that is already showing and add the Undo warning below it.
+      setAttachmentError(previous => previous?.split('\n').includes(undoFullMessage) ? previous : previous ? `${previous}\n${undoFullMessage}` : undoFullMessage);
+      return;
+    }
+    // Clear only this warning; an upload error from something else stays.
+    setAttachmentError(previous => previous?.split('\n').filter(line => line !== undoFullMessage).join('\n') || null);
+    setUndoStack(prev => prev.slice(0, -1));
     onChange(updatedConfig);
   };
 
@@ -1058,6 +1120,11 @@ export const Controls: React.FC<ControlsProps> = ({
       }
   };
 
+  // Move focus into the portaled Templates menu so the next Tab reaches its controls
+  useEffect(() => {
+    if (isTemplateMenuOpen) templateMenuRef.current?.focus();
+  }, [isTemplateMenuOpen]);
+
   // Click outside listener for template menu
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1070,8 +1137,17 @@ export const Controls: React.FC<ControlsProps> = ({
         setIsTemplateMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (!isTemplateMenuOpen || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setIsTemplateMenuOpen(false);
+      templateButtonRef.current?.focus();
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [isTemplateMenuOpen]);
 
   // --- Brainstorm Handlers ---
@@ -1221,8 +1297,8 @@ export const Controls: React.FC<ControlsProps> = ({
       };
       
       try {
-        await saveReferenceImage(savedImage);
-        setRefGallery(prev => [savedImage, ...prev]);
+        const saved = await saveReferenceImage(savedImage, refGallery);
+        setRefGallery(prev => prev.some(image => image.id === saved.id) ? prev : [saved, ...prev]);
       } catch (error) { setGenerationError(error instanceof Error ? error.message : 'Could not save reference.'); }
       return;
     }
@@ -1253,8 +1329,8 @@ export const Controls: React.FC<ControlsProps> = ({
           };
           
           try {
-            await saveReferenceImage(savedImage);
-            setRefGallery(prev => [savedImage, ...prev]);
+            const saved = await saveReferenceImage(savedImage);
+            setRefGallery(prev => [saved, ...prev]);
           } catch (error) { setGenerationError(error instanceof Error ? error.message : 'Could not save reference.'); }
         };
         reader.readAsDataURL(blob);
@@ -1623,7 +1699,7 @@ export const Controls: React.FC<ControlsProps> = ({
         return;
       }
 
-      // Ctrl/Cmd + Z → Undo image removal (when not in a text input)
+      // Ctrl/Cmd + Z → Undo reference removal or Clear (outside text inputs)
       if (isMod && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
         const activeEl = document.activeElement;
         const isInTextInput = activeEl instanceof HTMLTextAreaElement || activeEl instanceof HTMLInputElement;
@@ -1749,7 +1825,7 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.defaultPrevented || e.repeat || e.nativeEvent.isComposing) return;
+    if (e.defaultPrevented || e.repeat || e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       if (canGenerate) {
@@ -2611,6 +2687,8 @@ export const Controls: React.FC<ControlsProps> = ({
                     ref={templateButtonRef}
                     onClick={handleToggleTemplateMenu}
                     title="Templates"
+                    aria-haspopup="dialog"
+                    aria-expanded={isTemplateMenuOpen}
                     className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border transition-all ${
                         isTemplateMenuOpen ? 'border-violet-400/35 bg-violet-500/15 text-violet-200' : 'border-white/[0.07] bg-[#171e28] text-gray-400 hover:border-white/15 hover:bg-[#1b2330] hover:text-white'
                     }`}
@@ -2622,13 +2700,16 @@ export const Controls: React.FC<ControlsProps> = ({
                 {isTemplateMenuOpen && createPortal(
                     <div 
                         ref={templateMenuRef}
+                        role="dialog"
+                        aria-label="Templates"
+                        tabIndex={-1}
                         style={{
                             position: 'fixed',
                             left: `${templateMenuPos.left}px`,
                             bottom: `${templateMenuPos.bottom}px`,
                             zIndex: 9999
                         }}
-                        className="w-[300px] bg-[#161b22] border border-gray-700/50 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200"
+                        className="w-[300px] outline-none bg-[#161b22] border border-gray-700/50 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200"
                     >
                          {/* Header */}
                          <div className="px-4 py-3 bg-gray-900/50 border-b border-gray-800">
@@ -2649,8 +2730,9 @@ export const Controls: React.FC<ControlsProps> = ({
                                             value={newTemplateName} 
                                             onChange={(e) => setNewTemplateName(e.target.value)}
                                             placeholder="Template Name..."
+                                            aria-label="Template name"
                                             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50"
-                                            onKeyDown={(e) => e.key === 'Enter' && handleConfirmSave()}
+                                            onKeyDown={submitOnEnter(handleConfirmSave)}
                                          />
                                          <button onClick={handleConfirmSave} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white font-medium text-sm transition-colors">Save</button>
                                      </div>
@@ -2691,8 +2773,8 @@ export const Controls: React.FC<ControlsProps> = ({
                                              <div className="flex-1 min-w-0">
                                                  <span className="text-sm font-medium text-gray-200 group-hover:text-white block truncate">{t.name}</span>
                                                  <div className="flex items-center gap-2 mt-0.5">
-                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
-                                                   {t.config.imageModel !== SUNBURST_MODEL && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.aspectRatio}</span>}
+                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoQuality || '720p' : t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
+                                                   {(t.config.mode === 'video' || t.config.imageModel !== SUNBURST_MODEL) && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoAspectRatio || t.config.aspectRatio || '—' : t.config.aspectRatio}</span>}
                                                  </div>
                                              </div>
                                              
@@ -2790,6 +2872,7 @@ export const Controls: React.FC<ControlsProps> = ({
                               <button
                                 key={cat.id}
                                 onClick={() => setBrainstormCategory(cat.id)}
+                                aria-pressed={brainstormCategory === cat.id}
                                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wide transition-all shrink-0 ${
                                   brainstormCategory === cat.id
                                     ? 'bg-amber-500 text-black'
@@ -2848,7 +2931,7 @@ export const Controls: React.FC<ControlsProps> = ({
                             </div>;
                           })()}
                           <ImageReferenceSummary references={brainstormInputImages} />
-                          <p className="text-xs text-gray-400">{brainstormIdeaCount} ideas × {config.count} image{config.count > 1 ? 's' : ''} = {brainstormImageCount} images</p>
+                          <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, config.count, brainstormImageCount)}</p>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
                             disabled={!canBrainstormGenerate}
                             title={brainstormCostPreview.description}

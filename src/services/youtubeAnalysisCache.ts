@@ -40,7 +40,9 @@ export const openYouTubeAnalysisCache = async (input: string, signal: AbortSigna
     const digest = await waitForTask(crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)), signal);
     key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   } catch { signal.throwIfAborted(); return undefined; }
-  const owner = await currentOwner(signal);
+  let owner: string | undefined;
+  try { owner = await currentOwner(signal); }
+  catch { signal.throwIfAborted(); return undefined; }
   if (!owner) return undefined;
   signal.throwIfAborted();
   return {

@@ -126,7 +126,7 @@ export const GallerySearchDialog: React.FC<Props> = ({ images, folders, ownerId,
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) {
         event.preventDefault(); event.stopPropagation();
         if (picker && event.key === 'Escape') leavePicker(); else onClose();

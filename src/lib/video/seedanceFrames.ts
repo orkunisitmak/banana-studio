@@ -1,4 +1,5 @@
 import type { ReferenceImage, VideoOperation } from '../../types.js';
+import { mapUnquotedPrompt } from '../references/referenceTokens.ts';
 
 /** Frame roles are endpoint constraints, not ordinary reference-image hints. */
 export const getSeedanceFrameError = (
@@ -33,13 +34,13 @@ export const normalizeSeedanceFrameTags = (prompt: string, images: ReferenceImag
     if (!image || (!image.isFirstFrame && !image.isLastFrame)) throw new Error(`Image ${index} is not an attached start/end frame.`);
     return image.isFirstFrame ? 'the provided first frame' : 'the provided last frame';
   };
-  return prompt.replace(/\\_/g, '_')
+  return mapUnquotedPrompt(prompt, text => text.replace(/\\_/g, '_')
     .replace(/[@#]FIRST[_ ]?FRAME\b/gi, 'the provided first frame')
     .replace(/[@#]LAST[_ ]?FRAME\b/gi, () => {
       if (!images.some(image => image.isLastFrame)) throw new Error('The prompt mentions a Last Frame, but none is attached.');
       return 'the provided last frame';
     })
-    .replace(/[@#](?:REF[_ ]?)?IMAGE[_ ]?(\d+)\b/gi, (_match, index) => label(index));
+    .replace(/[@#](?:REF[_ ]?)?IMAGE[_ ]?(\d+)\b/gi, (_match, index) => label(index)));
 };
 
 export const prepareSeedanceFramePrompt = (prompt: string, images: ReferenceImage[]): string => {

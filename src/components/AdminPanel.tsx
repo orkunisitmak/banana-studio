@@ -1,3 +1,4 @@
+import { submitOnEnter } from './submitOnEnter';
 import { H3_MAX_MODE_OPTIONS } from '../lib/video/h3Max';
 import { H3_MAX_OUTPUT_RATES } from '../lib/video/h3MaxPricing';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -434,7 +435,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
                     autoCorrect="off"
                     value={newEmail}
                     onChange={e => { setNewEmail(e.target.value); setAccessError(null); }}
-                    onKeyDown={e => e.key === 'Enter' && handleAddEmail()}
+                    onKeyDown={submitOnEnter(handleAddEmail)}
                     placeholder="user@example.com"
                     className="w-full bg-gray-900/50 border border-gray-700 rounded-lg pl-10 pr-3 py-2.5 text-base sm:text-sm text-white placeholder-gray-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
                   />

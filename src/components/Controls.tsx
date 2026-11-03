@@ -693,7 +693,7 @@ export const Controls: React.FC<ControlsProps> = ({
       const remainingSlots = Math.max(0, MAX_IMAGES - currentImages.length);
 
       if (files.length > remainingSlots) {
-        setAttachmentError(`Limit reached: ${MAX_IMAGES} images max.`);
+        setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       }
 
       const filesToProcess = files.slice(0, remainingSlots);
@@ -736,7 +736,7 @@ export const Controls: React.FC<ControlsProps> = ({
           dropped = newImages.length - kept.length;
           return { ...prev, referenceImages: [...refs, ...kept] };
         }));
-        if (dropped) setAttachmentError(`Limit reached: ${attachLimitsRef.current.images} images max.`);
+        if (dropped) setAttachmentError(`Limit reached: ${attachLimitsRef.current.images} ${attachLimitsRef.current.images === 1 ? 'image' : 'images'} max.`);
       }
   };
 
@@ -814,7 +814,7 @@ export const Controls: React.FC<ControlsProps> = ({
         setAttachmentError(failures.join('\n'));
       }
       if (sourceChanged) addAttachmentError('The Insert source video changed while uploading. Add the clips again for the current source.');
-      if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} videos max.`);
+      if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} ${attachLimitsRef.current.videos === 1 ? 'video' : 'videos'} max.`);
     } finally {
       if (needsSource) insertSourceUploadRef.current = false;
       setUploadingReferenceVideos(count => Math.max(0, count - files.length));
@@ -840,14 +840,14 @@ export const Controls: React.FC<ControlsProps> = ({
     const picked = Array.from(e.target.files) as File[];
     await processVideoFiles(picked.slice(0, room));
     // After processing (which clears earlier errors), keeping any upload error it reported.
-    if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} videos max.`);
+    if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
     if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
   const processAudioFiles = async (files: File[], switchToVideo = false) => {
     const MAX_AUDIOS = maxReferenceAudios;
     const room = Math.max(0, MAX_AUDIOS - (config.referenceAudios?.length || 0));
-    if (files.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} audio clips max.`);
+    if (files.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
     const toAdd = files.slice(0, room);
     if (toAdd.length === 0) return;
     const newRefs = await Promise.all(toAdd.map(async file => {
@@ -875,7 +875,7 @@ export const Controls: React.FC<ControlsProps> = ({
     }));
     // Cut clips never reached the draft: release their object URLs and report them.
     cut.forEach(ref => URL.revokeObjectURL(ref.url));
-    if (cut.length) addAttachmentError(`Limit reached: ${attachLimitsRef.current.audios} audio clips max.`);
+    if (cut.length) addAttachmentError(`Limit reached: ${attachLimitsRef.current.audios} ${attachLimitsRef.current.audios === 1 ? 'audio clip' : 'audio clips'} max.`);
   };
 
   const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1343,7 +1343,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const handleAddFromGallery = (savedImage: SavedReferenceImage) => {
     const MAX_IMAGES = maxReferenceImages;
     if ((config.referenceImages?.length || 0) >= MAX_IMAGES) {
-      setAttachmentError(`Limit reached: ${MAX_IMAGES} images max.`);
+      setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       return;
     }
 
@@ -1506,7 +1506,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 if (toAdd.length > 0) {
                     await processVideoFiles(toAdd, true);
                 }
-                if (videoFiles.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} videos max.`);
+                if (videoFiles.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
             }
         }
 
@@ -1532,7 +1532,7 @@ export const Controls: React.FC<ControlsProps> = ({
               }
               const MAX_VIDEOS = maxReferenceVideos;
               if ((config.referenceVideos?.length || 0) >= MAX_VIDEOS) {
-                setAttachmentError(`Maximum of ${MAX_VIDEOS} videos allowed for the selected action.`);
+                setAttachmentError(`Maximum of ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} allowed for the selected action.`);
                 return;
               }
               onChange({

@@ -1678,7 +1678,7 @@ const AuthorizedWorkspace: React.FC<{
             mode: 'video',
           };
         }));
-        if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} reference videos allowed for this operation.`);
+        if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} ${limit === 1 ? 'reference video' : 'reference videos'} allowed for this operation.`);
         else toast.success('Video Reference Added', 'Video added as reference. Switched to video mode.');
         return;
       }
@@ -1711,7 +1711,7 @@ const AuthorizedWorkspace: React.FC<{
               ]
             };
           }));
-          if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} reference images allowed for this action.`);
+          if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} ${limit === 1 ? 'reference image' : 'reference images'} allowed for this action.`);
           else toast.success('Reference Added', 'Image added as reference.');
         }
       };

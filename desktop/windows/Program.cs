@@ -35,6 +35,7 @@ internal sealed class StudioWindow : Form
     private bool placementReady;
     private bool fullscreenTransition;
     private bool updateInProgress;
+    private bool healthReported;
     private FormWindowState lastVisibleState = FormWindowState.Normal;
     private readonly Label status = new() { Text = "Opening your local workspace…", ForeColor = Color.LightGray, BackColor = Color.FromArgb(13, 17, 23), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
 
@@ -148,6 +149,16 @@ internal sealed class StudioWindow : Form
         finally { updateInProgress = false; }
     }
 
+    // Only a loaded workspace page proves an update works; a started server alone does not.
+    // NavigationCompleted fires for every navigation, so this runs once.
+    private void ReportWorkspaceOpened()
+    {
+        if (healthReported) return;
+        healthReported = true;
+        Updater.ReportHealthy();
+        _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => Updater.CleanFinishedStages(), TaskScheduler.Default);
+    }
+
     private void ShowFailure(string message) { status.Text = message; status.Visible = true; status.BringToFront(); }
     private async Task StartWorkspace()
     {
@@ -196,9 +207,11 @@ internal sealed class StudioWindow : Form
                 // Unicode text, undo and selection retain real clipboard semantics.
             };
             var ready = await workspace.Start(); origin = ready.Origin;
-            Updater.ReportHealthy();
-            _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => Updater.CleanFinishedStages(), TaskScheduler.Default);
-            core.NavigationCompleted += (_, args) => { if (args.IsSuccess && Local(core.Source)) status.Visible = false; else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio."); };
+            core.NavigationCompleted += (_, args) =>
+            {
+                if (args.IsSuccess && Local(core.Source)) { status.Visible = false; ReportWorkspaceOpened(); }
+                else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio.");
+            };
             var request = environment.CreateWebResourceRequest(new Uri(origin, "/local/bootstrap").AbsoluteUri, "GET", null, "X-Banana-Bootstrap: " + ready.Bootstrap + "\r\n");
             core.NavigateWithWebResourceRequest(request);
         }

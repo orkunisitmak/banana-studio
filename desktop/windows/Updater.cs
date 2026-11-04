@@ -246,7 +246,7 @@ internal static partial class Updater
         if (index >= 0 && index + 1 < args.Length && IsOwnStage(args[index + 1])) stageReportingHealth = args[index + 1];
     }
 
-    // Called once the local workspace answers: the updater can then discard the old install.
+    // Called once the workspace page has loaded: the updater can then discard the old install.
     internal static void ReportHealthy()
     {
         if (stageReportingHealth != null) try { File.WriteAllText(Path.Combine(stageReportingHealth, HealthyMarker), "ok"); } catch (IOException) { } catch (UnauthorizedAccessException) { }

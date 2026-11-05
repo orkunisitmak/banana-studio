@@ -22,7 +22,7 @@ export const createReferenceUploader = (
     for (const [key, entry] of cache) if (entry.expires < now) cache.delete(key);
     const uploadOriginal = async () => {
       const url = await upload(data, mime, prefix);
-      if (!url) throw new Error('Could not upload a reference image. No OpenAI request was sent.');
+      if (!url) throw new Error('Could not upload a reference image. No provider request was sent.');
       return url;
     };
     const existing = cache.get(key);

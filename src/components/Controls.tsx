@@ -1170,7 +1170,6 @@ export const Controls: React.FC<ControlsProps> = ({
   const hasBrainstormInput = brainstormCategory === 'simple' || config.youtubeSource
     ? Boolean(config.prompt.trim() || config.referenceImages.length) : config.referenceImages.length > 0;
   // Like Generate: a Re-create's saved references must finish loading first.
-  const canBrainstormGenerate = config.mode === 'image' && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const isBrainstormActive = config.mode === 'image' && isBrainstormPanelOpen && !isMinimized;
 
   const handleBrainstorm = async () => {
@@ -1972,6 +1971,8 @@ export const Controls: React.FC<ControlsProps> = ({
   const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
   const isSunburst = config.imageModel === SUNBURST_MODEL;
   const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
+  // Like Generate: a route that cannot run would bill the Brainstorm text request and then fail every image.
+  const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
     : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
@@ -2939,7 +2940,7 @@ export const Controls: React.FC<ControlsProps> = ({
                           <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, config.count, brainstormImageCount)}</p>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
                             disabled={!canBrainstormGenerate}
-                            title={brainstormCostPreview.description}
+                            title={routeInputError || brainstormCostPreview.description}
                             className="w-full rounded-xl bg-gradient-to-r from-lime-400 to-emerald-400 px-3 py-3 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:from-gray-800 disabled:to-gray-800 disabled:text-gray-500">
                             <span className="flex items-center justify-center gap-2"><Play className="h-4 w-4 shrink-0" />Brainstorm &amp; generate {brainstormImageCount}</span>
                             <span className="mt-1 block text-xs font-medium">{brainstormCostPreview.label}</span>

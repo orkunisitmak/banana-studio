@@ -1,6 +1,7 @@
 import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
 import { videoProviderName, brokenVideoProviderLabel } from '../lib/video/videoProviderName';
+import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -3250,7 +3251,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Duration</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
+                      {selectedMedia.h3MaxMode && H3_MAX_CAPABILITIES[selectedMedia.h3MaxMode]?.duration === null
+                        ? selectedMedia.videoOutputDuration ? `${Number(selectedMedia.videoOutputDuration.toFixed(1))}s` : '—'
+                        : selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
                     </span>
                   </div>
                   <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
@@ -3280,7 +3283,12 @@ export const Gallery: React.FC<GalleryProps> = ({
                           ? 'Edit'
                           : selectedMedia.videoOperation === 'extend'
                             ? 'Extend'
-                            : 'Generate'}
+                            : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
+                              : selectedMedia.h3MaxMode === 'recast' ? 'Recast'
+                                : selectedMedia.h3MaxMode === 'relight' ? 'Relight'
+                                  : selectedMedia.h3MaxMode === 'extend_video' ? 'Extend'
+                                    : selectedMedia.h3MaxMode === 'insert_video' ? 'Insert'
+                                      : 'Generate'}
                     </span>
                   </div>
                   {selectedMedia.generationCost && (

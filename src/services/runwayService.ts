@@ -1184,11 +1184,12 @@ export const pollVideoTask = async (
         const expandedPrompt = typeof data.expandedPrompt === 'string' && data.expandedPrompt.trim().length > 0
           ? data.expandedPrompt.trim()
           : undefined;
+        const providerDuration = typeof data.duration === 'number' && Number.isFinite(data.duration) && data.duration > 0 ? data.duration : undefined;
         return {
           urls: output,
           actualCostUsd,
           expandedPrompt,
-          duration:typeof data.duration==='number'&&Number.isFinite(data.duration)&&data.duration>0?data.duration:undefined,
+          duration: providerDuration ?? (isH3Max ? await getMediaDuration(output[0], 'video') ?? undefined : undefined),
         };
       }
       if (data.status === 'FAILED') throw new TerminalVideoTaskError(data.error || 'Video generation failed');

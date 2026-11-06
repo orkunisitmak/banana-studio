@@ -1,0 +1,23 @@
+# docker compose up -d  →  http://localhost:8080
+# Values come from .env next to this file (copy .env.example). See docs/en/docker.md.
+services:
+  banana-studio:
+    build: .
+    image: banana-studio:local
+    restart: unless-stopped
+    ports:
+      - "${BANANA_PUBLISH_PORT:-8080}:8080"
+    environment:
+      BANANA_ACCESS_TOKEN: ${BANANA_ACCESS_TOKEN:?Set BANANA_ACCESS_TOKEN in .env}
+      BANANA_PUBLIC_URL: ${BANANA_PUBLIC_URL:-http://localhost:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      FAL_KEY: ${FAL_KEY:-}
+      EVOLINK_API_KEY: ${EVOLINK_API_KEY:-}
+    volumes:
+      - banana-data:/data
+
+volumes:
+  banana-data:

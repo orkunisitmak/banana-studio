@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { LocalWorkspace } from './store.mjs';
 import { setWorkspace } from './context.mjs';
@@ -27,10 +28,26 @@ import { chooseProvider } from '../../api/_lib/providerConfiguration.ts';
 import { seedanceProviderError } from '../../src/lib/video/seedanceProviders.ts';
 
 const KEY_NAMES=new Set(['OPENAI_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','FAL_KEY','EVOLINK_API_KEY']);
-const io=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
-const first=await new Promise(resolve=>io.once('line',resolve));
-let launch;try{launch=JSON.parse(first);}catch{process.exit(1);}
-if(!launch||typeof launch.dataDirectory!=='string'||!path.isAbsolute(launch.dataDirectory))process.exit(1);
+const fatal=message=>{process.stderr.write(message+'\n');process.exit(1);};
+// BANANA_SERVER=1 (the Docker image) configures the workspace from the environment
+// and serves browsers on other devices; the desktop shells send a launch line on stdin.
+const hosted=process.env.BANANA_SERVER==='1';
+const io=hosted?null:readline.createInterface({input:process.stdin,crlfDelay:Infinity});
+let launch;
+if(hosted){
+  const token=process.env.BANANA_ACCESS_TOKEN||'';
+  if(token.length<16)fatal('Set BANANA_ACCESS_TOKEN to a secret of at least 16 characters.');
+  let publicOrigin;try{publicOrigin=new URL(process.env.BANANA_PUBLIC_URL||'http://localhost:8080').origin;}catch{fatal('BANANA_PUBLIC_URL must be an absolute http(s) URL.');}
+  if(!/^https?:/.test(publicOrigin))fatal('BANANA_PUBLIC_URL must be an absolute http(s) URL.');
+  const port=Number(process.env.BANANA_PORT||8080);if(!Number.isInteger(port)||port<1||port>65535)fatal('BANANA_PORT must be a TCP port.');
+  launch={dataDirectory:path.resolve(process.env.BANANA_DATA_DIR||'/data'),webRoot:process.env.BANANA_WEB_ROOT,bootstrap:createHash('sha256').update(token).digest('hex'),keys:{...process.env},server:{host:process.env.BANANA_HOST||'0.0.0.0',port,publicOrigin}};
+  delete process.env.BANANA_ACCESS_TOKEN;
+  process.env.BANANA_KEY_SOURCE='environment';process.env.CODEX_ENABLED??='false';
+}else{
+  const first=await new Promise(resolve=>io.once('line',resolve));
+  try{launch=JSON.parse(first);}catch{process.exit(1);}
+  if(!launch||typeof launch.dataDirectory!=='string'||!path.isAbsolute(launch.dataDirectory))process.exit(1);
+}
 const updateKeys=keys=>{for(const name of KEY_NAMES){delete process.env[name];const value=keys?.[name];if(typeof value==='string'&&value.length<4096&&value.trim())process.env[name]=value.trim();}};
 process.env.BANANA_RUNTIME='local';
 updateKeys(launch.keys);
@@ -64,10 +81,10 @@ for(const [name,provider] of [['fal-image-generate','fal'],['fal-h3-video','fal'
  const original=routes[name];routes[name]=async(req,res)=>{if(req.method==='POST'){try{req.body=await prepareMedia(provider,req.body);}catch(error){return res.status(400).json({error:error.message});}}return original(req,res);};
 }
 const root=launch.webRoot || path.join(path.dirname(fileURLToPath(import.meta.url)),'web');
-const http=await startLocalServer({workspace,root,bootstrap:launch.bootstrap,routes,onWake:wake});
+const http=await startLocalServer({workspace,root,bootstrap:launch.bootstrap,routes,onWake:wake,server:hosted?launch.server:null});
 process.env.SUPABASE_URL=http.origin;
 process.stdout.write(JSON.stringify({event:'ready',origin:http.origin})+'\n');
 const timer=setInterval(wake,5_000);wake();
-io.on('line',line=>{try{const message=JSON.parse(line);if(message.action==='keys')updateKeys(message.keys);if(message.action==='shutdown')void shutdown();}catch{ /* Do not log configuration or credentials. */ }});
+io?.on('line',line=>{try{const message=JSON.parse(line);if(message.action==='keys')updateKeys(message.keys);if(message.action==='shutdown')void shutdown();}catch{ /* Do not log configuration or credentials. */ }});
 const shutdown=async()=>{if(closing)return;closing=true;clearInterval(timer);await http.close();workspace.close();process.exit(0);};
-io.on('close',()=>void shutdown());process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
+io?.on('close',()=>void shutdown());process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { LocalWorkspace } from '../desktop/server/store.mjs';
 import { startLocalServer } from '../desktop/server/http.mjs';
 
@@ -106,6 +106,35 @@ test('loopback server requires native bootstrap, cookie, exact host and mutation
     const response=await fetch(base+'/local/query',{method:'POST',headers:{...headers,Origin:base,'Content-Type':'application/json'},body:JSON.stringify({table:'folders',operation:'insert',value:{id:'folder',name:'Example'}})});assert.equal(response.status,200);assert.equal((await response.json()).error,null);
     const page=await fetch(base+'/',{headers});assert.match(page.headers.get('content-security-policy'),/script-src 'self'/);assert.ok(!(await page.text()).includes(bootstrap));
     await f.store.upload('example.mp4',Buffer.from('0123456789'));const part=await fetch(f.store.mediaUrl('example.mp4'),{headers:{...headers,Range:'bytes=2-4'}});assert.equal(part.status,206);assert.equal(await part.text(),'234');
+  }finally{if(local)await local.close();f.store.close();f.cleanup();}
+});
+test('self-hosted server signs in with the access token for its public origin only',async()=>{
+  const f=fixture();let local;try{
+    const root=path.join(f.root,'web');fs.mkdirSync(root);fs.writeFileSync(path.join(root,'index.html'),'<html>Synthetic</html>');
+    const token='synthetic-access-token-for-tests',origin='https://studio.example.test';
+    local=await startLocalServer({workspace:f.store,root,bootstrap:createHash('sha256').update(token).digest('hex'),server:{host:'127.0.0.1',port:0,publicOrigin:origin+'/'}});
+    assert.equal(local.origin,origin);
+    const port=local.server.address().port;
+    const send=(method,pathname,headers={},body)=>new Promise((resolve,reject)=>{const request=http.request({host:'127.0.0.1',port,method,path:pathname,headers:{Host:'studio.example.test',...headers}},response=>{let text='';response.on('data',d=>text+=d);response.on('end',()=>resolve({status:response.statusCode,headers:response.headers,text}));});request.on('error',reject);request.end(body);});
+    const form={'Content-Type':'application/x-www-form-urlencoded'};
+    assert.equal((await send('GET','/local/health')).status,200);
+    assert.equal((await send('GET','/local/health',{Host:'attacker.example'})).status,403);
+    const gate=await send('GET','/');assert.equal(gate.status,303);assert.equal(gate.headers.location,'/local/login');
+    assert.equal((await send('GET','/api/workspace-config')).status,401);
+    assert.equal((await send('GET','/local/bootstrap',{'X-Banana-Bootstrap':createHash('sha256').update(token).digest('hex')})).status,401);
+    assert.match((await send('GET','/local/login')).text,/name="token"/);
+    assert.equal((await send('POST','/local/login',{...form,Origin:'https://attacker.example'},'token='+token)).status,403);
+    const wrong=await send('POST','/local/login',{...form,Origin:origin},'token=not-the-token');assert.equal(wrong.headers.location,'/local/login?failed');assert.equal(wrong.headers['set-cookie'],undefined);
+    const login=await send('POST','/local/login',{...form,Origin:origin},'token='+encodeURIComponent(token));assert.equal(login.status,303);
+    const cookie=login.headers['set-cookie'][0];assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.ok(!cookie.includes(token));
+    const headers={Cookie:cookie.split(';')[0]};
+    const config=JSON.parse((await send('GET','/api/workspace-config',headers)).text);assert.equal(config.server,true);assert.equal(config.userId,f.store.user.id);
+    await f.store.upload('refs/a.png',Buffer.from('png'));
+    assert.equal(f.store.mediaUrl('refs/a.png'),origin+'/storage/v1/object/authenticated/media/refs/a.png');
+    assert.equal(f.store.mediaKey(origin+'/storage/v1/object/authenticated/media/refs/a.png'),'refs/a.png');
+    assert.equal(f.store.mediaKey('https://attacker.example/storage/v1/object/authenticated/media/refs/a.png'),null);
+    assert.equal((await send('GET','/storage/v1/object/authenticated/media/refs/a.png',headers)).text,'png');
+    const logout=await send('POST','/local/logout',{...headers,Origin:origin});assert.equal(logout.status,303);assert.match(logout.headers['set-cookie'][0],/Max-Age=0/);
   }finally{if(local)await local.close();f.store.close();f.cleanup();}
 });
 test('JSON metadata compare-and-swap matches by value like PostgREST jsonb and rejects stale snapshots',async()=>{

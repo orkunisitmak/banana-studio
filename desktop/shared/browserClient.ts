@@ -1,7 +1,7 @@
 import { WorkspaceQuery } from './query.mjs';
 import { postNativeAction } from './nativeBridge';
 
-export const createLocalWorkspaceClient = (config: { userId: string; sessionId: string }) => {
+export const createLocalWorkspaceClient = (config: { userId: string; sessionId: string; server?: true }) => {
   const user = { id: config.userId, email: 'local@example.invalid', email_confirmed_at: '2026-01-01T00:00:00Z', is_anonymous: false };
   // This is a compatibility identifier, never an authentication credential.
   // Every loopback operation requires the native app's HttpOnly session cookie.
@@ -35,8 +35,14 @@ export const createLocalWorkspaceClient = (config: { userId: string; sessionId: 
       refreshSession: async () => ({ data: { session }, error: null }),
       getUser: async () => ({ data: { user }, error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+      // A self-hosted server ends its cookie session; the desktop shell locks its window.
+      signOut: async () => {
+        if (!config.server) { postNativeAction('lock'); return { error: null }; }
+        await fetch('/local/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
+        location.assign('/local/login');
+        return { error: null };
+      },
       stopAutoRefresh() {},
-      signOut: async () => { postNativeAction('lock'); return { error: null }; },
     },
     from: (table: string) => new WorkspaceQuery(send, table),
     rpc: (rpc: string, args = {}) => new WorkspaceQuery(send, undefined, rpc, args),

@@ -536,7 +536,8 @@ const CustomVideoPlayer: React.FC<{
   useEffect(() => {
     const handlePlayerKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (target?.matches('input, textarea, select, button, [role="button"], [contenteditable="true"]')) return;
+      if (target?.closest('[role="dialog"]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const key = event.key.toLowerCase();
@@ -894,6 +895,9 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Popup Preview State
   const [previewRefImage, setPreviewRefImage] = useState<ReferenceImage | null>(null);
+  const previewOpenerRef = useRef<HTMLElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const openRefPreview = (ref: ReferenceImage, opener: HTMLElement) => { previewOpenerRef.current = opener; setPreviewRefImage(ref); };
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
@@ -1354,6 +1358,19 @@ export const Gallery: React.FC<GalleryProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
+
+  useEffect(() => {
+    if (!previewRefImage) return;
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setPreviewRefImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      const opener = previewOpenerRef.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [previewRefImage]);
 
   // --- Actions ---
 
@@ -3037,8 +3054,8 @@ export const Gallery: React.FC<GalleryProps> = ({
 
       {/* Reference Image Preview Popup */}
       {previewRefImage && (
-        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200" onClick={() => setPreviewRefImage(null)}>
-          <button aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
+        <div role="dialog" aria-modal="true" aria-label="Reference photo preview" tabIndex={-1} className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200 outline-none" onClick={() => setPreviewRefImage(null)} onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); previewCloseRef.current?.focus(); } }}>
+          <button type="button" ref={previewCloseRef} autoFocus aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
           <img src={previewRefImage.data} alt="Reference" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>
       )}
@@ -3414,8 +3431,16 @@ export const Gallery: React.FC<GalleryProps> = ({
                       return (
                         <div
                           key={idx}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isEditSource ? 'Preview edit source reference' : `Preview reference photo ${idx + 1}`}
                           className="aspect-square rounded-lg border border-gray-700 overflow-hidden bg-black/50 relative isolate group cursor-pointer"
-                          onClick={() => setPreviewRefImage(ref)}
+                          onClick={e => openRefPreview(ref, e.currentTarget)}
+                          onKeyDown={e => {
+                            if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                            e.preventDefault();
+                            openRefPreview(ref, e.currentTarget);
+                          }}
                         >
                           <img src={ref.data} alt={isEditSource ? 'Edit source reference' : 'Reference image'} className="w-full h-full object-cover" />
 

@@ -18,6 +18,9 @@ services:
       - "${BANANA_BIND:-127.0.0.1}:${BANANA_PUBLISH_PORT:-8080}:8080"
     environment:
       BANANA_IMAGE_WORKERS: ${BANANA_IMAGE_WORKERS:-4}
+      # X-Forwarded-For is trusted only when the port is loopback-only (see docs).
+      BANANA_BIND: ${BANANA_BIND:-127.0.0.1}
+      BANANA_TRUST_PROXY: ${BANANA_TRUST_PROXY:-}
       BANANA_PUBLIC_URL: ${BANANA_PUBLIC_URL:?Set BANANA_PUBLIC_URL in .env}
       BANANA_OWNER_EMAIL: ${BANANA_OWNER_EMAIL:-}
       BANANA_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres

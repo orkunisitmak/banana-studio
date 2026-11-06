@@ -29,6 +29,7 @@ fs.cpSync(path.join(root, 'supabase/migrations'), path.join(target, 'migrations'
 fs.cpSync(path.join(root, 'docker/server/pages'), path.join(target, 'pages'), { recursive: true });
 
 const copied = new Map();
+/** Find an installed package the way Node resolves it from `from`. */
 const resolvePackage = (name, from) => {
   for (let directory = from; ; directory = path.dirname(directory)) {
     const candidate = path.join(directory, 'node_modules', name);
@@ -36,6 +37,7 @@ const resolvePackage = (name, from) => {
     if (directory === path.dirname(directory)) return null;
   }
 };
+/** Copy a runtime package and its dependencies into the build, refusing version conflicts. */
 const copyPackage = (name, from, optional = false) => {
   const source = resolvePackage(name, from);
   if (!source) { if (optional) return; throw new Error('Missing runtime dependency: ' + name); }

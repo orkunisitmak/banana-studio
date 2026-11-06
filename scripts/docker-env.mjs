@@ -10,11 +10,14 @@ const root = path.resolve(import.meta.dirname, '..');
 const file = path.resolve(process.argv[2] || path.join(root, '.env'));
 if (!fs.existsSync(file)) fs.copyFileSync(path.join(root, '.env.example'), file);
 let text = fs.readFileSync(file, 'utf8');
+/** The current value of a `.env` variable, or '' when it is unset or empty. */
 const value = name => text.match(new RegExp(`^${name}=(.*)$`, 'm'))?.[1].trim() || '';
+/** Set a `.env` variable in place, appending it when the line is missing. */
 const set = (name, next) => {
   const line = `${name}=${next}`;
   text = new RegExp(`^${name}=.*$`, 'm').test(text) ? text.replace(new RegExp(`^${name}=.*$`, 'm'), line) : text.replace(/\n?$/, '\n') + line + '\n';
 };
+/** Base64url-encode a string or a JSON value. */
 const b64 = input => Buffer.from(typeof input === 'string' ? input : JSON.stringify(input)).toString('base64url');
 // Supabase API keys are HS256 JWTs signed with the shared JWT secret.
 const apiKey = (role, secret) => {

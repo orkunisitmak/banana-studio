@@ -11,6 +11,7 @@ const concurrency = Math.max(1, Number(process.env.BANANA_IMAGE_WORKERS) || 4);
 const scheduled = new Map();
 const running = new Set();
 
+/** Process one image job; any failure reschedules it (after the job's own delay, else 60 s). */
 const run = async job => {
   try {
     const db = createServiceRoleClient();
@@ -20,6 +21,7 @@ const run = async job => {
     schedule(job, (error instanceof ImageJobWait ? error.afterSeconds : 60) * 1000);
   }
 };
+/** Start due jobs until the worker limit is reached. */
 const pump = () => {
   const now = Date.now();
   for (const [id, { job, due }] of scheduled) {
@@ -29,6 +31,7 @@ const pump = () => {
     void run(job).finally(() => { running.delete(id); pump(); });
   }
 };
+/** Queue a job to run after `delay` ms, keeping the earlier time if it is already queued. */
 const schedule = (job, delay) => {
   const due = Date.now() + delay, current = scheduled.get(job.id);
   if (!current || current.due > due) scheduled.set(job.id, { job: { id: job.id, userId: job.userId }, due });

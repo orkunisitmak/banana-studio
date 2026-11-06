@@ -6,9 +6,13 @@ const storageKey = `banana-studio:${location.host}:auth`;
 const verifierKey = `banana-studio:${location.host}:oauth-pkce`;
 let apikey;
 
+/** Create an element with properties and children. */
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+/** Replace the page content. */
 const render = (...children) => app.replaceChildren(...children);
+/** Show an error message in place of the page. */
 const fail = message => render(el('h1', {}, 'Banana Studio'), el('p', { className: 'error', role: 'alert' }, message));
+/** Call the Auth API; a non-2xx response throws with Auth's message and the HTTP status. */
 const auth = async (path, { method = 'GET', token, body, query } = {}) => {
   const url = new URL(`/auth/v1${path}`, location.origin);
   for (const [name, value] of Object.entries(query || {})) url.searchParams.set(name, value);
@@ -17,8 +21,10 @@ const auth = async (path, { method = 'GET', token, body, query } = {}) => {
   if (!response.ok) throw Object.assign(new Error(data?.msg || data?.message || data?.error_description || data?.error || `Request failed (${response.status})`), { status: response.status });
   return data;
 };
+/** Store the session where the web app keeps it, so both share one sign-in. */
 const save = session => { localStorage.setItem(storageKey, JSON.stringify(session)); return session; };
 
+/** Base64url-encode bytes (for the PKCE verifier and challenge). */
 const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
@@ -45,6 +51,7 @@ async function session() {
   catch { localStorage.removeItem(storageKey); return null; }
 }
 
+/** Start Google sign-in with a fresh PKCE verifier kept in this tab. */
 const startGoogle = async () => {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   sessionStorage.setItem(verifierKey, verifier);
@@ -54,12 +61,14 @@ const startGoogle = async () => {
   location.assign(url);
 };
 
+/** Show the Google sign-in step. */
 const signIn = () => render(
   el('h1', {}, 'Sign in to Banana Studio'),
   el('p', {}, 'Sign in with the Google account that was invited to this workspace.'),
   el('div', { className: 'actions' }, el('button', { type: 'button', className: 'primary', onclick: () => void startGoogle().catch(error => fail(error.message)) }, 'Continue with Google')),
 );
 
+/** Show the consent screen for `authorization_id`, or return at once when consent was already given. */
 async function consent(current) {
   const id = new URLSearchParams(location.search).get('authorization_id');
   if (!id) return fail('This sign-in request is missing its authorization ID. Start again from your assistant.');
@@ -87,6 +96,7 @@ async function consent(current) {
   );
 }
 
+/** List the assistants connected to this account, each with a Disconnect button. */
 async function connections(current) {
   const grants = await auth('/user/oauth/grants', { token: current.access_token });
   const list = Array.isArray(grants) ? grants : grants?.grants || [];

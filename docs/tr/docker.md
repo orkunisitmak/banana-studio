@@ -46,7 +46,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/w -w /w node:24-slim node 
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | 3. adımdan. |
 | Servis anahtarları | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY`; yalnız kullandıkların. |
 | `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | İsteğe bağlı yönetici fatura raporları. |
-| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | `app` için sunucu adresi ve portu (varsayılan `127.0.0.1` ve `8080`). |
+| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | `app` için sunucu adresi ve portu (varsayılan `127.0.0.1` ve `8080`). Aynı sunucudaki bir ters vekil sunucunun arkasında varsayılan loopback adresini koru. Başka bir adreste `app`, `X-Forwarded-For` başlığını yok sayar ve girişleri bağlanan adrese göre sınırlar. `BANANA_TRUST_PROXY=true` değerini yalnız güvenlik duvarı porta vekil sunucundan başkasını almıyorsa yaz. |
 
 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` ve `SUPABASE_SERVICE_ROLE_KEY` değerlerini boş bırak: bunlar Vercel kurulumuna aittir. Docker sunucusu bunları kendisi üretir.
 
@@ -95,14 +95,20 @@ Sonuçlar galeride diğer üretimler gibi görünür. Bağlı asistanları **`/o
 | `banana-studio_storage-data` | Yüklenen referanslar ve üretilen görseller/videolar |
 | `banana-studio_db-config` | Postgres imajının oluşturduğu şifreleme anahtarı dosyaları |
 
-- **Yedek:** veritabanı ve medya dosyaları uyumlu olsun diye `app` konteynerini durdur, ikisini de özel bir klasöre yaz, sonra yeniden başlat:
+- **Yedek:** veritabanı ve medya dosyaları uyumlu olsun diye `app` konteynerini durdur, ikisini de özel bir klasöre yaz, sonra yeniden başlat. Her yedek zaman damgalı yeni bir ad alır; eski yedeklerin üzerine yazılmaz. Bir adım başarısız olursa yarım dosyalar silinir ve `app` yeniden başlatılır:
 
   ```sh
-  umask 077 && mkdir -p backups
-  docker compose stop app
-  docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/banana-db.dump
-  docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/banana-media.tgz
-  docker compose start app
+  (
+    set -eu
+    umask 077 && mkdir -p backups
+    stamp=$(date +%Y%m%d-%H%M%S)
+    trap 'rm -f backups/.partial-*; docker compose start app' EXIT
+    docker compose stop app
+    docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/.partial-db
+    docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/.partial-media
+    mv backups/.partial-db "backups/banana-db-$stamp.dump"
+    mv backups/.partial-media "backups/banana-media-$stamp.tgz"
+  )
   ```
 
   Medya komutu çalışan `storage` konteynerinin kullandığı birimi okur. Bu yüzden başka bir Compose proje adıyla da çalışır. `storage` çalışmıyorsa komut başarısız olur.

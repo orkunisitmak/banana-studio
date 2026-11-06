@@ -11,7 +11,9 @@ import { applyMigrations, ensureDockerSchema, promoteOwner } from './database.mj
 import { createMcpServer } from './mcp.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+/** Print a configuration error and stop the process. */
 const fatal = message => { console.error(message); process.exit(1); };
+/** Read a required environment variable or stop with a clear message. */
 const env = name => process.env[name] || fatal(`Set ${name}.`);
 
 let publicOrigin;
@@ -31,10 +33,12 @@ const webRoot = process.env.BANANA_WEB_ROOT || path.join(here, 'web');
 const migrationsDirectory = process.env.BANANA_MIGRATIONS || path.join(here, 'migrations');
 const pagesRoot = process.env.BANANA_PAGES_ROOT || path.join(here, 'pages');
 
+/** The internal service (`auth`, `rest`, `storage`) that serves a public path, if any. */
 const upstreamFor = pathname => {
   for (const [prefix, target] of Object.entries(upstreams)) if (pathname === prefix || pathname.startsWith(prefix + '/')) return { prefix, target };
   return null;
 };
+/** Headers that make a service build public URLs for the address people open. */
 const forwardedHeaders = prefix => ({
   'x-forwarded-host': publicUrl.host, 'x-forwarded-proto': publicUrl.protocol.slice(0, -1), 'x-forwarded-prefix': prefix,
 });
@@ -79,6 +83,7 @@ const handlers = Object.fromEntries(Object.entries({
 }).map(([name, module]) => [name, module.default]));
 
 const BODY_LIMIT = 16 * 1024 * 1024;
+/** Buffer a function request body, refusing bodies above BODY_LIMIT. */
 const readBody = async req => {
   const parts = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > BODY_LIMIT) throw Object.assign(new Error('Request body too large.'), { status: 413 }); parts.push(chunk); }
@@ -92,11 +97,13 @@ const parseBody = (bytes, type = '') => {
   if (type.startsWith('text/')) return bytes.toString();
   return bytes;
 };
+/** Add the Vercel response helpers (`status`, `json`, `send`) the functions expect. */
 const withResponseHelpers = res => Object.assign(res, {
   status(code) { this.statusCode = code; return this; },
   json(value) { if (!this.getHeader('content-type')) this.setHeader('Content-Type', 'application/json; charset=utf-8'); this.end(JSON.stringify(value)); return this; },
   send(value) { if (value !== null && typeof value === 'object' && !Buffer.isBuffer(value)) return this.json(value); this.end(value); return this; },
 });
+/** Run an `api/` function; an uncaught error becomes a generic 500 response. */
 const invoke = async (handler, req, res) => {
   withResponseHelpers(res);
   try { await handler(req, res); }
@@ -109,6 +116,7 @@ const invoke = async (handler, req, res) => {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.gif': 'image/gif' };
 // Mirrors vercel.json `headers`.
 const SHARE_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/** Serve a file from the built frontend with the hosted deployment's cache headers. */
 const serveStatic = (req, res, pathname) => {
   if (!['GET', 'HEAD'].includes(req.method)) { res.statusCode = 405; return res.end(); }
   let relative;
@@ -126,12 +134,17 @@ const serveStatic = (req, res, pathname) => {
   fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
 };
 
-// Auth rate-limits by this header (GOTRUE_RATE_LIMIT_HEADER). It is always
-// rebuilt here, never passed through. The published port is reachable only by
-// the reverse proxy, which appends the real client as the last
-// X-Forwarded-For entry; anything before it is client-supplied and ignored.
+// Auth rate-limits by X-Banana-Client-Ip (GOTRUE_RATE_LIMIT_HEADER); it is
+// always rebuilt here, never passed through. X-Forwarded-For is trusted only
+// when the published port is loopback-only (the default `BANANA_BIND`), so
+// just the local reverse proxy can reach it, or when BANANA_TRUST_PROXY=true
+// says a firewall gives the same guarantee. The proxy appends the real client
+// as the last entry; anything before it is client-supplied and ignored.
+const LOOPBACK = ['127.0.0.1', '::1', 'localhost'];
+const trustProxy = process.env.BANANA_TRUST_PROXY ? process.env.BANANA_TRUST_PROXY === 'true' : LOOPBACK.includes(process.env.BANANA_BIND || '127.0.0.1');
+/** The address Auth rate-limits by: the proxy's last X-Forwarded-For entry when trusted, else the socket peer. */
 const clientIp = req => {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map(part => part.trim()).filter(Boolean);
+  const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',').map(part => part.trim()).filter(Boolean) : [];
   return forwarded.at(-1) || req.socket.remoteAddress || 'unknown';
 };
 
@@ -157,6 +170,7 @@ const authDiscovery = {
   '/.well-known/openid-configuration/auth/v1': '/.well-known/openid-configuration',
 };
 const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/** Serve one of the OAuth pages with a strict, no-store policy. */
 const servePage = (res, file, type) => {
   res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': PAGE_CSP });
   fs.createReadStream(path.join(pagesRoot, file)).on('error', () => res.destroy()).pipe(res);
@@ -207,5 +221,6 @@ ready = true;
 console.log(`Banana Studio is ready at ${publicOrigin}`);
 setInterval(() => { void sweep().catch(() => {}); if (owner) void promoteOwner(sql, owner).catch(() => {}); }, 60_000).unref();
 void sweep().catch(() => {});
+/** Stop accepting requests, then exit once open requests finish. */
 const shutdown = () => server.close(() => process.exit(0));
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

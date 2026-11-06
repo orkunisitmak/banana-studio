@@ -19,16 +19,23 @@ const VIDEO_MODELS = { 'seedance-2.0': 'Seedance 2.0', 'seedance-2.5': 'Seedance
 const VIDEO_PROVIDERS = ['fal', 'openrouter'];
 const MAX_VIDEO_BYTES = 512 * 1024 * 1024;
 
+/** Wrap a tool result as MCP text content. */
 const text = value => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
+/** An error whose message is safe to show to the assistant. */
 class ToolError extends Error {}
+/** Validate a non-empty text argument of at most `max` characters. */
 const string = (value, name, max = 32000) => { if (typeof value !== 'string' || !value.trim() || value.length > max) throw new ToolError(`${name} must be text of up to ${max} characters.`); return value; };
+/** Validate an enum argument, using `fallback` when it is omitted. */
 const choice = (value, allowed, fallback, name) => { const result = value ?? fallback; if (!allowed.includes(result)) throw new ToolError(`${name} must be one of: ${allowed.join(', ')}.`); return result; };
+/** Validate a list of credential-free HTTPS URLs. */
 const httpsUrls = (value, name, max) => {
   if (value == null) return [];
   if (!Array.isArray(value) || value.length > max) throw new ToolError(`${name} accepts up to ${max} URLs.`);
   return value.map(url => { let parsed; try { parsed = new URL(url); } catch { throw new ToolError(`${name} must contain HTTPS URLs.`); } if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new ToolError(`${name} must contain HTTPS URLs without credentials.`); return parsed.href; });
 };
+/** Guess an image MIME type from the URL's file extension. */
 const mimeFromUrl = url => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' })[new URL(url).pathname.split('.').pop()?.toLowerCase()] || 'image/png';
+/** Wait `ms` milliseconds. */
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const TOOLS = [
@@ -189,12 +196,20 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       const { status, data } = await call('seedance-video', token, { body: request });
       if (status !== 200 || !data?.taskId) throw new ToolError(data?.error || 'The video could not be started.');
       const id = `mcp_${randomUUID()}`;
-      await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, task_id, provider, request) VALUES (${id}, ${user.id}, ${data.taskId}, ${data.provider || provider}, ${sql.json(request)})`;
-      // Logged once, when the provider accepts the task, like the web app's logVideoUsage.
+      // The provider has accepted a paid task: record usage first, then keep
+      // retrying the tracking row so a brief database error cannot lose it.
       const cost = estimateVideoCost(model, request.quality, request.duration, false, 0, 'generate', 0, 0);
       const { error: usageError } = await db.from('usage_logs').insert({ user_id: user.id, action: 'video_generate', model: `${model}-${request.mode.replace(/_/g, '-')}`,
         prompt: request.prompt.slice(0, 500), image_count: 1, estimated_cost: cost?.usd ?? null });
-      if (usageError) console.error('MCP video usage could not be recorded:', usageError.message);
+      if (usageError) console.error(`MCP video usage could not be recorded for task ${data.taskId}:`, usageError.message);
+      for (let attempt = 1; ; attempt++) {
+        try { await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, task_id, provider, request) VALUES (${id}, ${user.id}, ${data.taskId}, ${data.provider || provider}, ${sql.json(request)})`; break; }
+        catch (error) {
+          if (attempt < 3) { await sleep(1000 * attempt); continue; }
+          console.error(`MCP video task ${data.taskId} was accepted but could not be tracked:`, error.message);
+          throw new ToolError(`The provider accepted the video (task ${data.taskId}), but the workspace could not record it. Do not start it again: that would be billed a second time. Ask the administrator to recover this task.`);
+        }
+      }
       return { generation_id: id, status: 'processing', next: 'Call get_generation with wait_seconds; the video usually takes a few minutes.' };
     },
     async get_generation(args, token, user, db) {

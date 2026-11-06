@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import postgres from 'postgres';
 
+/** A single-connection client for one-off administration work. */
 const connect = url => postgres(url, { max: 1, onnotice: () => {}, connect_timeout: 10 });
 
 /**

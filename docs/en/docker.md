@@ -46,7 +46,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/w -w /w node:24-slim node 
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | From step 3. |
 | Provider keys | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY` — only the ones you use. |
 | `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | Optional admin billing reports. |
-| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | Host address and port of `app` (default `127.0.0.1` and `8080`). |
+| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | Host address and port of `app` (default `127.0.0.1` and `8080`). Keep the loopback default behind a reverse proxy on the same host. With another address, `app` ignores `X-Forwarded-For` and rate-limits sign-in by the connecting address; set `BANANA_TRUST_PROXY=true` only when a firewall lets nothing but your proxy reach the port. |
 
 Leave `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SERVICE_ROLE_KEY` empty: they belong to the Vercel deployment. The Docker server derives them.
 
@@ -95,14 +95,20 @@ Results appear in the gallery like any other generation. See and disconnect assi
 | `banana-studio_storage-data` | Uploaded references and generated images/videos |
 | `banana-studio_db-config` | Database encryption key material created by the Postgres image |
 
-- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again:
+- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again. Each backup gets a new timestamped name, so older backups are never overwritten. If a step fails, the partial files are removed and `app` is started again:
 
   ```sh
-  umask 077 && mkdir -p backups
-  docker compose stop app
-  docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/banana-db.dump
-  docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/banana-media.tgz
-  docker compose start app
+  (
+    set -eu
+    umask 077 && mkdir -p backups
+    stamp=$(date +%Y%m%d-%H%M%S)
+    trap 'rm -f backups/.partial-*; docker compose start app' EXIT
+    docker compose stop app
+    docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/.partial-db
+    docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/.partial-media
+    mv backups/.partial-db "backups/banana-db-$stamp.dump"
+    mv backups/.partial-media "backups/banana-media-$stamp.tgz"
+  )
   ```
 
   The media command reads the volume the running `storage` container uses, so it also works with another Compose project name; it fails when `storage` is not running.

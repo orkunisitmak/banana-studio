@@ -77,7 +77,7 @@ export class LocalWorkspace {
     return result;
   }
   mediaKey(value) {
-    try { const url=new URL(value);if(url.origin!==this.origin&&!['127.0.0.1','localhost'].includes(url.hostname))return null;const m=url.pathname.match(/^\/storage\/v1\/object\/(?:authenticated|sign|public)\/media\/(.+)$/);return m?decodeURIComponent(m[1]):null; } catch{return null;}
+    try { const url=new URL(value);if(!['127.0.0.1','localhost'].includes(url.hostname))return null;const m=url.pathname.match(/^\/storage\/v1\/object\/(?:authenticated|sign|public)\/media\/(.+)$/);return m?decodeURIComponent(m[1]):null; } catch{return null;}
   }
   mediaUrl(key) { this.mediaPath(key);return `${this.origin}/storage/v1/object/authenticated/media/${key.split('/').map(encodeURIComponent).join('/')}`; }
   materialize(value) { if(typeof value==='string'){const key=this.mediaKey(value);return key?this.mediaUrl(key):value;}if(Array.isArray(value))return value.map(v=>this.materialize(v));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,this.materialize(v)]));return value; }

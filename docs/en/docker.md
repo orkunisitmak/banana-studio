@@ -1,88 +1,122 @@
-# Run Banana Studio with Docker
+# Run the web workspace with Docker
 
-[Home](../../README.md) · [Türkçe](../tr/docker.md) · [Keys](models.md) · [Web deployment](deploy.md)
+[Home](../../README.md) · [Türkçe](../tr/docker.md) · [Keys](models.md) · [Vercel + Supabase deployment](deploy.md)
 
-The Docker image runs the same standalone workspace as the Mac and Windows apps — one Node.js server, SQLite and media files on disk — and serves it to a browser. You do not need Supabase, Vercel or Google sign-in. Image and video generation still happen at the providers; the server only sends requests, follows jobs and stores the results.
+`compose.yaml` runs the **same web workspace as the hosted deployment** on your own server: the same frontend, the same `api/` functions, the same Supabase schema and row-level security. Google sign-in, invitations, Workspace admin, usage reports, the durable image queue, resumable video uploads and public folder links all work. Nothing is hosted at Vercel or Supabase.
 
-| | Docker server | Hosted web ([deploy.md](deploy.md)) |
+| Container | Image | Replaces |
 | --- | --- | --- |
-| Infrastructure | One container on any Linux host | Vercel + Supabase |
-| Sign-in | One shared access token | Google accounts, admin approval |
-| Data | SQLite + files in a Docker volume | Supabase Postgres + Storage |
-| Provider keys | Server environment | Server environment |
-| Public folder links | Not available | Available |
+| `app` | built from this repository | Vercel: frontend, functions, Queues, Cron; the Supabase API gateway |
+| `db` | `supabase/postgres` | Supabase Postgres |
+| `auth` | `supabase/gotrue` | Supabase Auth (Google sign-in) |
+| `rest` | `postgrest/postgrest` | Supabase Data API |
+| `storage` | `supabase/storage-api` | Supabase Storage (private `media` bucket, files on a volume) |
 
-The Docker server is a **single workspace**: everyone who has the access token sees and edits the same gallery. Use the hosted web deployment if each person needs their own account.
+Only `app` is published, on `127.0.0.1:8080` by default. It serves the site and forwards `/auth/v1`, `/rest/v1` and `/storage/v1` to the internal services, so the browser uses one address. Image and video generation run at the providers; the server's CPU load stays low. Expect roughly 0.5–1 GB of RAM for the whole stack and disk use that grows with the gallery.
 
-## Start
+## Before you start
 
-1. Install Docker with the Compose plugin.
-2. Clone the repository and create the configuration file:
+- A Linux server with Docker and the Compose plugin.
+- A domain with HTTPS in front of the server (Caddy, Traefik, nginx, Cloudflare Tunnel). The app requires `https://` except on `localhost`.
+- A Google Cloud project for the OAuth client (step 3).
+- The provider keys you plan to use — see the [key guide](models.md).
 
-   ```sh
-   git clone https://github.com/orkunisitmak/banana-studio.git
-   cd banana-studio
-   cp .env.example .env
-   ```
-
-3. In `.env`, set `BANANA_ACCESS_TOKEN` to a long random secret, for example the output of `openssl rand -hex 24`. It must have at least 16 characters.
-4. Add the provider keys you plan to use (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY`). The [key guide](models.md) explains which features each key covers. Leave the Supabase and Vercel variables empty.
-5. Start it:
-
-   ```sh
-   docker compose up -d --build
-   ```
-
-6. Open <http://localhost:8080>, enter the access token and select **Open workspace**.
-
-**Checkpoint:** the top bar shows **Self-hosted workspace**, an empty gallery and the generation controls. `docker compose ps` reports the container as `healthy`.
-
-## Configuration
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BANANA_ACCESS_TOKEN` | — (required) | Sign-in secret. The server keeps only its SHA-256 digest; changing it signs everyone out. |
-| `BANANA_PUBLIC_URL` | `http://localhost:8080` | The exact address people type in the browser. Requests for any other host are rejected. |
-| `BANANA_PUBLISH_PORT` | `8080` | Host port that Compose publishes. If you change it, change `BANANA_PUBLIC_URL` too. |
-| Provider keys | empty | Read when the container starts. Run `docker compose up -d` after editing them. |
-
-The image also reads `BANANA_PORT` (container port, `8080`) and `BANANA_DATA_DIR` (`/data`).
-
-## Put it on a domain
-
-Run it behind a reverse proxy that terminates HTTPS (Caddy, Traefik, nginx, Cloudflare Tunnel) and set the public address:
+## 1. Create the configuration
 
 ```sh
-BANANA_PUBLIC_URL=https://studio.example.com
+git clone https://github.com/orkunisitmak/banana-studio.git
+cd banana-studio
+node scripts/docker-env.mjs
 ```
 
-The proxy must forward the original `Host` header (the default for Caddy, Traefik and Cloudflare Tunnel; `proxy_set_header Host $host;` in nginx) and allow uploads of up to 512 MB (`client_max_body_size 512m;` in nginx). With an `https://` address the session cookie is marked `Secure`. Do not publish the plain HTTP port to the internet; bind it to the proxy only, for example `127.0.0.1:8080:8080`.
+Without Node on the server, run the same script in a container:
 
-A wrong access token waits one second before answering, but the token is the only protection: use a long random value, and put extra access control in the proxy if the address is public.
+```sh
+docker run --rm -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
+```
+
+The script copies `.env.example` to `.env` and fills the internal secrets (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`). It never overwrites a value that is already set. Keep `.env` private and back it up: the database and keys depend on it.
+
+## 2. Fill in `.env`
+
+| Variable | Value |
+| --- | --- |
+| `BANANA_PUBLIC_URL` | The address people open, for example `https://studio.example.com`. No path or trailing slash. |
+| `BANANA_OWNER_EMAIL` | Your Google account's address. It is allowed in at the first start and becomes administrator after your first sign-in. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | From step 3. |
+| Provider keys | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY` — only the ones you use. |
+| `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | Optional admin billing reports. |
+| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | Host address and port of `app` (default `127.0.0.1` and `8080`). |
+
+Leave `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` empty: they belong to the Vercel deployment. The Docker server derives them.
+
+## 3. Create the Google OAuth client
+
+1. In [Google Cloud Console](https://console.cloud.google.com), configure the OAuth consent screen.
+2. Create an OAuth client of type **Web application**.
+3. **Authorized JavaScript origins:** your `BANANA_PUBLIC_URL`.
+4. **Authorized redirect URIs:** `BANANA_PUBLIC_URL` + `/auth/v1/callback`, for example `https://studio.example.com/auth/v1/callback`.
+5. Copy the client ID and secret into `.env`. If the consent screen is in testing mode, add your account as a test user.
+
+## 4. Start
+
+```sh
+docker compose up -d --build
+docker compose ps
+```
+
+The first start builds the app image and creates the database. The `app` container applies `supabase/migrations` automatically when `auth` and `storage` have created their schemas, then reports `healthy`. Point your reverse proxy at `127.0.0.1:8080`. It must pass the original `Host` header and allow request bodies up to your upload limit (nginx: `proxy_set_header Host $host;`, `client_max_body_size 512m;`).
+
+**Checkpoint:** open `BANANA_PUBLIC_URL`, sign in with Google using `BANANA_OWNER_EMAIL`, and you see the gallery and **Workspace admin**. Invite other people from Workspace admin; an uninvited Google account is refused.
+
+## Connect Claude, ChatGPT or another assistant (MCP)
+
+The server is also a remote [MCP](https://modelcontextprotocol.io) server at **`BANANA_PUBLIC_URL/mcp`**. Add it as a custom connector (Claude: **Settings → Connectors → Add custom connector**; ChatGPT: **Settings → Connectors**; Claude Code: `claude mcp add --transport http banana-studio https://studio.example.com/mcp`). No key is copied anywhere:
+
+1. The assistant registers itself with the workspace's sign-in service.
+2. A browser window opens `/oauth/consent`. Sign in with your invited Google account and select **Allow**.
+3. The assistant now acts as you. Invitation checks, provider routing and usage reports apply as in the web app.
+
+| Tool | What it does |
+| --- | --- |
+| `list_models` | Image and video models, and whether the server has a key for each |
+| `generate_image` | Queues an image (GPT Image 2.5, Nano Banana Pro/2.1) with optional HTTPS reference images and folder |
+| `generate_video` | Starts a Seedance 2.0/2.5 video from text or first/last frames (fal.ai or OpenRouter key) |
+| `get_generation` | Waits for a result and returns a download URL valid for one hour; saves finished MCP videos to the gallery |
+| `list_generations`, `list_folders` | Browse the gallery |
+
+Results appear in the gallery like any other generation. See and disconnect assistants at **`/oauth/connections`**; disconnecting ends their access at once. Assistants register without approval from an administrator, but only invited accounts can approve them. Set `BANANA_MCP_DYNAMIC_REGISTRATION=false` to turn registration off.
 
 ## Data, backups and updates
 
-Everything lives in the `banana-data` volume: `workspace.sqlite` (gallery, folders, templates, People, jobs) and `media/` (uploaded references and generated results). Generation needs no local CPU or GPU; disk use grows with your gallery.
+| Volume | Contents |
+| --- | --- |
+| `banana-studio_db-data` | Postgres: accounts, gallery records, folders, People, templates, jobs, usage |
+| `banana-studio_storage-data` | Uploaded references and generated images/videos |
+| `banana-studio_db-config` | Database encryption key material created by the Postgres image |
 
-- **Back up:** stop the container so SQLite is consistent, then copy the volume:
+- **Database backup:** `docker compose exec db pg_dump -U postgres -Fc postgres > banana-db.dump`
+- **Media backup:** `docker run --rm -v banana-studio_storage-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-media.tgz -C /data .`
+- **Update:** `git pull && docker compose up -d --build`. New migrations are applied at start.
+- **Stop / remove:** `docker compose down` keeps the volumes; `docker compose down -v` deletes all data permanently.
 
-  ```sh
-  docker compose stop
-  docker run --rm -v banana-studio_banana-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-data.tgz -C /data .
-  docker compose start
-  ```
+## Settings
 
-- **Update:** `git pull && docker compose up -d --build`. The volume is kept.
-- **Remove:** `docker compose down` keeps the data; `docker compose down -v` deletes it permanently.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BANANA_MAX_UPLOAD_BYTES` | `524288000` (500 MB) | Largest single media file Storage accepts. |
+| `BANANA_IMAGE_WORKERS` | `4` | Image jobs processed at the same time by `app`. |
+| `BANANA_MCP_DYNAMIC_REGISTRATION` | `true` | Lets MCP clients register themselves. |
 
-The volume name is prefixed with the Compose project name (the folder name by default); `docker volume ls` shows it.
+Set them in `.env`, then run `docker compose up -d`.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| The container exits at once | `docker compose logs` names the missing or invalid variable: usually `BANANA_ACCESS_TOKEN` is empty or too short. |
-| `Invalid local host.` | The browser address does not match `BANANA_PUBLIC_URL`, or the proxy rewrites `Host`. |
-| `Cross-origin requests are not allowed.` when signing in | Open the exact `BANANA_PUBLIC_URL`, including `https://`; the proxy must not change the browser's `Origin`. |
+| `app` stays `starting`, logs mention auth and storage schemas | Check `docker compose logs auth storage`; usually a wrong `POSTGRES_PASSWORD` after the database was first created with another one. |
+| Google shows `redirect_uri_mismatch` | The redirect URI must be exactly `BANANA_PUBLIC_URL/auth/v1/callback`. |
+| Sign-in succeeds, then access is denied | That account is not invited. The owner is the address in `BANANA_OWNER_EMAIL`. |
+| “Use the HTTPS URL of your own Supabase project” | `BANANA_PUBLIC_URL` is plain `http://` on a host other than `localhost`. Put HTTPS in front. |
 | `… is not configured. The workspace owner must add …` | Add that key to `.env` and run `docker compose up -d`. |
-| Large uploads fail behind a proxy | Raise the proxy's request-body limit. |
+| Large uploads fail | Raise the proxy's body limit and, if needed, `BANANA_MAX_UPLOAD_BYTES`. |

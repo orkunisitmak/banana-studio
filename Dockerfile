@@ -1,5 +1,6 @@
-# Self-hosted Banana Studio: the standalone workspace server (SQLite + local
-# media files) served to browsers. See docs/en/docker.md.
+# Banana Studio web workspace server: the hosted frontend, `api/` functions,
+# image queue and Supabase gateway in one process. compose.yaml runs it with the
+# Supabase services it needs. See docs/en/docker.md.
 # The Node version matches desktop/node-runtime.json and CI.
 ARG NODE_IMAGE=node:24.19.0-bookworm-slim
 
@@ -8,21 +9,13 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-fund --no-audit
 COPY . .
-RUN npm run build && npm run build:desktop && node scripts/package-server.mjs /app
+RUN npm run build && node scripts/build-server.mjs /app
 
 FROM ${NODE_IMAGE}
-ENV NODE_ENV=production \
-    BANANA_SERVER=1 \
-    BANANA_HOST=0.0.0.0 \
-    BANANA_PORT=8080 \
-    BANANA_DATA_DIR=/data \
-    BANANA_WEB_ROOT=/app/web
+ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=build /app /app
-RUN mkdir -p /data && chown node:node /data
 USER node
-VOLUME ["/data"]
 EXPOSE 8080
-# Health is answered without a session, but only for the configured public host.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["node", "-e", "const u=new URL(process.env.BANANA_PUBLIC_URL||'http://localhost:8080');require('node:http').get({host:'127.0.0.1',port:process.env.BANANA_PORT,path:'/local/health',headers:{host:u.host}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["node", "server.mjs"]

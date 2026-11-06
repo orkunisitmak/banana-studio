@@ -105,7 +105,7 @@ MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to 
 | Mac with Intel | Standalone app, macOS 13.5+ | [Download](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-macos-x64.zip) · [Installation guide](docs/en/desktop.md) |
 | Windows 10/11, 64-bit Intel/AMD | Standalone portable app | [Download](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) · [Installation guide](docs/en/desktop.md#windows-download-and-open) |
 | Other computers, phones and tablets | Web version in a browser | Open a deployed workspace; its owner manages access and provider keys. |
-| Your own Linux server or NAS | Docker container, browser access | [Docker guide](docs/en/docker.md) |
+| Your own server, for your team | Full web workspace with Docker Compose | [Docker guide](docs/en/docker.md) |
 
 **Desktop quick start:** download → unzip → open (Mac: move to Applications first) → **Provider keys** → add the key for your model → generate. Both standalone apps need **no Supabase, Vercel, Google sign-in or separate Node installation**. The gallery stays on your computer. API keys stay in macOS Keychain or Windows Credential Manager. Keep the app open while jobs run; minimizing is fine. [First-open permissions, updates and backups →](docs/en/desktop.md)
 
@@ -146,9 +146,9 @@ The tutorial includes a browser-only SQL Editor route, the required variable tab
 
 **[Open the step-by-step web deployment tutorial →](docs/en/deploy.md)**
 
-### Or run one Docker container
+### Or run it on your own server with Docker
 
-Prefer a single server without Supabase or Vercel? The Docker image runs the standalone workspace (SQLite + media files in a volume) and serves it to browsers behind one access token. Set `BANANA_ACCESS_TOKEN` and your provider keys in `.env`, then run `docker compose up -d --build`. It is one shared workspace, not per-user accounts.
+`docker compose up -d --build` runs the same web workspace — Google sign-in, invitations, admin, usage reports, the durable image queue and folder links — with its own Postgres, Auth, Data API and Storage containers instead of Vercel and Supabase. It is also a remote **MCP server**, so Claude, ChatGPT and other assistants can generate into the gallery after the person approves them.
 
 **[Open the Docker guide →](docs/en/docker.md)**
 

@@ -19,5 +19,4 @@ docs
 tests
 desktop/macos
 desktop/windows
-Dockerfile
-compose.yaml
+docker/db

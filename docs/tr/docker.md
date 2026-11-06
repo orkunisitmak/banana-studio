@@ -1,88 +1,122 @@
-# Banana Studio'yu Docker ile çalıştırın
+# Web çalışma alanını Docker ile çalıştır
 
-[Ana sayfa](README.md) · [English](../en/docker.md) · [Anahtarlar](models.md) · [Web kurulumu](deploy.md)
+[Ana sayfa](README.md) · [English](../en/docker.md) · [Anahtarlar](models.md) · [Vercel + Supabase kurulumu](deploy.md)
 
-Docker imajı, Mac ve Windows uygulamalarındaki bağımsız çalışma alanını çalıştırır: tek Node.js sunucusu, SQLite ve diskteki medya dosyaları. Bu alanı tarayıcıya sunar. Supabase, Vercel ya da Google girişi gerekmez. Görsel ve video üretimini yine sağlayıcılar yapar; sunucu isteği gönderir, işi izler ve sonucu saklar.
+`compose.yaml`, **barındırılan sürümle aynı web çalışma alanını** kendi sunucunda çalıştırır: aynı arayüz, aynı `api/` fonksiyonları, aynı Supabase şeması ve satır düzeyi güvenlik. Google ile giriş, davet, Workspace admin, kullanım raporları, kalıcı görsel kuyruğu, devam ettirilebilir video yükleme ve herkese açık klasör bağlantıları çalışır. Vercel'de ya da Supabase'de hiçbir şey barındırılmaz.
 
-| | Docker sunucusu | Barındırılan web ([deploy.md](deploy.md)) |
+| Konteyner | İmaj | Yerine geçtiği |
 | --- | --- | --- |
-| Altyapı | Herhangi bir Linux sunucuda tek konteyner | Vercel + Supabase |
-| Giriş | Ortak tek erişim anahtarı | Google hesapları, yönetici onayı |
-| Veri | Docker biriminde SQLite + dosyalar | Supabase Postgres + Storage |
-| Sağlayıcı anahtarları | Sunucu ortam değişkenleri | Sunucu ortam değişkenleri |
-| Herkese açık klasör bağlantıları | Yok | Var |
+| `app` | bu depodan derlenir | Vercel: arayüz, fonksiyonlar, Queues, Cron; Supabase API geçidi |
+| `db` | `supabase/postgres` | Supabase Postgres |
+| `auth` | `supabase/gotrue` | Supabase Auth (Google ile giriş) |
+| `rest` | `postgrest/postgrest` | Supabase Data API |
+| `storage` | `supabase/storage-api` | Supabase Storage (özel `media` kovası, dosyalar birimde) |
 
-Docker sunucusu **tek çalışma alanıdır**: erişim anahtarını bilen herkes aynı galeriyi görür ve düzenler. Herkesin ayrı hesabı gerekiyorsa barındırılan web kurulumunu kullanın.
+Yalnız `app` dışarı açılır; varsayılan adres `127.0.0.1:8080`. Siteyi sunar ve `/auth/v1`, `/rest/v1`, `/storage/v1` isteklerini iç servislere iletir. Böylece tarayıcı tek adres kullanır. Görsel ve video üretimini sağlayıcılar yapar; sunucunun CPU yükü düşük kalır. Bütün yığın için yaklaşık 0,5–1 GB RAM bekle. Disk kullanımı galeriyle birlikte büyür.
 
-## Başlatma
+## Başlamadan önce
 
-1. Docker'ı Compose eklentisiyle kurun.
-2. Depoyu klonlayın ve yapılandırma dosyasını oluşturun:
+- Docker ve Compose eklentisi kurulu bir Linux sunucu.
+- Sunucunun önünde HTTPS'li bir alan adı (Caddy, Traefik, nginx, Cloudflare Tunnel). Uygulama `localhost` dışında `https://` ister.
+- OAuth istemcisi için bir Google Cloud projesi (3. adım).
+- Kullanacağın servis anahtarları; [anahtar rehberine](models.md) bak.
 
-   ```sh
-   git clone https://github.com/orkunisitmak/banana-studio.git
-   cd banana-studio
-   cp .env.example .env
-   ```
-
-3. `.env` içinde `BANANA_ACCESS_TOKEN` değerine uzun, rastgele bir gizli değer yazın; örneğin `openssl rand -hex 24` çıktısı. En az 16 karakter olmalı.
-4. Kullanacağınız sağlayıcı anahtarlarını ekleyin (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY`). Hangi anahtarın hangi özelliği açtığını [anahtar rehberi](models.md) anlatır. Supabase ve Vercel değişkenlerini boş bırakın.
-5. Başlatın:
-
-   ```sh
-   docker compose up -d --build
-   ```
-
-6. <http://localhost:8080> adresini açın, erişim anahtarını girin ve **Open workspace** düğmesine basın.
-
-**Kontrol:** üst çubukta **Self-hosted workspace**, boş bir galeri ve üretim denetimleri görünür. `docker compose ps` konteyneri `healthy` gösterir.
-
-## Yapılandırma
-
-| Değişken | Varsayılan | Görev |
-| --- | --- | --- |
-| `BANANA_ACCESS_TOKEN` | — (zorunlu) | Giriş anahtarı. Sunucu yalnız SHA-256 özetini tutar; değiştirince herkesin oturumu kapanır. |
-| `BANANA_PUBLIC_URL` | `http://localhost:8080` | Tarayıcıya yazılan tam adres. Başka bir alan adıyla gelen istekler reddedilir. |
-| `BANANA_PUBLISH_PORT` | `8080` | Compose'un sunucuda açtığı port. Değiştirirseniz `BANANA_PUBLIC_URL` değerini de değiştirin. |
-| Sağlayıcı anahtarları | boş | Konteyner açılırken okunur. Düzenledikten sonra `docker compose up -d` çalıştırın. |
-
-İmaj ayrıca `BANANA_PORT` (konteyner portu, `8080`) ve `BANANA_DATA_DIR` (`/data`) değerlerini okur.
-
-## Alan adına bağlama
-
-HTTPS'i sonlandıran bir ters vekil sunucunun (Caddy, Traefik, nginx, Cloudflare Tunnel) arkasında çalıştırın ve herkese açık adresi yazın:
+## 1. Yapılandırmayı oluştur
 
 ```sh
-BANANA_PUBLIC_URL=https://studio.example.com
+git clone https://github.com/orkunisitmak/banana-studio.git
+cd banana-studio
+node scripts/docker-env.mjs
 ```
 
-Vekil sunucu özgün `Host` başlığını iletmeli (Caddy, Traefik ve Cloudflare Tunnel bunu varsayılan olarak yapar; nginx'te `proxy_set_header Host $host;`). 512 MB'a kadar yüklemeye izin vermeli (nginx'te `client_max_body_size 512m;`). `https://` adresinde oturum çerezi `Secure` olarak işaretlenir. Düz HTTP portunu internete açmayın; yalnız vekil sunucuya bağlayın, örneğin `127.0.0.1:8080:8080`.
+Sunucuda Node yoksa aynı betiği bir konteynerde çalıştır:
 
-Yanlış erişim anahtarı bir saniye bekledikten sonra yanıt alır, ama tek koruma bu anahtardır. Uzun ve rastgele bir değer kullanın. Adres herkese açıksa vekil sunucuya ek erişim denetimi koyun.
+```sh
+docker run --rm -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
+```
+
+Betik `.env.example` dosyasını `.env` olarak kopyalar ve iç gizli değerleri (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`) doldurur. Dolu bir değerin üzerine asla yazmaz. `.env` dosyasını gizli tut ve yedekle: veritabanı ve anahtarlar ona bağlıdır.
+
+## 2. `.env` dosyasını doldur
+
+| Değişken | Değer |
+| --- | --- |
+| `BANANA_PUBLIC_URL` | Kullanıcıların açtığı adres, örneğin `https://studio.example.com`. Yol ya da sondaki eğik çizgi yok. |
+| `BANANA_OWNER_EMAIL` | Google hesabının adresi. İlk açılışta izin listesine girer; ilk girişten sonra yönetici olur. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | 3. adımdan. |
+| Servis anahtarları | `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, `EVOLINK_API_KEY`, `YOUTUBE_API_KEY`; yalnız kullandıkların. |
+| `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | İsteğe bağlı yönetici fatura raporları. |
+| `BANANA_BIND`, `BANANA_PUBLISH_PORT` | `app` için sunucu adresi ve portu (varsayılan `127.0.0.1` ve `8080`). |
+
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` ve `CRON_SECRET` değerlerini boş bırak: bunlar Vercel kurulumuna aittir. Docker sunucusu bunları kendisi üretir.
+
+## 3. Google OAuth istemcisini oluştur
+
+1. [Google Cloud Console](https://console.cloud.google.com) içinde OAuth onay ekranını ayarla.
+2. **Web application** türünde bir OAuth istemcisi oluştur.
+3. **Authorized JavaScript origins:** `BANANA_PUBLIC_URL` değerin.
+4. **Authorized redirect URIs:** `BANANA_PUBLIC_URL` + `/auth/v1/callback`, örneğin `https://studio.example.com/auth/v1/callback`.
+5. İstemci kimliğini ve gizli anahtarı `.env` dosyasına kopyala. Onay ekranı test modundaysa hesabını test kullanıcısı olarak ekle.
+
+## 4. Başlat
+
+```sh
+docker compose up -d --build
+docker compose ps
+```
+
+İlk açılış uygulama imajını derler ve veritabanını oluşturur. `auth` ve `storage` şemalarını oluşturunca `app` konteyneri `supabase/migrations` dosyalarını kendisi uygular, sonra `healthy` olur. Ters vekil sunucunu `127.0.0.1:8080` adresine yönlendir. Vekil sunucu özgün `Host` başlığını iletmeli ve yükleme sınırın kadar istek gövdesine izin vermeli (nginx: `proxy_set_header Host $host;`, `client_max_body_size 512m;`).
+
+**Kontrol:** `BANANA_PUBLIC_URL` adresini aç, `BANANA_OWNER_EMAIL` hesabıyla Google'dan giriş yap. Galeriyi ve **Workspace admin** düğmesini görürsün. Diğer kişileri Workspace admin'den davet et; davet edilmeyen Google hesabı reddedilir.
+
+## Claude, ChatGPT ya da başka bir asistanı bağla (MCP)
+
+Sunucu aynı zamanda **`BANANA_PUBLIC_URL/mcp`** adresinde uzak bir [MCP](https://modelcontextprotocol.io) sunucusudur. Onu özel bağlayıcı olarak ekle (Claude: **Settings → Connectors → Add custom connector**; ChatGPT: **Settings → Connectors**; Claude Code: `claude mcp add --transport http banana-studio https://studio.example.com/mcp`). Hiçbir yere anahtar kopyalanmaz:
+
+1. Asistan kendini çalışma alanının giriş servisine kaydeder.
+2. Tarayıcıda `/oauth/consent` açılır. Davet edilmiş Google hesabınla giriş yap ve **Allow** düğmesine bas.
+3. Asistan artık senin adına çalışır. Davet denetimi, sağlayıcı seçimi ve kullanım raporları web uygulamasındaki gibi uygulanır.
+
+| Araç | Görev |
+| --- | --- |
+| `list_models` | Görsel ve video modelleri; sunucuda her biri için anahtar olup olmadığı |
+| `generate_image` | İsteğe bağlı HTTPS referans görseller ve klasörle bir görsel (GPT Image 2.5, Nano Banana Pro/2.1) kuyruğa alır |
+| `generate_video` | Metinden ya da ilk/son kareden Seedance 2.0/2.5 videosu başlatır (fal.ai ya da OpenRouter anahtarı) |
+| `get_generation` | Sonucu bekler ve bir saat geçerli indirme adresi verir; biten MCP videolarını galeriye kaydeder |
+| `list_generations`, `list_folders` | Galeriye göz atar |
+
+Sonuçlar galeride diğer üretimler gibi görünür. Bağlı asistanları **`/oauth/connections`** sayfasında gör ve bağlantılarını kes; bağlantı kesilince erişimleri hemen biter. Asistanlar yönetici onayı olmadan kaydolur, ama onları yalnız davet edilmiş hesaplar onaylayabilir. Kaydı kapatmak için `BANANA_MCP_DYNAMIC_REGISTRATION=false` yaz.
 
 ## Veri, yedek ve güncelleme
 
-Her şey `banana-data` biriminde durur: `workspace.sqlite` (galeri, klasörler, şablonlar, People, işler) ve `media/` (yüklenen referanslar ve üretilen sonuçlar). Üretim yerel CPU ya da GPU kullanmaz; disk kullanımı galeriyle birlikte büyür.
+| Birim | İçerik |
+| --- | --- |
+| `banana-studio_db-data` | Postgres: hesaplar, galeri kayıtları, klasörler, People, şablonlar, işler, kullanım |
+| `banana-studio_storage-data` | Yüklenen referanslar ve üretilen görseller/videolar |
+| `banana-studio_db-config` | Postgres imajının oluşturduğu şifreleme anahtarı dosyaları |
 
-- **Yedek:** SQLite tutarlı kalsın diye konteyneri durdurun, sonra birimi kopyalayın:
+- **Veritabanı yedeği:** `docker compose exec db pg_dump -U postgres -Fc postgres > banana-db.dump`
+- **Medya yedeği:** `docker run --rm -v banana-studio_storage-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-media.tgz -C /data .`
+- **Güncelleme:** `git pull && docker compose up -d --build`. Yeni migration dosyaları açılışta uygulanır.
+- **Durdurma / kaldırma:** `docker compose down` birimleri korur; `docker compose down -v` bütün veriyi kalıcı olarak siler.
 
-  ```sh
-  docker compose stop
-  docker run --rm -v banana-studio_banana-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-data.tgz -C /data .
-  docker compose start
-  ```
+## Ayarlar
 
-- **Güncelleme:** `git pull && docker compose up -d --build`. Birim korunur.
-- **Kaldırma:** `docker compose down` veriyi korur; `docker compose down -v` veriyi kalıcı olarak siler.
+| Değişken | Varsayılan | Görev |
+| --- | --- | --- |
+| `BANANA_MAX_UPLOAD_BYTES` | `524288000` (500 MB) | Storage'ın kabul ettiği en büyük tek medya dosyası. |
+| `BANANA_IMAGE_WORKERS` | `4` | `app` içinde aynı anda işlenen görsel işi sayısı. |
+| `BANANA_MCP_DYNAMIC_REGISTRATION` | `true` | MCP istemcilerinin kendini kaydetmesine izin verir. |
 
-Birim adının önünde Compose proje adı (varsayılan olarak klasör adı) bulunur; `docker volume ls` adı gösterir.
+Bunları `.env` dosyasına yaz, sonra `docker compose up -d` çalıştır.
 
 ## Sorun giderme
 
 | Belirti | Çözüm |
 | --- | --- |
-| Konteyner hemen kapanıyor | `docker compose logs` eksik ya da geçersiz değişkeni söyler; çoğunlukla `BANANA_ACCESS_TOKEN` boştur ya da kısadır. |
-| `Invalid local host.` | Tarayıcı adresi `BANANA_PUBLIC_URL` ile eşleşmiyor ya da vekil sunucu `Host` başlığını değiştiriyor. |
-| Girişte `Cross-origin requests are not allowed.` | `BANANA_PUBLIC_URL` adresini `https://` dahil aynen açın; vekil sunucu tarayıcının `Origin` başlığını değiştirmemeli. |
-| `… is not configured. The workspace owner must add …` | O anahtarı `.env` dosyasına ekleyin ve `docker compose up -d` çalıştırın. |
-| Vekil sunucu arkasında büyük yüklemeler başarısız | Vekil sunucunun istek gövdesi sınırını yükseltin. |
+| `app` `starting` durumunda kalıyor, günlükte auth ve storage şemaları geçiyor | `docker compose logs auth storage` çıktısına bak; çoğunlukla veritabanı başka bir `POSTGRES_PASSWORD` ile oluşturulmuştur. |
+| Google `redirect_uri_mismatch` gösteriyor | Yönlendirme adresi tam olarak `BANANA_PUBLIC_URL/auth/v1/callback` olmalı. |
+| Giriş başarılı, sonra erişim reddediliyor | Bu hesap davet edilmemiş. Sahip, `BANANA_OWNER_EMAIL` içindeki adrestir. |
+| “Use the HTTPS URL of your own Supabase project” | `BANANA_PUBLIC_URL`, `localhost` dışında düz `http://`. Önüne HTTPS koy. |
+| `… is not configured. The workspace owner must add …` | O anahtarı `.env` dosyasına ekle ve `docker compose up -d` çalıştır. |
+| Büyük yüklemeler başarısız | Vekil sunucunun gövde sınırını, gerekirse `BANANA_MAX_UPLOAD_BYTES` değerini yükselt. |

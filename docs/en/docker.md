@@ -12,7 +12,7 @@
 | `rest` | `postgrest/postgrest` | Supabase Data API |
 | `storage` | `supabase/storage-api` | Supabase Storage (private `media` bucket, files on a volume) |
 
-Only `app` is published, on `127.0.0.1:8080` by default. It serves the site and forwards `/auth/v1`, `/rest/v1` and `/storage/v1` to the internal services, so the browser uses one address. Image and video generation run at the providers; the server's CPU load stays low. Expect roughly 0.5–1 GB of RAM for the whole stack and disk use that grows with the gallery.
+Only `app` is published, on `127.0.0.1:8080` by default. It serves the site and forwards `/auth/v1`, `/rest/v1` and `/storage/v1` to the internal services, so the browser uses one address. Image and video generation run at the providers; the server's CPU load stays low. The idle stack uses about 350 MB of RAM; the images need about 4 GB of disk, and media storage grows with the gallery.
 
 ## Before you start
 

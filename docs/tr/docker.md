@@ -12,7 +12,7 @@
 | `rest` | `postgrest/postgrest` | Supabase Data API |
 | `storage` | `supabase/storage-api` | Supabase Storage (özel `media` kovası, dosyalar birimde) |
 
-Yalnız `app` dışarı açılır; varsayılan adres `127.0.0.1:8080`. Siteyi sunar ve `/auth/v1`, `/rest/v1`, `/storage/v1` isteklerini iç servislere iletir. Böylece tarayıcı tek adres kullanır. Görsel ve video üretimini sağlayıcılar yapar; sunucunun CPU yükü düşük kalır. Bütün yığın için yaklaşık 0,5–1 GB RAM bekle. Disk kullanımı galeriyle birlikte büyür.
+Yalnız `app` dışarı açılır; varsayılan adres `127.0.0.1:8080`. Siteyi sunar ve `/auth/v1`, `/rest/v1`, `/storage/v1` isteklerini iç servislere iletir. Böylece tarayıcı tek adres kullanır. Görsel ve video üretimini sağlayıcılar yapar; sunucunun CPU yükü düşük kalır. Boştaki yığın yaklaşık 350 MB RAM kullanır. İmajlar yaklaşık 4 GB disk ister; medya alanı galeriyle birlikte büyür.
 
 ## Başlamadan önce
 

@@ -55,3 +55,4 @@ supabase/.temp/
 *.cer
 *.crt
 *.provisionprofile
+backups/

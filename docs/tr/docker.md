@@ -32,10 +32,10 @@ node scripts/docker-env.mjs
 Sunucuda Node yoksa aynı betiği bir konteynerde çalıştır:
 
 ```sh
-docker run --rm -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
 ```
 
-Betik `.env.example` dosyasını `.env` olarak kopyalar ve iç gizli değerleri (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`) doldurur. Dolu bir değerin üzerine asla yazmaz. `.env` dosyasını gizli tut ve yedekle: veritabanı ve anahtarlar ona bağlıdır.
+`--user` sayesinde `.env` root'a değil sana ait olur. Betik `.env.example` dosyasını `.env` olarak kopyalar ve iç gizli değerleri (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `JWT_KEYS`, `JWT_JWKS`, `CRON_SECRET`) doldurur. Dolu bir değerin üzerine asla yazmaz. `.env` dosyasını gizli tut ve yedekle: veritabanı ve anahtarlar ona bağlıdır.
 
 ## 2. `.env` dosyasını doldur
 
@@ -48,7 +48,7 @@ Betik `.env.example` dosyasını `.env` olarak kopyalar ve iç gizli değerleri 
 | `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | İsteğe bağlı yönetici fatura raporları. |
 | `BANANA_BIND`, `BANANA_PUBLISH_PORT` | `app` için sunucu adresi ve portu (varsayılan `127.0.0.1` ve `8080`). |
 
-`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` ve `CRON_SECRET` değerlerini boş bırak: bunlar Vercel kurulumuna aittir. Docker sunucusu bunları kendisi üretir.
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` ve `SUPABASE_SERVICE_ROLE_KEY` değerlerini boş bırak: bunlar Vercel kurulumuna aittir. Docker sunucusu bunları kendisi üretir.
 
 ## 3. Google OAuth istemcisini oluştur
 
@@ -65,7 +65,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-İlk açılış uygulama imajını derler ve veritabanını oluşturur. `auth` ve `storage` şemalarını oluşturunca `app` konteyneri `supabase/migrations` dosyalarını kendisi uygular, sonra `healthy` olur. Ters vekil sunucunu `127.0.0.1:8080` adresine yönlendir. Vekil sunucu özgün `Host` başlığını iletmeli ve yükleme sınırın kadar istek gövdesine izin vermeli (nginx: `proxy_set_header Host $host;`, `client_max_body_size 512m;`).
+İlk açılış uygulama imajını derler ve veritabanını oluşturur. `auth` ve `storage` şemalarını oluşturunca `app` konteyneri `supabase/migrations` dosyalarını kendisi uygular, sonra `healthy` olur. Ters vekil sunucunu `127.0.0.1:8080` adresine (ya da ayarladığın `BANANA_PUBLISH_PORT` portuna) yönlendir. Vekil sunucu özgün `Host` başlığını iletmeli, istemci adresini `X-Forwarded-For` sonuna eklemeli (Auth girişleri son girdiye göre istemci başına sınırlar) ve yükleme sınırın kadar istek gövdesine izin vermeli (nginx: `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `client_max_body_size 512m;`). Cloudflare Tunnel `X-Forwarded-For` başlığını kendisi ekler.
 
 **Kontrol:** `BANANA_PUBLIC_URL` adresini aç, `BANANA_OWNER_EMAIL` hesabıyla Google'dan giriş yap. Galeriyi ve **Workspace admin** düğmesini görürsün. Diğer kişileri Workspace admin'den davet et; davet edilmeyen Google hesabı reddedilir.
 
@@ -95,8 +95,17 @@ Sonuçlar galeride diğer üretimler gibi görünür. Bağlı asistanları **`/o
 | `banana-studio_storage-data` | Yüklenen referanslar ve üretilen görseller/videolar |
 | `banana-studio_db-config` | Postgres imajının oluşturduğu şifreleme anahtarı dosyaları |
 
-- **Veritabanı yedeği:** `docker compose exec db pg_dump -U postgres -Fc postgres > banana-db.dump`
-- **Medya yedeği:** `docker run --rm -v banana-studio_storage-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-media.tgz -C /data .`
+- **Yedek:** veritabanı ve medya dosyaları uyumlu olsun diye `app` konteynerini durdur, ikisini de özel bir klasöre yaz, sonra yeniden başlat:
+
+  ```sh
+  umask 077 && mkdir -p backups
+  docker compose stop app
+  docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/banana-db.dump
+  docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/banana-media.tgz
+  docker compose start app
+  ```
+
+  Medya komutu çalışan `storage` konteynerinin kullandığı birimi okur. Bu yüzden başka bir Compose proje adıyla da çalışır. `storage` çalışmıyorsa komut başarısız olur.
 - **Güncelleme:** `git pull && docker compose up -d --build`. Yeni migration dosyaları açılışta uygulanır.
 - **Durdurma / kaldırma:** `docker compose down` birimleri korur; `docker compose down -v` bütün veriyi kalıcı olarak siler.
 

@@ -26,6 +26,7 @@ services:
       BANANA_STORAGE_URL: http://storage:5000
       SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY:?Run node scripts/docker-env.mjs}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run node scripts/docker-env.mjs}
+      CRON_SECRET: ${CRON_SECRET:?Run node scripts/docker-env.mjs}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -68,6 +69,8 @@ services:
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
+      # Per-client rate limits; `app` rebuilds this header for every request.
+      GOTRUE_RATE_LIMIT_HEADER: X-Banana-Client-Ip
       API_EXTERNAL_URL: ${BANANA_PUBLIC_URL}/auth/v1
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres

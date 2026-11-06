@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireUser } from '../../api/_lib/auth.ts';
 import { providerAvailability } from '../../api/_lib/providerConfiguration.ts';
 import { MODEL_ROUTES, PROVIDER_LABELS } from '../../src/lib/providers.ts';
+import { estimateVideoCost } from '../../src/types.ts';
 
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const IMAGE_MODELS = { 'gpt-image-2.5-sunburst': 'GPT Image 2.5', 'gemini-3-pro-image-preview': 'Nano Banana Pro', 'gemini-nano-banana-2.1': 'Nano Banana 2.1' };
@@ -96,10 +97,35 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
   });
   const COLUMNS = 'id,type,status,image_model,prompt,aspect_ratio,resolution,folder_id,created_at,storage_path,metadata';
 
+  /** Read a response body, stopping as soon as it exceeds the video limit instead of buffering it first. */
+  const readLimited = async response => {
+    const parts = []; let size = 0;
+    for await (const part of response.body) {
+      size += part.length;
+      if (size > MAX_VIDEO_BYTES) { await response.body.cancel().catch(() => {}); throw new ToolError('The finished video exceeds the 512 MB limit.'); }
+      parts.push(part);
+    }
+    return Buffer.concat(parts);
+  };
+
+  // One poll per video at a time: parallel get_generation calls (a batch, or a
+  // retrying client) share it instead of each downloading the same file.
+  const advancing = new Map();
+  const advanceVideo = (token, user, db, job) => {
+    let pending = advancing.get(job.generation_id);
+    if (!pending) {
+      pending = pollVideo(token, user, db, job).finally(() => advancing.delete(job.generation_id));
+      advancing.set(job.generation_id, pending);
+    }
+    return pending;
+  };
+
   /** Poll a Seedance task once; when it finished, save the file and gallery row like the web app. */
-  const advanceVideo = async (token, user, db, job) => {
+  const pollVideo = async (token, user, db, job) => {
     const { status, data } = await call('seedance-video', token, { method: 'GET', query: { taskId: job.task_id } });
-    if (status !== 200 || data?.status === 'RUNNING') return { status: 'processing', progress: data?.progress };
+    // The task outcome is unknown, so it stays processing and can be polled again; the reason is passed on.
+    if (status !== 200) return { status: 'processing', status_error: data?.error || 'The video status is temporarily unavailable.' };
+    if (data?.status === 'RUNNING') return { status: 'processing', progress: data?.progress };
     const request = job.request;
     if (data?.status === 'FAILED') {
       await sql`UPDATE banana_docker.mcp_videos SET state='failed', error=${data.error || 'The provider could not generate this video.'}, finished_at=now() WHERE generation_id=${job.generation_id}`;
@@ -108,9 +134,8 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
     const source = data?.output?.[0];
     if (!source) return { status: 'processing' };
     const download = await fetch(source, { redirect: 'follow', signal: AbortSignal.timeout(300_000) });
-    if (!download.ok || Number(download.headers.get('content-length')) > MAX_VIDEO_BYTES) throw new ToolError('The finished video could not be downloaded yet. Try get_generation again.');
-    const bytes = Buffer.from(await download.arrayBuffer());
-    if (bytes.length > MAX_VIDEO_BYTES) throw new ToolError('The finished video exceeds the 512 MB limit.');
+    if (!download.ok || !download.body || Number(download.headers.get('content-length')) > MAX_VIDEO_BYTES) throw new ToolError('The finished video could not be downloaded yet. Try get_generation again.');
+    const bytes = await readLimited(download);
     const path = `${user.id}/video_${job.generation_id}.mp4`;
     const saved = await db.storage.from('media').upload(path, bytes, { contentType: 'video/mp4', upsert: true });
     if (saved.error) throw new ToolError('The finished video could not be saved. Try get_generation again.');
@@ -151,7 +176,7 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       if (status !== 202) throw new ToolError(data?.error || 'The image could not be queued.');
       return { generation_id: id, status: 'queued', next: 'Call get_generation with wait_seconds to receive the image.' };
     },
-    async generate_video(args, token, user) {
+    async generate_video(args, token, user, db) {
       const model = choice(args.model, Object.keys(VIDEO_MODELS), 'seedance-2.5', 'model');
       const available = providerAvailability(), provider = VIDEO_PROVIDERS.find(name => MODEL_ROUTES[model].includes(name) && available[name]);
       if (!provider) throw new ToolError('Video generation through MCP needs a fal.ai (FAL_KEY) or OpenRouter (OPENROUTER_API_KEY) key on the server.');
@@ -165,6 +190,11 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       if (status !== 200 || !data?.taskId) throw new ToolError(data?.error || 'The video could not be started.');
       const id = `mcp_${randomUUID()}`;
       await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, task_id, provider, request) VALUES (${id}, ${user.id}, ${data.taskId}, ${data.provider || provider}, ${sql.json(request)})`;
+      // Logged once, when the provider accepts the task, like the web app's logVideoUsage.
+      const cost = estimateVideoCost(model, request.quality, request.duration, false, 0, 'generate', 0, 0);
+      const { error: usageError } = await db.from('usage_logs').insert({ user_id: user.id, action: 'video_generate', model: `${model}-${request.mode.replace(/_/g, '-')}`,
+        prompt: request.prompt.slice(0, 500), image_count: 1, estimated_cost: cost?.usd ?? null });
+      if (usageError) console.error('MCP video usage could not be recorded:', usageError.message);
       return { generation_id: id, status: 'processing', next: 'Call get_generation with wait_seconds; the video usually takes a few minutes.' };
     },
     async get_generation(args, token, user, db) {
@@ -174,9 +204,10 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
         if (job?.state === 'processing') {
           const progress = await advanceVideo(token, user, db, job);
           if (progress.status === 'failed') return { generation_id: id, type: 'video', status: 'failed', error: progress.error };
-          if (progress.status === 'processing') { if (Date.now() + 5000 > deadline) return { generation_id: id, type: 'video', status: 'processing', ...(progress.progress != null ? { progress: progress.progress } : {}) }; await sleep(5000); continue; }
+          if (progress.status === 'processing') { if (Date.now() + 5000 > deadline) return { generation_id: id, type: 'video', status: 'processing', ...(progress.progress != null ? { progress: progress.progress } : {}), ...(progress.status_error ? { status_error: progress.status_error } : {}) }; await sleep(5000); continue; }
         } else if (job?.state === 'failed') return { generation_id: id, type: 'video', status: 'failed', error: job.error };
-        const { data: row, error } = await db.from('generations').select(COLUMNS).eq('id', id).maybeSingle();
+        // RLS lets administrators read every row; an assistant only ever sees its own person's gallery.
+        const { data: row, error } = await db.from('generations').select(COLUMNS).eq('id', id).eq('user_id', user.id).maybeSingle();
         if (error) throw new ToolError('The gallery is temporarily unavailable.');
         if (!row) throw new ToolError('No generation with this ID exists in your gallery.');
         if (['completed', 'failed'].includes(row.status) || Date.now() + 2000 > deadline) return describe(db, row);
@@ -184,7 +215,7 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       }
     },
     async list_generations(args, token, user, db) {
-      let query = db.from('generations').select(COLUMNS).order('created_at', { ascending: false }).limit(Math.min(Math.max(Number(args.limit) || 20, 1), 50));
+      let query = db.from('generations').select(COLUMNS).eq('user_id', user.id).order('created_at', { ascending: false }).limit(Math.min(Math.max(Number(args.limit) || 20, 1), 50));
       if (args.type) query = query.eq('type', choice(args.type, ['image', 'video'], undefined, 'type'));
       if (args.folder_id) query = query.eq('folder_id', string(args.folder_id, 'folder_id', 200));
       const { data, error } = await query;
@@ -193,7 +224,7 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       return { generations: await Promise.all(data.map(row => describe(db, row))), processing_videos: pending.map(row => row.generation_id) };
     },
     async list_folders(args, token, user, db) {
-      const { data, error } = await db.from('folders').select('id,name,parent_id').order('name');
+      const { data, error } = await db.from('folders').select('id,name,parent_id').eq('user_id', user.id).order('name');
       if (error) throw new ToolError('The gallery is temporarily unavailable.');
       return { folders: data };
     },

@@ -32,10 +32,10 @@ node scripts/docker-env.mjs
 Without Node on the server, run the same script in a container:
 
 ```sh
-docker run --rm -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/w -w /w node:24-slim node scripts/docker-env.mjs
 ```
 
-The script copies `.env.example` to `.env` and fills the internal secrets (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`). It never overwrites a value that is already set. Keep `.env` private and back it up: the database and keys depend on it.
+`--user` makes `.env` belong to you, not root. The script copies `.env.example` to `.env` and fills the internal secrets (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `JWT_KEYS`, `JWT_JWKS`, `CRON_SECRET`). It never overwrites a value that is already set. Keep `.env` private and back it up: the database and keys depend on it.
 
 ## 2. Fill in `.env`
 
@@ -48,7 +48,7 @@ The script copies `.env.example` to `.env` and fills the internal secrets (`POST
 | `FAL_ADMIN_KEY`, `OPENAI_ADMIN_KEY`, `OPENAI_PROJECT_ID` | Optional admin billing reports. |
 | `BANANA_BIND`, `BANANA_PUBLISH_PORT` | Host address and port of `app` (default `127.0.0.1` and `8080`). |
 
-Leave `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` empty: they belong to the Vercel deployment. The Docker server derives them.
+Leave `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SERVICE_ROLE_KEY` empty: they belong to the Vercel deployment. The Docker server derives them.
 
 ## 3. Create the Google OAuth client
 
@@ -65,7 +65,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-The first start builds the app image and creates the database. The `app` container applies `supabase/migrations` automatically when `auth` and `storage` have created their schemas, then reports `healthy`. Point your reverse proxy at `127.0.0.1:8080`. It must pass the original `Host` header and allow request bodies up to your upload limit (nginx: `proxy_set_header Host $host;`, `client_max_body_size 512m;`).
+The first start builds the app image and creates the database. The `app` container applies `supabase/migrations` automatically when `auth` and `storage` have created their schemas, then reports `healthy`. Point your reverse proxy at `127.0.0.1:8080` (or the `BANANA_PUBLISH_PORT` you set). It must pass the original `Host` header, append the client address to `X-Forwarded-For` (Auth rate-limits sign-in per client by its last entry) and allow request bodies up to your upload limit (nginx: `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `client_max_body_size 512m;`). Cloudflare Tunnel sets `X-Forwarded-For` itself.
 
 **Checkpoint:** open `BANANA_PUBLIC_URL`, sign in with Google using `BANANA_OWNER_EMAIL`, and you see the gallery and **Workspace admin**. Invite other people from Workspace admin; an uninvited Google account is refused.
 
@@ -95,8 +95,17 @@ Results appear in the gallery like any other generation. See and disconnect assi
 | `banana-studio_storage-data` | Uploaded references and generated images/videos |
 | `banana-studio_db-config` | Database encryption key material created by the Postgres image |
 
-- **Database backup:** `docker compose exec db pg_dump -U postgres -Fc postgres > banana-db.dump`
-- **Media backup:** `docker run --rm -v banana-studio_storage-data:/data -v "$PWD":/backup busybox tar czf /backup/banana-media.tgz -C /data .`
+- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again:
+
+  ```sh
+  umask 077 && mkdir -p backups
+  docker compose stop app
+  docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/banana-db.dump
+  docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/banana-media.tgz
+  docker compose start app
+  ```
+
+  The media command reads the volume the running `storage` container uses, so it also works with another Compose project name; it fails when `storage` is not running.
 - **Update:** `git pull && docker compose up -d --build`. New migrations are applied at start.
 - **Stop / remove:** `docker compose down` keeps the volumes; `docker compose down -v` deletes all data permanently.
 

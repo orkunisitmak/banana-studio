@@ -5,7 +5,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { applyMigrations, ensureDockerSchema, promoteOwner } from './database.mjs';
@@ -26,7 +25,8 @@ const upstreams = {
 // The functions build their Supabase clients from these, exactly as on Vercel.
 process.env.SUPABASE_URL = publicOrigin;
 env('SUPABASE_PUBLISHABLE_KEY'); env('SUPABASE_SERVICE_ROLE_KEY');
-process.env.CRON_SECRET ||= randomBytes(32).toString('hex');
+// Stored H3 usage signatures are verified with it, so it must not change on restart.
+env('CRON_SECRET');
 const webRoot = process.env.BANANA_WEB_ROOT || path.join(here, 'web');
 const migrationsDirectory = process.env.BANANA_MIGRATIONS || path.join(here, 'migrations');
 const pagesRoot = process.env.BANANA_PAGES_ROOT || path.join(here, 'pages');
@@ -126,10 +126,21 @@ const serveStatic = (req, res, pathname) => {
   fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
 };
 
+// Auth rate-limits by this header (GOTRUE_RATE_LIMIT_HEADER). It is always
+// rebuilt here, never passed through. The published port is reachable only by
+// the reverse proxy, which appends the real client as the last
+// X-Forwarded-For entry; anything before it is client-supplied and ignored.
+const clientIp = req => {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map(part => part.trim()).filter(Boolean);
+  return forwarded.at(-1) || req.socket.remoteAddress || 'unknown';
+};
+
 // Streams both directions, so large TUS/media uploads are never buffered here.
 const proxy = (req, res, { prefix, target }, url) => {
   const destination = new URL(target.replace(/\/$/, '') + url.pathname.slice(prefix.length) + url.search);
-  const headers = { ...req.headers, ...forwardedHeaders(prefix), host: destination.host };
+  const client = clientIp(req);
+  // Services also log X-Forwarded-For; they get only the trusted entry.
+  const headers = { ...req.headers, ...forwardedHeaders(prefix), 'x-forwarded-for': client, 'x-banana-client-ip': client, host: destination.host };
   const upstream = http.request(destination, { method: req.method, headers }, response => {
     res.writeHead(response.statusCode, response.headers);
     response.pipe(res);

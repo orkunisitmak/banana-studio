@@ -25,6 +25,8 @@ const apiKey = (role, secret) => {
 
 const filled = [];
 if (!value('POSTGRES_PASSWORD')) { set('POSTGRES_PASSWORD', randomBytes(24).toString('hex')); filled.push('POSTGRES_PASSWORD'); }
+// Signs H3 usage reconciliation records; it must survive restarts.
+if (!value('CRON_SECRET')) { set('CRON_SECRET', randomBytes(32).toString('hex')); filled.push('CRON_SECRET'); }
 let regenerateKeys = false;
 if (!value('JWT_SECRET')) { set('JWT_SECRET', randomBytes(32).toString('hex')); filled.push('JWT_SECRET'); regenerateKeys = true; }
 for (const [name, role] of [['ANON_KEY', 'anon'], ['SERVICE_ROLE_KEY', 'service_role']]) {

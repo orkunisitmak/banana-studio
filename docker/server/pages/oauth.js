@@ -3,8 +3,8 @@
 // stored session, so a person already signed in to the gallery is not asked again.
 const app = document.getElementById('app');
 const storageKey = `banana-studio:${location.host}:auth`;
-const config = await (await fetch('/api/workspace-config', { cache: 'no-store' })).json();
-const apikey = config.supabasePublishableKey;
+const verifierKey = `banana-studio:${location.host}:oauth-pkce`;
+let apikey;
 
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
 const render = (...children) => app.replaceChildren(...children);
@@ -19,16 +19,25 @@ const auth = async (path, { method = 'GET', token, body, query } = {}) => {
 };
 const save = session => { localStorage.setItem(storageKey, JSON.stringify(session)); return session; };
 
-/** The stored web-app session, refreshed when close to expiry, or one returned from Google sign-in. */
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/**
+ * The stored web-app session, refreshed when close to expiry, or one returned from
+ * Google sign-in. Sign-in uses PKCE: only a code whose verifier this tab created
+ * is exchanged, so a crafted return link cannot sign the page in as someone else.
+ */
 async function session() {
-  const hash = new URLSearchParams(location.hash.slice(1));
-  if (hash.get('access_token')) {
-    history.replaceState(null, '', location.pathname + location.search);
-    const access_token = hash.get('access_token'), expires_in = Number(hash.get('expires_in')) || 3600;
-    const user = await auth('/user', { token: access_token });
-    return save({ access_token, refresh_token: hash.get('refresh_token'), token_type: 'bearer', expires_in, expires_at: Math.floor(Date.now() / 1000) + expires_in, user });
+  const params = new URLSearchParams(location.search), code = params.get('code'), failure = params.get('error_description');
+  if (code || failure) {
+    const verifier = sessionStorage.getItem(verifierKey);
+    sessionStorage.removeItem(verifierKey);
+    for (const name of ['code', 'error', 'error_code', 'error_description']) params.delete(name);
+    history.replaceState(null, '', location.pathname + (params.size ? `?${params}` : ''));
+    if (!code) throw new Error(failure);
+    if (!verifier) throw new Error('This sign-in was not started on this page. Start again from your assistant.');
+    const result = await auth('/token', { method: 'POST', query: { grant_type: 'pkce' }, body: { auth_code: code, code_verifier: verifier } });
+    return save({ ...result, expires_at: result.expires_at || Math.floor(Date.now() / 1000) + (result.expires_in || 3600) });
   }
-  if (hash.get('error_description')) throw new Error(hash.get('error_description'));
   let stored; try { stored = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { stored = null; }
   if (!stored?.access_token) return null;
   if ((stored.expires_at || 0) * 1000 > Date.now() + 60_000) return stored;
@@ -36,10 +45,19 @@ async function session() {
   catch { localStorage.removeItem(storageKey); return null; }
 }
 
+const startGoogle = async () => {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  sessionStorage.setItem(verifierKey, verifier);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const url = new URL('/auth/v1/authorize', location.origin);
+  for (const [name, value] of Object.entries({ provider: 'google', redirect_to: location.href, code_challenge: challenge, code_challenge_method: 's256' })) url.searchParams.set(name, value);
+  location.assign(url);
+};
+
 const signIn = () => render(
   el('h1', {}, 'Sign in to Banana Studio'),
   el('p', {}, 'Sign in with the Google account that was invited to this workspace.'),
-  el('div', { className: 'actions' }, el('a', { className: 'button primary', href: `/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(location.href)}` }, 'Continue with Google')),
+  el('div', { className: 'actions' }, el('button', { type: 'button', className: 'primary', onclick: () => void startGoogle().catch(error => fail(error.message)) }, 'Continue with Google')),
 );
 
 async function consent(current) {
@@ -86,6 +104,10 @@ async function connections(current) {
 }
 
 try {
+  const config = await fetch('/api/workspace-config', { cache: 'no-store' });
+  if (!config.ok) throw new Error('The workspace is temporarily unavailable. Try again.');
+  apikey = (await config.json().catch(() => null))?.supabasePublishableKey;
+  if (!apikey) throw new Error('The workspace configuration is incomplete.');
   const current = await session();
   if (!current) signIn();
   else if (location.pathname === '/oauth/connections') await connections(current);

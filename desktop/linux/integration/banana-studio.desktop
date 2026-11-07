@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Banana Studio Linux Alpha
+Comment=Local AI media workspace (development alpha)
+Exec=/opt/banana-studio/banana-studio
+Icon=banana-studio
+Terminal=false
+Categories=Graphics;
+StartupWMClass=banana-studio-linux-alpha

@@ -46,3 +46,64 @@ test('a deleted secret in an earlier commit still blocks publishing the reposito
     assert.ok(result.findings.some(f => f.rule === 'provider-credential' && f.object));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test('linked worktree metadata is excluded without skipping source, tracked artifacts or history', async () => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'banana-worktree-audit-'));
+  const repository = path.join(temporary, 'Users', 'fixture', 'repository');
+  const worktree = path.join(temporary, 'linked');
+  await fs.mkdir(repository, { recursive: true });
+  const git = (...args) => execFileSync('git', args, { cwd: repository, stdio: 'pipe' });
+  const secret = ['sk', 'proj', 'A'.repeat(40)].join('-');
+  try {
+    git('init', '-b', 'main');
+    git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+    await fs.writeFile(path.join(repository, 'source.ts'), secret);
+    git('add', '.'); git('commit', '-m', 'Synthetic historical credential');
+    await fs.writeFile(path.join(repository, 'source.ts'), 'export const clean = true;');
+    git('add', '.'); git('commit', '-m', 'Clean source');
+    git('worktree', 'add', '--detach', worktree, 'HEAD');
+    const pointer = await fs.readFile(path.join(worktree, '.git'));
+    assert.ok(inspectContent('.git', Buffer.from(pointer.toString().replaceAll('\\', '/'))).some(f => f.rule === 'machine-path'));
+    const clean = await auditPublicRelease(worktree);
+    assert.equal(clean.ok, true); assert.equal(clean.files, 1);
+    assert.deepEqual(await fs.readFile(path.join(worktree, '.git')), pointer);
+    const historical = await auditPublicRelease(worktree, { history: true });
+    assert.ok(historical.findings.some(f => f.rule === 'provider-credential' && f.object));
+    await fs.mkdir(path.join(worktree, 'dist'));
+    await fs.writeFile(path.join(worktree, 'dist', 'bundle.js'), secret);
+    execFileSync('git', ['add', '-f', 'dist/bundle.js'], { cwd: worktree, stdio: 'pipe' });
+    await fs.writeFile(path.join(worktree, '.env.local'), 'SYNTHETIC=');
+    await fs.writeFile(path.join(worktree, 'untracked.ts'), secret);
+    const unsafe = await auditPublicRelease(worktree);
+    assert.ok(unsafe.findings.some(f => f.path === 'dist/bundle.js' && f.rule === 'tracked-build-product'));
+    assert.ok(unsafe.findings.some(f => f.path === 'dist/bundle.js' && f.rule === 'provider-credential'));
+    assert.ok(unsafe.findings.some(f => f.path === '.env.local' && f.rule === 'private-file'));
+    assert.ok(unsafe.findings.some(f => f.path === 'untracked.ts' && f.rule === 'provider-credential'));
+    // A pointer with extra content is not exempt, even if Git accepts its first line.
+    await fs.appendFile(path.join(worktree, '.git'), secret + '\n');
+    assert.ok((await auditPublicRelease(worktree)).findings.some(f => f.path === '.git' && f.rule === 'provider-credential'));
+    // Git marks this file hidden on Windows; opening it with 'w' fails with EPERM.
+    const metadata = await fs.open(path.join(worktree, '.git'), 'r+');
+    try {
+      await metadata.writeFile(pointer);
+      await metadata.truncate(pointer.length); // Remove the appended synthetic credential.
+    } finally { await metadata.close(); }
+    assert.deepEqual(await fs.readFile(path.join(worktree, '.git')), pointer);
+  } finally {
+    try { git('worktree', 'remove', '--force', worktree); } catch { /* Cleanup after a failed assertion. */ }
+    await fs.rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('an arbitrary .git file or .git symlink remains scanned', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'banana-gitfile-audit-'));
+  try {
+    const secret = ['sk', 'proj', 'A'.repeat(40)].join('-');
+    await fs.writeFile(path.join(root, '.git'), secret);
+    assert.ok((await auditPublicRelease(root)).findings.some(f => f.path === '.git' && f.rule === 'provider-credential'));
+    await fs.rm(path.join(root, '.git'));
+    await fs.mkdir(path.join(root, 'target'));
+    await fs.symlink(path.join(root, 'target'), path.join(root, '.git'), process.platform === 'win32' ? 'junction' : 'dir');
+    assert.ok((await auditPublicRelease(root)).findings.some(f => f.path === '.git' && f.rule === 'unreviewed-symlink'));
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

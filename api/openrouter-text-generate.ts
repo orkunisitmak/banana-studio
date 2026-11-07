@@ -23,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
   const parts = body?.contents?.parts;
   const usageContext = body?.usageContext;
-  if (!['anthropic/claude-opus-5.5', 'gpt-6.1-sol', 'gemini-3.8-flash'].includes(body?.model)) return res.status(400).json({ error: 'Unsupported text model' });
+  if (!['anthropic/claude-opus-5.5', 'gpt-6.1-sol', 'gemini-3.8-flash', 'openrouter/free'].includes(body?.model)) return res.status(400).json({ error: 'Unsupported text model' });
   const model = body.model as string;
   const upstreamModel = OPENROUTER_MODELS[model];
   const effort = body.reasoningEffort ?? DEFAULT_OPENROUTER_REASONING;

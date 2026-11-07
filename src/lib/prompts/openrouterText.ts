@@ -1,6 +1,7 @@
 // Server-safe definitions. Verified against OpenRouter's live catalog 2026-10-14.
 // https://openrouter.ai/anthropic/claude-opus-5.5
 export const OPENROUTER_TEXT_MODEL = 'anthropic/claude-opus-5.5' as const;
+export const OPENROUTER_FREE_TEXT_MODEL = 'openrouter/free' as const;
 export const OPENROUTER_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type OpenRouterReasoningEffort = typeof OPENROUTER_REASONING_EFFORTS[number];
 export const DEFAULT_OPENROUTER_REASONING: OpenRouterReasoningEffort = 'medium';
@@ -10,6 +11,7 @@ export const isOpenRouterReasoningEffort = (value: unknown): value is OpenRouter
 /** Prefer OpenRouter's actual request cost, including caching/provider routing.
  * Token pricing is a fallback for responses without native cost accounting. */
 export const calculateOpenRouterTextCost = (usage: any, model: string = OPENROUTER_TEXT_MODEL): number | null => {
+  if (model === OPENROUTER_FREE_TEXT_MODEL) return 0;
   const valid = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
   if (usage?.cost != null) return valid(usage.cost) ? usage.cost : null;
   if (model !== OPENROUTER_TEXT_MODEL) return null;

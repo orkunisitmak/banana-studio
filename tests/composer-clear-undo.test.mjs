@@ -21,7 +21,7 @@ const code = transformSync(`module.exports = env => {
   const { config, onChange, undoStack, setUndoStack, setEnhanceError, refInputRef,
     getPersonDefinitions, getPersonId, removeH3MaxReferenceImages, isH3VideoConfig,
     h3PromptSupported, preEnhancePrompt, maxReferenceVideos, maxReferenceAudios, setAttachmentError, getH3MaxUIState,
-    insertUploadDraftRef, insertSourceUploadRef, getReferenceImageLimit } = env;
+    insertUploadDraftRef, insertSourceUploadRef, getReferenceImageLimit, galleryDropEpochRef } = env;
   ${source.slice(start, end)}
   return { clear: handleClearAll, undo: handleUndo, remove: handleRemoveImage, revert: handleRevertEnhancedPrompt };
 };`, { loader: 'ts', format: 'cjs' }).code;
@@ -38,7 +38,7 @@ function scenario(initial) {
     onChange: update => { config = typeof update === 'function' ? update(config) : update; },
     setUndoStack: update => { undoStack = update(undoStack); },
     setEnhanceError() {}, refInputRef: { current: null },
-    insertUploadDraftRef, insertSourceUploadRef,
+    insertUploadDraftRef, insertSourceUploadRef, galleryDropEpochRef: { current: 0 },
     maxReferenceVideos: limits.videos, maxReferenceAudios: limits.audios, setAttachmentError: update => { shown = typeof update === 'function' ? update(shown) : update; errors.push(shown); },
     isH3VideoConfig: config.mode === 'video' && config.videoModel === 'minimax-h3',
     h3PromptSupported: true, preEnhancePrompt: config.originalPrompt ?? null,

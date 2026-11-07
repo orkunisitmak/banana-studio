@@ -134,6 +134,11 @@ const readMediaDuration = (url: string, kind: 'video' | 'audio'): Promise<number
 };
 
 const readVideoDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'video');
+// A saved Video Edit result has no length of its own (-1 = source length), so measure it like an uploaded file.
+export const galleryVideoDuration = async (media: { url: string; videoOutputDuration?: number; videoDuration?: number }): Promise<number | undefined> => {
+  const known = media.videoOutputDuration != null && media.videoOutputDuration > 0 ? media.videoOutputDuration : media.videoDuration;
+  return known && known > 0 ? known : readVideoDuration(media.url);
+};
 const readAudioDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'audio');
 
 const uploadReferenceVideo = async (file: File, allowNativeWebm = false): Promise<ReferenceVideo> => {
@@ -418,6 +423,8 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
+  const galleryDropEpochRef = useRef(0);
+  const galleryDropChainRef = useRef<Promise<void>>(Promise.resolve());
   const insertSourceUploadRef = useRef(false);
 
   useLayoutEffect(() => {
@@ -973,6 +980,7 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleClearAll = () => {
+    galleryDropEpochRef.current += 1;
     if (config.prompt || config.referenceImages.length > 0 || config.personGroups?.length || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0) {
         setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions, clearedConfig: config }]);
         onChange({
@@ -1529,19 +1537,40 @@ export const Controls: React.FC<ControlsProps> = ({
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
                 return;
               }
-              const MAX_VIDEOS = maxReferenceVideos;
-              if ((config.referenceVideos?.length || 0) >= MAX_VIDEOS) {
-                setAttachmentError(`Maximum of ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} allowed for the selected action.`);
-                return;
+              // Reading the length can take seconds: hold Generate meanwhile, add drops in the order they were dropped,
+              // and skip the add if Clear ran while waiting.
+              const epoch = galleryDropEpochRef.current;
+              const turn = galleryDropChainRef.current;
+              let release: () => void = () => {};
+              galleryDropChainRef.current = new Promise<void>(resolve => { release = resolve; });
+              setUploadingReferenceVideos(count => count + 1);
+              // Start reading now so slow drops overlap; the chain only orders the adds.
+              const durationRead = galleryVideoDuration(media);
+              try {
+                await turn;
+                const duration = await durationRead;
+                if (epoch !== galleryDropEpochRef.current) return;
+                // Merge into the latest draft and its latest limit.
+                let full = false;
+                flushSync(() => onChange(previous => {
+                  if ((previous.referenceVideos?.length || 0) >= attachLimitsRef.current.videos) {
+                    full = true;
+                    return previous;
+                  }
+                  return {
+                    ...previous,
+                    referenceVideos: [
+                      ...(previous.referenceVideos || []),
+                      { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration }
+                    ],
+                    mode: 'video',
+                  };
+                }));
+                if (full) setAttachmentError(`Maximum of ${attachLimitsRef.current.videos} videos allowed for the selected action.`);
+              } finally {
+                release();
+                setUploadingReferenceVideos(count => count - 1);
               }
-              onChange({
-                ...config,
-                referenceVideos: [
-                  ...(config.referenceVideos || []),
-                  { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration: media.videoDuration }
-                ],
-                mode: 'video',
-              });
               return;
             }
             const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));
@@ -1975,7 +2004,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+    : uploadingReferenceVideos === 0 && !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
   if (isMinimized) {
     return (

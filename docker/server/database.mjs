@@ -71,10 +71,14 @@ export async function ensureDockerSchema(sql) {
   await sql`CREATE SCHEMA IF NOT EXISTS banana_docker`;
   await sql`REVOKE ALL ON SCHEMA banana_docker FROM PUBLIC, anon, authenticated, service_role`;
   await sql`CREATE TABLE IF NOT EXISTS banana_docker.owner_bootstrap (email text PRIMARY KEY, authorized_at timestamptz NOT NULL DEFAULT now(), promoted_at timestamptz)`;
+  // A row is written before the provider is called (`starting`, no task yet), so
+  // a restart between the provider accepting the task and the task ID being
+  // saved can still be matched to provider_tasks and billed exactly once
+  // (usage_id is the usage_logs key).
   await sql`CREATE TABLE IF NOT EXISTS banana_docker.mcp_videos (
     generation_id text PRIMARY KEY, user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    task_id text NOT NULL, provider text NOT NULL, request jsonb NOT NULL,
-    state text NOT NULL DEFAULT 'processing' CHECK (state IN ('processing','completed','failed')), error text,
+    task_id text UNIQUE, provider text NOT NULL, request jsonb NOT NULL, usage_id uuid NOT NULL,
+    state text NOT NULL DEFAULT 'starting' CHECK (state IN ('starting','processing','completed','failed')), error text,
     created_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz)`;
   await sql`CREATE INDEX IF NOT EXISTS mcp_videos_user_state ON banana_docker.mcp_videos (user_id, state, created_at DESC)`;
 }

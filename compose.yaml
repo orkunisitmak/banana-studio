@@ -10,6 +10,8 @@ services:
     build: .
     image: banana-studio-server:local
     restart: unless-stopped
+    # Stopping waits for running image generations to save their results.
+    stop_grace_period: 5m
     depends_on:
       auth: { condition: service_healthy }
       rest: { condition: service_healthy }

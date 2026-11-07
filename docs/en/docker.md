@@ -95,19 +95,21 @@ Results appear in the gallery like any other generation. See and disconnect assi
 | `banana-studio_storage-data` | Uploaded references and generated images/videos |
 | `banana-studio_db-config` | Database encryption key material created by the Postgres image |
 
-- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again. Each backup gets a new timestamped name, so older backups are never overwritten. If a step fails, the partial files are removed and `app` is started again:
+- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again. Stopping `app` waits for running image generations to save their results (up to five minutes); queued ones continue after the start. Only one backup runs at a time: a second one stops at once and leaves `app` alone. Each backup gets a new name and never replaces an older file. If a step fails, the partial files are removed and `app` is started again:
 
   ```sh
   (
     set -eu
     umask 077 && mkdir -p backups
-    stamp=$(date +%Y%m%d-%H%M%S)
-    trap 'rm -f backups/.partial-*; docker compose start app' EXIT
+    mkdir backups/.lock 2>/dev/null || { echo 'Another backup is running (or remove a stale backups/.lock).' >&2; exit 1; }
+    trap 'docker compose start app; rm -rf backups/.lock' EXIT
+    name="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    for file in "backups/banana-db-$name.dump" "backups/banana-media-$name.tgz"; do [ ! -e "$file" ] || { echo "$file exists." >&2; exit 1; }; done
     docker compose stop app
-    docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/.partial-db
-    docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/.partial-media
-    mv backups/.partial-db "backups/banana-db-$stamp.dump"
-    mv backups/.partial-media "backups/banana-media-$stamp.tgz"
+    docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/.lock/db
+    docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/.lock/media
+    mv backups/.lock/db "backups/banana-db-$name.dump"
+    mv backups/.lock/media "backups/banana-media-$name.tgz"
   )
   ```
 

@@ -9,7 +9,13 @@ import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { applyMigrations, ensureDockerSchema, promoteOwner } from './database.mjs';
 import { createMcpServer } from './mcp.mjs';
+import { drainImageJobs } from './queue.mjs';
 
+// Node runs as PID 1, which ignores SIGTERM without a handler, so one is
+// registered before the slow startup steps. Until the server is ready there is
+// nothing to finish.
+let shutdown = () => process.exit(0);
+process.on('SIGTERM', () => shutdown()); process.on('SIGINT', () => shutdown());
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** Print a configuration error and stop the process. */
 const fatal = message => { console.error(message); process.exit(1); };
@@ -221,6 +227,5 @@ ready = true;
 console.log(`Banana Studio is ready at ${publicOrigin}`);
 setInterval(() => { void sweep().catch(() => {}); if (owner) void promoteOwner(sql, owner).catch(() => {}); }, 60_000).unref();
 void sweep().catch(() => {});
-/** Stop accepting requests, then exit once open requests finish. */
-const shutdown = () => server.close(() => process.exit(0));
-process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+// Stop accepting requests and starting image jobs, then exit once running jobs have saved their results.
+shutdown = () => { server.close(); void drainImageJobs().then(() => process.exit(0)); };

@@ -10,6 +10,7 @@ export const IMAGE_JOB_TOPIC = 'banana-image-jobs';
 const concurrency = Math.max(1, Number(process.env.BANANA_IMAGE_WORKERS) || 4);
 const scheduled = new Map();
 const running = new Set();
+let draining = false, drained = null;
 
 /** Process one image job; any failure reschedules it (after the job's own delay, else 60 s). */
 const run = async job => {
@@ -23,6 +24,7 @@ const run = async job => {
 };
 /** Start due jobs until the worker limit is reached. */
 const pump = () => {
+  if (draining) { if (!running.size) drained?.(); return; }
   const now = Date.now();
   for (const [id, { job, due }] of scheduled) {
     if (running.size >= concurrency) break;
@@ -38,6 +40,14 @@ const schedule = (job, delay) => {
   pump();
 };
 setInterval(pump, 1000).unref();
+
+/**
+ * Stop starting jobs and resolve once the running ones have finished, so a
+ * stop (`docker compose stop`, an update, a backup) never cuts off a paid
+ * generation before its result is saved. Queued jobs stay in Postgres and the
+ * sweep re-publishes them after the next start.
+ */
+export const drainImageJobs = () => new Promise(resolve => { draining = true; drained = resolve; pump(); });
 
 /** Same contract as the hosted queue: deliver, then confirm publication in Postgres. */
 export const publishImageJob = async (db, job) => {

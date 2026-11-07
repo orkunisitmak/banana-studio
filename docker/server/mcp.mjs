@@ -218,7 +218,10 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       try {
         await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, provider, request, usage_id, usage_model, usage_cost)
           VALUES (${id}, ${user.id}, ${provider}, ${sql.json(request)}, ${randomUUID()}, ${`${model}-${request.mode.replace(/_/g, '-')}`}, ${cost?.usd ?? null})`;
-      } catch { throw new ToolError('The workspace could not record the video request. Nothing was sent to the provider; try again.'); }
+      } catch (error) {
+        console.error('MCP video request could not be recorded:', error?.message || error);
+        throw new ToolError('The workspace could not record the video request. Nothing was sent to the provider; try again.');
+      }
       const { status, data } = await mcpVideoRequest.run(id, () => call('seedance-video', token, { body: request }));
       if (status !== 200 || !data?.taskId) {
         const message = data?.error || 'The video could not be started.';

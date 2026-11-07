@@ -10,8 +10,9 @@ services:
     build: .
     image: banana-studio-server:local
     restart: unless-stopped
-    # Stopping waits for running image generations to save their results.
-    stop_grace_period: 5m
+    # Stopping waits for open requests (an MCP video poll can wait 50 s, then
+    # download for up to 300 s and save) and running image generations.
+    stop_grace_period: 10m
     depends_on:
       auth: { condition: service_healthy }
       rest: { condition: service_healthy }

@@ -95,7 +95,7 @@ Sonuçlar galeride diğer üretimler gibi görünür. Bağlı asistanları **`/o
 | `banana-studio_storage-data` | Yüklenen referanslar ve üretilen görseller/videolar |
 | `banana-studio_db-config` | Postgres imajının oluşturduğu şifreleme anahtarı dosyaları |
 
-- **Yedek:** veritabanı ve medya dosyaları uyumlu olsun diye `app` konteynerini durdur, ikisini de özel bir klasöre yaz, sonra yeniden başlat. `app` durdurulurken çalışan görsel üretimlerinin sonuçlarını kaydetmesi beklenir (en çok beş dakika); sıradaki işler yeniden başlatmadan sonra sürer. Aynı anda yalnız bir yedek çalışır: ikinci yedek hemen durur ve `app` konteynerine dokunmaz. Her yedek yeni bir ad alır ve eski bir dosyanın yerine geçmez. Bir adım başarısız olursa yarım dosyalar silinir ve `app` yeniden başlatılır:
+- **Yedek:** veritabanı ve medya dosyaları uyumlu olsun diye `app` konteynerini durdur, ikisini de özel bir klasöre yaz, sonra yeniden başlat. `app` durdurulurken açık isteklerin ve çalışan görsel üretimlerinin sonuçlarını kaydetmesi beklenir (en çok on dakika); sıradaki işler yeniden başlatmadan sonra sürer. Aynı anda yalnız bir yedek çalışır: ikinci yedek hemen durur ve `app` konteynerine dokunmaz. Her yedek yeni bir ad alır ve eski bir dosyanın yerine geçmez. Bir adım başarısız olursa yarım dosyalar silinir ve `app` yeniden başlatılır:
 
   ```sh
   (

@@ -95,7 +95,7 @@ Results appear in the gallery like any other generation. See and disconnect assi
 | `banana-studio_storage-data` | Uploaded references and generated images/videos |
 | `banana-studio_db-config` | Database encryption key material created by the Postgres image |
 
-- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again. Stopping `app` waits for running image generations to save their results (up to five minutes); queued ones continue after the start. Only one backup runs at a time: a second one stops at once and leaves `app` alone. Each backup gets a new name and never replaces an older file. If a step fails, the partial files are removed and `app` is started again:
+- **Backup:** stop `app` so the database and the media files match, write both into a private directory, then start it again. Stopping `app` waits for open requests and running image generations to save their results (up to ten minutes); queued ones continue after the start. Only one backup runs at a time: a second one stops at once and leaves `app` alone. Each backup gets a new name and never replaces an older file. If a step fails, the partial files are removed and `app` is started again:
 
   ```sh
   (

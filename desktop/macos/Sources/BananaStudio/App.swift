@@ -68,7 +68,7 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updater.checkForUpdates(self)
     }
     @objc func showKeys() {
-        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
+        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Claude plan token (from `claude setup-token`) runs Opus 5.5 on your Claude subscription. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
         alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         var rows: [(ProviderKey, NSSecureTextField, NSButton)] = []
@@ -76,11 +76,11 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             let row = NSStackView(); row.orientation = .horizontal; row.spacing = 10
             let label = NSTextField(labelWithString: key.label); label.widthAnchor.constraint(equalToConstant: 124).isActive = true
             let field = NSSecureTextField(); field.widthAnchor.constraint(equalToConstant: 290).isActive = true
-            field.placeholderString = ((try? KeyVault.read(key)) ?? nil) != nil ? "Saved in Keychain" : "Paste your API key"
+            field.placeholderString = ((try? KeyVault.read(key)) ?? nil) != nil ? "Saved in Keychain" : key == .claude ? "Paste the claude setup-token output" : "Paste your API key"
             let remove = NSButton(checkboxWithTitle: "Remove", target: nil, action: nil)
             row.addArrangedSubview(label); row.addArrangedSubview(field); row.addArrangedSubview(remove); stack.addArrangedSubview(row); rows.append((key, field, remove))
         }
-        stack.frame = NSRect(x: 0, y: 0, width: 560, height: 224)
+        stack.frame = NSRect(x: 0, y: 0, width: 560, height: 262)
         stack.widthAnchor.constraint(equalToConstant: 560).isActive = true
         alert.accessoryView = stack
         guard alert.runModal() == .alertFirstButtonReturn else { return }

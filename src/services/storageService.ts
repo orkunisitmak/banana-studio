@@ -187,8 +187,12 @@ export const uploadVideoBlobToPublicUrl = async (
     if (!userId) return null;
     const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, '_');
     const path = `${userId}/${safePrefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${ext}`;
-    const projectId = new URL(SUPABASE_URL).hostname.split('.')[0];
-    if (!projectId) return null;
+    // Supabase-hosted projects take large uploads on their direct storage host;
+    // a self-hosted gateway (Docker) serves the same TUS endpoint on its own origin.
+    const project = new URL(SUPABASE_URL);
+    const resumableEndpoint = project.hostname.endsWith('.supabase.co')
+      ? `https://${project.hostname.split('.')[0]}.storage.supabase.co/storage/v1/upload/resumable`
+      : `${project.origin}/storage/v1/upload/resumable`;
 
     return await new Promise<string | null>((resolve) => {
       let settled = false;
@@ -199,7 +203,7 @@ export const uploadVideoBlobToPublicUrl = async (
       };
 
       const upload = new Upload(blob, {
-        endpoint: `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`,
+        endpoint: resumableEndpoint,
         retryDelays: [0, 3_000, 5_000, 10_000, 20_000],
         headers: {
           authorization: `Bearer ${session.access_token}`,

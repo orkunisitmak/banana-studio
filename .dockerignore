@@ -14,3 +14,10 @@ outputs
 *.p12
 *.pfx
 .DS_Store
+.build
+docs
+tests
+desktop/macos
+desktop/windows
+docker/db
+backups

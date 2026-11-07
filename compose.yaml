@@ -1,0 +1,169 @@
+# Self-hosted Banana Studio web workspace: the hosted app with its own Supabase
+# services (Postgres, Auth, PostgREST, Storage). Only `app` is published.
+#   node scripts/docker-env.mjs     # creates .env with fresh secrets
+#   docker compose up -d --build
+# See docs/en/docker.md.
+name: banana-studio
+
+services:
+  app:
+    build: .
+    image: banana-studio-server:local
+    restart: unless-stopped
+    # Stopping waits for open requests (an MCP video poll can wait 50 s, then
+    # download for up to 300 s and save) and running image generations.
+    stop_grace_period: 10m
+    depends_on:
+      auth: { condition: service_healthy }
+      rest: { condition: service_healthy }
+      storage: { condition: service_healthy }
+    ports:
+      - "${BANANA_BIND:-127.0.0.1}:${BANANA_PUBLISH_PORT:-8080}:8080"
+    environment:
+      BANANA_IMAGE_WORKERS: ${BANANA_IMAGE_WORKERS:-4}
+      # X-Forwarded-For is trusted only when the port is loopback-only (see docs).
+      BANANA_BIND: ${BANANA_BIND:-127.0.0.1}
+      BANANA_TRUST_PROXY: ${BANANA_TRUST_PROXY:-}
+      BANANA_PUBLIC_URL: ${BANANA_PUBLIC_URL:?Set BANANA_PUBLIC_URL in .env}
+      BANANA_OWNER_EMAIL: ${BANANA_OWNER_EMAIL:-}
+      BANANA_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      BANANA_AUTH_URL: http://auth:9999
+      BANANA_REST_URL: http://rest:3000
+      BANANA_STORAGE_URL: http://storage:5000
+      SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY:?Run node scripts/docker-env.mjs}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run node scripts/docker-env.mjs}
+      CRON_SECRET: ${CRON_SECRET:?Run node scripts/docker-env.mjs}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      FAL_KEY: ${FAL_KEY:-}
+      EVOLINK_API_KEY: ${EVOLINK_API_KEY:-}
+      FAL_ADMIN_KEY: ${FAL_ADMIN_KEY:-}
+      OPENAI_ADMIN_KEY: ${OPENAI_ADMIN_KEY:-}
+      OPENAI_PROJECT_ID: ${OPENAI_PROJECT_ID:-}
+
+  db:
+    image: supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "log_min_messages=fatal"]
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      PGPORT: 5432
+      POSTGRES_DB: postgres
+      PGDATABASE: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/docker-env.mjs}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      JWT_EXP: 3600
+    volumes:
+      - ./docker/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ./docker/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+      - db-data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      # Per-client rate limits; `app` rebuilds this header for every request.
+      GOTRUE_RATE_LIMIT_HEADER: X-Banana-Client-Ip
+      API_EXTERNAL_URL: ${BANANA_PUBLIC_URL}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${BANANA_PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: ${BANANA_PUBLIC_URL},${BANANA_PUBLIC_URL}/**
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?Run node scripts/docker-env.mjs}
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:?Run node scripts/docker-env.mjs}
+      GOTRUE_JWT_ISSUER: ${BANANA_PUBLIC_URL}/auth/v1
+      # Google is the app's only sign-in method, as in the hosted deployment.
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${BANANA_PUBLIC_URL}/auth/v1/callback
+      # OAuth 2.1 server for MCP clients (Claude, ChatGPT, Cursor…). They register
+      # themselves; the person still signs in and approves at /oauth/consent.
+      GOTRUE_OAUTH_SERVER_ENABLED: "true"
+      GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH: /oauth/consent
+      GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION: ${BANANA_MCP_DYNAMIC_REGISTRATION:-true}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rest:
+    image: postgrest/postgrest:v14.18
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_JWKS:?Run node scripts/docker-env.mjs}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: 3600
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+      # The baseline migration is applied after start; reload the schema cache on DDL.
+      PGRST_DB_CHANNEL_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  storage:
+    image: supabase/storage-api:v1.89.12
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_healthy }
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      JWT_JWKS: ${JWT_JWKS}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      STORAGE_PUBLIC_URL: ${BANANA_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: ${BANANA_MAX_UPLOAD_BYTES:-524288000}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      GLOBAL_S3_BUCKET: banana-studio
+      TENANT_ID: banana-studio
+      REGION: local
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://storage:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  db-data:
+  db-config:
+  storage-data:

@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Monitor, Smartphone, Sun, Moon, Menu, Search, Mic, Bell, Home, PlaySquare, Compass, MoreVertical, Shuffle, Crosshair, Youtube, CheckCircle2, History, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Monitor, Smartphone, Sun, Moon, Menu, Search, Mic, Bell, Home, PlaySquare, Compass, MoreVertical, Shuffle, Crosshair, Youtube, CheckCircle2, History, ChevronLeft, ChevronRight, Grid } from 'lucide-react';
 import type { GeneratedMedia } from '../types';
 import { DESKTOP_PREVIEW_WIDTHS, MOBILE_PREVIEW_WIDTHS, PREVIEW_EXAMPLES, getPreviewLayout, type PreviewDevice } from './youtubePreview';
 import { youtubePreviewStyles } from './youtubePreviewStyles';
+import { YouTubeSafeZoneOverlay } from './YouTubeSafeZoneOverlay';
+import { useTranslation } from '../lib/i18n';
 
 interface Props {
   media: GeneratedMedia;
@@ -53,6 +55,7 @@ const PreviewImage: React.FC<{ media: GeneratedMedia; refreshSource: Props['refr
 };
 
 export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, channelName, currentIndex, totalImages, favoritesOnly, onNavigate, onClose, refreshSource }) => {
+  const { language } = useTranslation();
   const [device, setDevice] = useState<PreviewDevice>(() => window.innerWidth < 768 ? 'mobile' : 'desktop');
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [desktopWidth, setDesktopWidth] = useState(0);
@@ -63,6 +66,7 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
   }, []);
   const [mobileWidth, setMobileWidth] = useState(() => window.innerWidth < 390 ? (window.innerWidth < 360 ? 320 : 360) : 390);
   const [dark, setDark] = useState(false);
+  const [showSafeZones, setShowSafeZones] = useState(false);
   const [titleEdit, setTitleEdit] = useState<{ source: string; value: string } | null>(null);
   const title = titleEdit?.source === initialTitle ? titleEdit.value : initialTitle || 'Your next video';
   const [channel, setChannel] = useState(channelName || 'Your channel');
@@ -146,6 +150,18 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
       <button type="button" className="ytp-icon-button" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setDark(value => !value)}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
       <button type="button" className="ytp-action" onClick={() => setPosition(value => (value + 1) % 6)}><Shuffle size={16} />Move thumbnail</button>
       <button type="button" className="ytp-action" onClick={reveal}><Crosshair size={16} />Find mine</button>
+      <button
+        type="button"
+        className="ytp-action"
+        style={showSafeZones ? { background: 'rgba(234, 179, 8, 0.25)', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.5)' } : undefined}
+        onClick={() => setShowSafeZones(value => !value)}
+        title={language === 'tr' ? 'YouTube Güvenli Bölgeleri ve Üçler Kuralını Aç/Kapat' : 'Toggle YouTube Safe Zones & Rule of Thirds'}
+      >
+        <Grid size={16} />
+        {showSafeZones
+          ? (language === 'tr' ? 'Güvenli Bölgeler AÇIK' : 'Safe Zones ON')
+          : (language === 'tr' ? 'Güvenli Bölgeler' : 'Safe Zones')}
+      </button>
       <span className="ytp-dimensions" role="status">{Math.round(layout.thumbnailWidth)} × {Math.round(layout.thumbnailHeight)} px <span>· 100% size</span></span>
     </div>
     <details className="ytp-edit"><summary>Edit preview title &amp; channel</summary><div>
@@ -164,7 +180,7 @@ export const YouTubePreviewDialog: React.FC<Props> = ({ media, initialTitle, cha
             const cardTitle = isSelected ? title || 'Your next video' : sample.title;
             const cardChannel = isSelected ? channel || 'Your channel' : sample.channel;
             return <article className="ytp-card" key={isSelected ? 'selected-preview' : `context-${sampleIndex}`} ref={isSelected ? selectedCard : undefined} data-selected-thumbnail={isSelected || undefined} aria-label={isSelected ? 'Your video preview' : 'Sample video'}>
-              <div className="ytp-thumbnail">{isSelected ? <PreviewImage key={`${media.id}:${media.url}`} media={media} refreshSource={refreshSource} /> : <ChannelThumbnail index={sampleIndex} />}<span className="ytp-duration">{isSelected ? '12:48' : sample.duration}</span></div>
+              <div className="ytp-thumbnail" style={{ position: 'relative' }}>{isSelected ? <><PreviewImage key={`${media.id}:${media.url}`} media={media} refreshSource={refreshSource} /><YouTubeSafeZoneOverlay isVisible={showSafeZones} /></> : <ChannelThumbnail index={sampleIndex} />}<span className="ytp-duration">{isSelected ? '12:48' : sample.duration}</span></div>
               <div className="ytp-card-details"><span className="ytp-avatar" style={{ background: '#6d43c0' }} aria-hidden="true">{isSelected ? cardChannel.charAt(0).toUpperCase() : <img src={`/youtube-preview/${sample.avatar}`} alt="" loading="lazy" />}</span><div className="ytp-card-copy"><h3>{cardTitle}</h3><p className="ytp-metadata"><span>{cardChannel}</span>{!isSelected && <CheckCircle2 size={13} aria-label="Verified channel" />}<span>▷ {isSelected ? '128K' : sample.views}</span><span>{isSelected ? '1d ago' : sample.age}</span></p></div><MoreVertical size={20} aria-hidden="true" /></div>
             </article>;
           })}</div>

@@ -14,6 +14,10 @@ test('release auditing detects secrets without returning their values', () => {
   assert.equal(inspectContent('.env.local', Buffer.from('EMPTY=')).at(0).rule, 'private-file');
   assert.deepEqual(inspectContent('.env.example', Buffer.from('OPENAI_API_KEY=\nSUPABASE_URL=\n')), []);
   assert.ok(inspectContent('.env.example', Buffer.from('OPENAI_API_KEY=anything\n')).length);
+  const windowsPath = ['const workspace = "' + String.fromCharCode(67) + ':', ['Us','ers'].join(''), 'Ada', 'Documents', 'banana";'].join(String.fromCharCode(92));
+  assert.deepEqual(inspectContent('source.ts', Buffer.from(windowsPath)), [{ path: 'source.ts', rule: 'machine-path' }]);
+  assert.deepEqual(inspectContent('unix.ts', Buffer.from(['const workspace = "', ['/', 'home/Runner/Documents/banana'].join(''), '";'].join(''))), [{ path: 'unix.ts', rule: 'machine-path' }]);
+  assert.deepEqual(inspectContent('unix.ts', Buffer.from('const workspace = "/home/runner/Documents/banana";')), []);
 });
 
 test('fresh source scans reject unexpected private files and external symlinks', async () => {

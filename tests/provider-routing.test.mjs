@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider } from '../src/lib/providers.ts';
+import { MODEL_ROUTES, PROVIDER_KEYS, PROVIDER_LABELS, resolveProvider, sanitizeProviderAvailability, sanitizeProviderPreferences } from '../src/lib/providers.ts';
+import { browserIsOffline } from '../src/lib/networkStatus.ts';
 import { falSeedanceInput, openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
 import { resizePixels } from '../src/lib/images/resizePixels.ts';
 import { build } from 'esbuild';
@@ -15,6 +16,11 @@ const {getImageCostPreview} = await import('data:text/javascript;base64,'+Buffer
 import { LocalWorkspace } from '../desktop/server/store.mjs';
 import { createMediaUploader } from '../desktop/server/uploads.mjs';
 
+test('offline state is conservative and only treats an explicit false as offline',()=>{
+  assert.equal(browserIsOffline(false),true);
+  assert.equal(browserIsOffline(true),false);
+  assert.equal(browserIsOffline(undefined),false);
+});
 test('every key combination selects only a configured route for the same model',()=>{
   const providers=Object.keys(PROVIDER_LABELS);
   for(let mask=0;mask<2**providers.length;mask++){
@@ -57,6 +63,21 @@ test('resizing a generated tier cannot change any source pixel outside selected 
   const result=compositeEditPixels(source,resized,12,12,region);
   for(let y=0;y<12;y++)for(let x=0;x<12;x++)if(x<3||x>=9||y<3||y>=9){const i=(y*12+x)*4;assert.deepEqual(Array.from(result.slice(i,i+4)),Array.from(source.slice(i,i+4)));}
   assert.equal(result[(6*12+6)*4],210);
+});
+test('corrupt route preferences are quarantined and cannot poison provider selection',()=>{
+  for(const corrupt of [null, false, 3, 'fal', [], {'seedance-2.5':null}, {'seedance-2.5':'foreign'}]) {
+    assert.deepEqual(sanitizeProviderPreferences(corrupt), {});
+  }
+  assert.deepEqual(sanitizeProviderPreferences({
+    'seedance-2.5':'fal',
+    'minimax-h3':'evolink',
+    'anthropic/claude-opus-5.5':'auto',
+    unknown:'openrouter',
+  }), {'seedance-2.5':'fal','anthropic/claude-opus-5.5':'auto'});
+});
+test('provider availability is normalized to strict booleans before routing',()=>{
+  assert.deepEqual(sanitizeProviderAvailability({openai:true,gemini:false,openrouter:'true',unknown:true}),{openai:true,gemini:false});
+  assert.deepEqual(sanitizeProviderAvailability(null),{});
 });
 test('native route preferences survive restart and cannot select a foreign model/provider pair',()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-routing-'));let store=new LocalWorkspace(directory);

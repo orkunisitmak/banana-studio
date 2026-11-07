@@ -6,11 +6,20 @@
 // invitation checks, provider routing, the durable image queue, usage logging
 // and row-level security apply unchanged.
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createClient } from '@supabase/supabase-js';
 import { requireUser } from '../../api/_lib/auth.ts';
 import { providerAvailability } from '../../api/_lib/providerConfiguration.ts';
 import { MODEL_ROUTES, PROVIDER_LABELS } from '../../src/lib/providers.ts';
 import { estimateVideoCost } from '../../src/types.ts';
+
+/**
+ * The MCP video a server-side call belongs to. The gateway sends it as
+ * `X-Banana-Mcp-Video` with the call's Supabase requests, and a database trigger
+ * links the provider task to that video in the same transaction that registers
+ * the task (see ensureDockerSchema).
+ */
+export const mcpVideoRequest = new AsyncLocalStorage();
 
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const IMAGE_MODELS = { 'gpt-image-2.5-sunburst': 'GPT Image 2.5', 'gemini-3-pro-image-preview': 'Nano Banana Pro', 'gemini-nano-banana-2.1': 'Nano Banana 2.1' };
@@ -159,40 +168,13 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
     return { status: 'completed' };
   };
 
-  /**
-   * Attach the provider's task to a `starting` row and record its usage. The
-   * usage row's key is fixed per video, so a repeat (retry, recovery) adds nothing.
-   */
-  const linkTask = async (generationId, taskId, provider) => {
-    const [job] = await sql`UPDATE banana_docker.mcp_videos SET task_id=${taskId}, provider=${provider}, state='processing'
-      WHERE generation_id=${generationId} AND state='starting' RETURNING *`;
-    if (!job) return;
-    const { videoModel, mode, quality, duration, prompt } = job.request;
-    const cost = estimateVideoCost(videoModel, quality, duration, false, 0, 'generate', 0, 0);
-    await sql`INSERT INTO public.usage_logs (id, user_id, action, model, prompt, image_count, estimated_cost)
-      VALUES (${job.usage_id}, ${job.user_id}, 'video_generate', ${`${videoModel}-${mode.replace(/_/g, '-')}`}, ${prompt.slice(0, 500)}, 1, ${cost?.usd ?? null})
-      ON CONFLICT (id) DO NOTHING`;
-  };
-
-  /**
-   * A `starting` row whose call never returned (restart, lost link). Its task is
-   * the one provider task of this person, registered after the row, that no
-   * other video claims. Nothing is ever resubmitted.
-   */
-  const STARTING_GRACE_MS = 2 * 60_000, STARTING_GIVE_UP_MS = 15 * 60_000;
-  const recoverStarting = async job => {
-    const age = Date.now() - new Date(job.created_at).getTime();
-    if (age < STARTING_GRACE_MS) return { state: 'starting' };
-    const tasks = await sql`SELECT p.provider, p.task_id FROM public.provider_tasks p
-      WHERE p.user_id=${job.user_id} AND p.created_at >= ${job.created_at} AND p.created_at < ${new Date(new Date(job.created_at).getTime() + STARTING_GIVE_UP_MS)}
-        AND NOT EXISTS (SELECT 1 FROM banana_docker.mcp_videos v WHERE v.task_id = p.task_id)
-        AND NOT EXISTS (SELECT 1 FROM public.generations g WHERE g.task_id = p.task_id)`;
-    if (tasks.length === 1) { await linkTask(job.generation_id, tasks[0].task_id, tasks[0].provider); return { state: 'processing' }; }
-    if (tasks.length > 1) return { state: 'starting', status_error: 'The provider task for this video cannot be identified automatically. Do not start it again; ask the administrator to check provider task history.' };
-    if (age < STARTING_GIVE_UP_MS) return { state: 'starting' };
+  /** A `starting` video older than any start call can run was never confirmed by the provider. */
+  const STARTING_GIVE_UP_MS = 15 * 60_000;
+  const expireStarting = async job => {
+    if (Date.now() - new Date(job.created_at).getTime() < STARTING_GIVE_UP_MS) return null;
     const error = 'The provider never confirmed this video. It was probably not started; if it was billed, ask the administrator to check provider task history before trying again.';
     await sql`UPDATE banana_docker.mcp_videos SET state='failed', error=${error}, finished_at=now() WHERE generation_id=${job.generation_id} AND state='starting'`;
-    return { state: 'failed', error };
+    return error;
   };
 
   const tools = {
@@ -230,25 +212,20 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
         aspectRatio: choice(args.aspect_ratio, ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], '16:9', 'aspect_ratio'),
         generateAudio: args.generate_audio !== false, imageUrls: frames, provider, ...(args.folder_id ? { folderId: string(args.folder_id, 'folder_id', 200) } : {}) };
       const id = `mcp_${randomUUID()}`;
-      // Recorded before the paid call, so a restart after the provider accepts
-      // the task can still be matched to it (see recoverStarting).
-      try { await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, provider, request, usage_id) VALUES (${id}, ${user.id}, ${provider}, ${sql.json(request)}, ${randomUUID()})`; }
-      catch { throw new ToolError('The workspace could not record the video request. Nothing was sent to the provider; try again.'); }
-      const { status, data } = await call('seedance-video', token, { body: request });
+      // Recorded before the paid call with everything its usage row needs; the
+      // trigger fills in the task and the usage when the provider accepts it.
+      const cost = estimateVideoCost(model, request.quality, request.duration, false, 0, 'generate', 0, 0);
+      try {
+        await sql`INSERT INTO banana_docker.mcp_videos (generation_id, user_id, provider, request, usage_id, usage_model, usage_cost)
+          VALUES (${id}, ${user.id}, ${provider}, ${sql.json(request)}, ${randomUUID()}, ${`${model}-${request.mode.replace(/_/g, '-')}`}, ${cost?.usd ?? null})`;
+      } catch { throw new ToolError('The workspace could not record the video request. Nothing was sent to the provider; try again.'); }
+      const { status, data } = await mcpVideoRequest.run(id, () => call('seedance-video', token, { body: request }));
       if (status !== 200 || !data?.taskId) {
         const message = data?.error || 'The video could not be started.';
-        // A provider error may still have created a task (for example when its
-        // registration failed); such a row stays `starting` for recovery.
+        // A 5xx can follow an accepted task whose registration failed; that row
+        // stays `starting` and expires with a pointer to the provider history.
         if (status < 500) await sql`UPDATE banana_docker.mcp_videos SET state='failed', error=${message}, finished_at=now() WHERE generation_id=${id} AND state='starting'`.catch(() => {});
         throw new ToolError(message);
-      }
-      for (let attempt = 1; ; attempt++) {
-        try { await linkTask(id, data.taskId, data.provider || provider); break; }
-        catch (error) {
-          if (attempt < 3) { await sleep(1000 * attempt); continue; }
-          console.error(`MCP video task ${data.taskId} was accepted but could not be linked to ${id}:`, error.message);
-          break; // The row stays `starting`; get_generation recovers it from provider_tasks.
-        }
       }
       return { generation_id: id, status: 'processing', next: 'Call get_generation with wait_seconds; the video usually takes a few minutes.' };
     },
@@ -257,10 +234,9 @@ export function createMcpServer({ publicOrigin, handlers, invoke, sql, anonKey }
       for (;;) {
         const [job] = await sql`SELECT * FROM banana_docker.mcp_videos WHERE generation_id=${id} AND user_id=${user.id}`;
         if (job?.state === 'starting') {
-          const recovered = await recoverStarting(job);
-          if (recovered.state === 'failed') return { generation_id: id, type: 'video', status: 'failed', error: recovered.error };
-          if (recovered.state === 'processing') continue;
-          if (Date.now() + 5000 > deadline) return { generation_id: id, type: 'video', status: 'processing', ...(recovered.status_error ? { status_error: recovered.status_error } : {}) };
+          const error = await expireStarting(job);
+          if (error) return { generation_id: id, type: 'video', status: 'failed', error };
+          if (Date.now() + 5000 > deadline) return { generation_id: id, type: 'video', status: 'processing' };
           await sleep(5000); continue;
         }
         if (job?.state === 'processing') {

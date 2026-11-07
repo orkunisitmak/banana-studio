@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { applyMigrations, ensureDockerSchema, promoteOwner } from './database.mjs';
-import { createMcpServer } from './mcp.mjs';
+import { createMcpServer, mcpVideoRequest } from './mcp.mjs';
 import { drainImageJobs } from './queue.mjs';
 
 // Node runs as PID 1, which ignores SIGTERM without a handler, so one is
@@ -60,6 +60,10 @@ globalThis.fetch = (input, init) => {
   const target = new URL(route.target.replace(/\/$/, '') + url.pathname.slice(route.prefix.length) + url.search);
   const headers = new Headers(init?.headers ?? request?.headers);
   for (const [name, value] of Object.entries(forwardedHeaders(route.prefix))) headers.set(name, value);
+  // Set only here, from the MCP video this call runs for (see link_mcp_video).
+  headers.delete('x-banana-mcp-video');
+  const video = mcpVideoRequest.getStore();
+  if (video) headers.set('x-banana-mcp-video', video);
   return nativeFetch(request ? new Request(target, request) : target, { ...init, headers });
 };
 
@@ -159,7 +163,8 @@ const proxy = (req, res, { prefix, target }, url) => {
   const destination = new URL(target.replace(/\/$/, '') + url.pathname.slice(prefix.length) + url.search);
   const client = clientIp(req);
   // Services also log X-Forwarded-For; they get only the trusted entry.
-  const headers = { ...req.headers, ...forwardedHeaders(prefix), 'x-forwarded-for': client, 'x-banana-client-ip': client, host: destination.host };
+  const { 'x-banana-mcp-video': _ignored, ...incoming } = req.headers;
+  const headers = { ...incoming, ...forwardedHeaders(prefix), 'x-forwarded-for': client, 'x-banana-client-ip': client, host: destination.host };
   const upstream = http.request(destination, { method: req.method, headers }, response => {
     res.writeHead(response.statusCode, response.headers);
     response.pipe(res);
@@ -227,5 +232,11 @@ ready = true;
 console.log(`Banana Studio is ready at ${publicOrigin}`);
 setInterval(() => { void sweep().catch(() => {}); if (owner) void promoteOwner(sql, owner).catch(() => {}); }, 60_000).unref();
 void sweep().catch(() => {});
-// Stop accepting requests and starting image jobs, then exit once running jobs have saved their results.
-shutdown = () => { server.close(); void drainImageJobs().then(() => process.exit(0)); };
+// Stop accepting requests and starting image jobs; exit only when open requests
+// have finished and running jobs have saved their results. Repeated signals
+// wait for the same shutdown.
+let stopping;
+shutdown = () => {
+  stopping ??= Promise.all([new Promise(resolve => server.close(() => resolve())), drainImageJobs()]).then(() => process.exit(0));
+  return stopping;
+};

@@ -102,14 +102,14 @@ Results appear in the gallery like any other generation. See and disconnect assi
     set -eu
     umask 077 && mkdir -p backups
     mkdir backups/.lock 2>/dev/null || { echo 'Another backup is running (or remove a stale backups/.lock).' >&2; exit 1; }
-    trap 'docker compose start app; rm -rf backups/.lock' EXIT
+    trap 'status=$?; docker compose start app || status=1; rm -rf backups/.lock; exit $status' EXIT
     name="$(date -u +%Y%m%dT%H%M%SZ)-$$"
     for file in "backups/banana-db-$name.dump" "backups/banana-media-$name.tgz"; do [ ! -e "$file" ] || { echo "$file exists." >&2; exit 1; }; done
     docker compose stop app
     docker compose exec -T db pg_dump -U postgres -Fc postgres > backups/.lock/db
     docker run --rm --volumes-from "$(docker compose ps -q storage)" busybox tar czf - -C /var/lib/storage . > backups/.lock/media
     mv backups/.lock/db "backups/banana-db-$name.dump"
-    mv backups/.lock/media "backups/banana-media-$name.tgz"
+    mv backups/.lock/media "backups/banana-media-$name.tgz" || { rm -f "backups/banana-db-$name.dump"; exit 1; }
   )
   ```
 

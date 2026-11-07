@@ -13,6 +13,10 @@ internal static class Program
     {
         if (args.Contains("--test-vault")) { try { KeyVault.Test(); return 0; } catch { return 1; } }
         if (args.Contains("--test-window-placement")) { try { WindowPlacement.Test(); return 0; } catch { return 1; } }
+        if (args.Contains("--test-updater")) { try { Updater.Test(); return 0; } catch { return 1; } }
+        if (args.Length == 3 && args[0] == "--test-update-manifest") { try { Updater.TestManifest(args[1], args[2]); return 0; } catch { return 1; } }
+        if (args.Length == 4 && args[0] == "--apply-update") { ApplicationConfiguration.Initialize(); return Updater.RunApply(args[1], args[2], args[3]); }
+        Updater.ReportHealthWhenReady(args);
         ApplicationConfiguration.Initialize();
         using var instance = new Mutex(true, "Local\\BananaStudio.Workspace", out var first);
         if (!first) { MessageBox.Show("Banana Studio is already running. Open its existing window.", "Banana Studio"); return 0; }
@@ -30,6 +34,8 @@ internal sealed class StudioWindow : Form
     private Rectangle normalWindowBounds;
     private bool placementReady;
     private bool fullscreenTransition;
+    private bool updateInProgress;
+    private bool healthReported;
     private FormWindowState lastVisibleState = FormWindowState.Normal;
     private readonly Label status = new() { Text = "Opening your local workspace…", ForeColor = Color.LightGray, BackColor = Color.FromArgb(13, 17, 23), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
 
@@ -44,7 +50,7 @@ internal sealed class StudioWindow : Form
         var keyItem = new ToolStripMenuItem("Provider API Keys…", null, async (_, _) => await ShowKeys()) { ShortcutKeys = Keys.Control | Keys.Oemcomma, ShortcutKeyDisplayString = "Ctrl+," };
         file.DropDownItems.Add(keyItem);
         file.DropDownItems.Add("Open Local Data Folder", null, (_, _) => Process.Start(new ProcessStartInfo(WorkspaceProcess.DataDirectory) { UseShellExecute = true }));
-        file.DropDownItems.Add("Check for Updates…", null, (_, _) => OpenExternal("https://github.com/orkunisitmak/banana-studio/releases/latest"));
+        file.DropDownItems.Add("Check for Updates…", null, async (_, _) => await CheckForUpdates());
         file.DropDownItems.Add("Exit", null, (_, _) => Close());
         var view = new ToolStripMenuItem("View");
         view.DropDownItems.Add("Full Screen (F11, Esc to exit)", null, (_, _) => ToggleFullScreen());
@@ -117,6 +123,42 @@ internal sealed class StudioWindow : Form
     }
     private bool Local(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && origin != null && uri.Scheme == origin.Scheme && uri.Host == origin.Host && uri.Port == origin.Port;
     private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+    private async Task CheckForUpdates()
+    {
+        var publicKey = Updater.PublicKey;
+        var current = Updater.CurrentVersion;
+        if (publicKey == null || current == null || updateInProgress) { if (!updateInProgress) OpenExternal(Updater.ReleasesPage); return; }
+        updateInProgress = true;
+        try
+        {
+            using var checking = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            var update = await Updater.Check(publicKey, current, checking.Token);
+            if (update == null) { MessageBox.Show(this, $"Banana Studio {current} is the latest version.", "Check for Updates"); return; }
+            if (MessageBox.Show(this, $"Banana Studio {update.Version} is available. You have {current}.\n\nInstall it now? Let running jobs finish first. The app closes, updates and reopens. Your gallery and keys are kept.", "Check for Updates", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            status.Text = $"Downloading and verifying Banana Studio {update.Version}…"; status.Visible = true; status.BringToFront();
+            using var downloading = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+            var stage = await Updater.Prepare(update, publicKey, downloading.Token);
+            try { Updater.StartApply(stage); } catch { Updater.DiscardStage(stage); throw; }
+            Close();
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            status.Visible = false;
+            if (MessageBox.Show(this, "The update could not be completed, and nothing was changed. " + error.Message + "\n\nOpen the releases page to download it manually?", "Check for Updates", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) OpenExternal(Updater.ReleasesPage);
+        }
+        finally { updateInProgress = false; }
+    }
+
+    // Only a loaded workspace page proves an update works; a started server alone does not.
+    // NavigationCompleted fires for every navigation, so this runs once.
+    private void ReportWorkspaceOpened()
+    {
+        if (healthReported) return;
+        healthReported = true;
+        Updater.ReportHealthy();
+        _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => Updater.CleanFinishedStages(), TaskScheduler.Default);
+    }
+
     private void ShowFailure(string message) { status.Text = message; status.Visible = true; status.BringToFront(); }
     private async Task StartWorkspace()
     {
@@ -165,7 +207,11 @@ internal sealed class StudioWindow : Form
                 // Unicode text, undo and selection retain real clipboard semantics.
             };
             var ready = await workspace.Start(); origin = ready.Origin;
-            core.NavigationCompleted += (_, args) => { if (args.IsSuccess && Local(core.Source)) status.Visible = false; else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio."); };
+            core.NavigationCompleted += (_, args) =>
+            {
+                if (args.IsSuccess && Local(core.Source)) { status.Visible = false; ReportWorkspaceOpened(); }
+                else if (!args.IsSuccess) ShowFailure("The workspace could not open. Reopen Banana Studio.");
+            };
             var request = environment.CreateWebResourceRequest(new Uri(origin, "/local/bootstrap").AbsoluteUri, "GET", null, "X-Banana-Bootstrap: " + ready.Bootstrap + "\r\n");
             core.NavigateWithWebResourceRequest(request);
         }

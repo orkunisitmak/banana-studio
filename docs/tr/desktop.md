@@ -56,7 +56,7 @@ Yerel veritabanı ayrıca şifrelenmez; dosyaları Mac hesap güvenliği, FileVa
 
 Bu **imzasız topluluk sürümüdür**. Windows, tanınmayan yayıncı uyarısı gösterebilir. Arşivin bu reponun yayınından geldiğini ve SHA-256 değerinin `verification-windows-x64.json` ile eşleştiğini kontrol et. Windows güvenliğini kapatma, başka kaynaktan paket kullanma.
 
-Galeri `%LOCALAPPDATA%\Banana Studio\` içindedir; **File → Open Local Data Folder** ile aç. Yedeklemeden önce uygulamayı kapat ve tüm klasörü yedekle. Anahtarlar Credential Manager'da ayrı tutulur. Windows güncellemeleri elle yapılır: **File → Check for Updates…** GitHub Releases'i açar; uygulamayı kapat, yeni klasörü ayıkla ve çalıştır. Galeri ve anahtarlar uygulama klasörünün dışında kalır.
+Galeri `%LOCALAPPDATA%\Banana Studio\` içindedir; **File → Open Local Data Folder** ile aç. Yedeklemeden önce uygulamayı kapat ve tüm klasörü yedekle. Anahtarlar Credential Manager'da ayrı tutulur. **File → Check for Updates…**, sürümde güncelleme anahtarı varsa doğrulanan güncellemeyi kurar ve uygulamayı yeniden açar; önce çalışan işlerin bitmesini bekle. Yeni sürüm açılamazsa önceki sürüm geri yüklenir. Anahtarsız sürüm bunun yerine GitHub Releases'i açar: uygulamayı kapat, yeni klasörü ayıkla ve çalıştır. Galeri ve anahtarlar uygulama klasörünün dışında kalır.
 
 Mac ve Windows aynı React arayüzünü ve SQLite çalışma alanını kullanır. Yerel menüler, dosya seçiciler ve anahtar saklama yöntemi işletim sistemine uygundur. Windows paketine Windows CI üzerinde derleme, Credential Manager ve korumalı edit entegrasyon testleri uygulanır; tam yayın kabulü için etkileşimli Windows UI testi de gerekir. [Platform karşılaştırması ve kısayollar](desktop-parity.md).
 

@@ -816,6 +816,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const createFolderDialogRef = useRef<HTMLDivElement>(null);
+  const createFolderOpenerRef = useRef<HTMLElement | null>(null);
 
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -1150,6 +1151,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     const handleModalKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isSavingFolder) {
         setIsCreatingFolder(false);
+        createFolderOpenerRef.current?.focus({ preventScroll: true });
         setNewFolderName("");
         setFolderCreateError(null);
         return;
@@ -1374,7 +1376,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // --- Actions ---
 
-  const openCreateFolderModal = () => {
+  const openCreateFolderModal = (event: React.MouseEvent<HTMLElement>) => {
     if (isReadOnly) return;
     setNewFolderName("");
     setFolderCreateError(null);
@@ -1382,12 +1384,15 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsNotificationPanelOpen(false);
     setIsGridMenuOpen(false);
     setIsUserMenuOpen(false);
+    // The button itself: Safari does not focus a clicked button, so document.activeElement could be elsewhere.
+    createFolderOpenerRef.current = event.currentTarget;
     setIsCreatingFolder(true);
   };
 
   const closeCreateFolderModal = () => {
     if (isSavingFolder) return;
     setIsCreatingFolder(false);
+    createFolderOpenerRef.current?.focus({ preventScroll: true });
     setNewFolderName("");
     setFolderCreateError(null);
   };
@@ -1409,6 +1414,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       setFolders(prev => [newFolder, ...prev]);
       setNewFolderName("");
       setIsCreatingFolder(false);
+      createFolderOpenerRef.current?.focus({ preventScroll: true });
     } catch (error: any) {
       setFolderCreateError(error?.message || 'The folder could not be created. Please try again.');
     } finally {
@@ -1985,7 +1991,10 @@ export const Gallery: React.FC<GalleryProps> = ({
         <div
           className="fixed inset-0 z-[310] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeCreateFolderModal();
+            if (event.target !== event.currentTarget) return;
+            // Without this the browser moves focus to the body after the handler, undoing the focus return.
+            event.preventDefault();
+            closeCreateFolderModal();
           }}
         >
           <div

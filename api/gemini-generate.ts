@@ -32,6 +32,16 @@ export const config = {
   maxDuration: 300,
 };
 
+// @google/genai puts the whole JSON response body in ApiError.message; show only the provider's sentence.
+export const geminiErrorMessage = (raw: unknown): string => {
+  const text = String(raw || 'Gemini request failed');
+  try {
+    const inner = JSON.parse(text)?.error?.message;
+    if (typeof inner === 'string' && inner.trim()) return inner.trim();
+  } catch { /* not a JSON body */ }
+  return text;
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -137,7 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.info(`[gemini-generate] model=${model} kind=${kind} stage=cancelled ms=${Date.now() - startedAt}`);
       return;
     }
-    const message = String(error?.message || 'Gemini request failed').replaceAll(apiKey, '[redacted]');
+    const message = geminiErrorMessage(error?.message).replaceAll(apiKey, '[redacted]');
     const status = error?.name === 'TimeoutError' ? 504 : typeof error?.status === 'number' ? error.status : 500;
     console.error(
       `Gemini proxy error: model=${model} kind=${kind} ms=${Date.now() - startedAt} msg=${message}`,

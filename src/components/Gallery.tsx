@@ -2295,7 +2295,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-sm font-semibold text-white">Notifications</span>
                       <span className="text-xs text-gray-500">({toasts.length})</span>
                     </div>
-                    {toasts.length > 0 && onDismissAllToasts && (
+                    {toasts.some(toast => toast.type !== 'loading') && onDismissAllToasts && (
                       <button
                         onClick={onDismissAllToasts}
                         className="text-[10px] font-medium text-gray-400 hover:text-red-400 px-2 py-1 hover:bg-red-500/10 rounded-lg transition-colors"

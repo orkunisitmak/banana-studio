@@ -21,8 +21,10 @@ test('native commands reach the matching shell and never run on a remote origin'
   postNativeAction('keys');
   globalThis.window={chrome:{webview:{postMessage:value=>messages.push(['windows',value])}}};
   postNativeAction('keys');postNativeAction('lock');
+  globalThis.window={bananaLinux:{postMessage:value=>messages.push(['linux',value])}};
+  postNativeAction('keys');postNativeAction('lock');
   globalThis.location={protocol:'https:',hostname:'example.invalid'};postNativeAction('keys');
-  assert.deepEqual(messages,[['mac',{action:'keys'}],['windows',{action:'keys'}],['windows',{action:'lock'}]]);
+  assert.deepEqual(messages,[['mac',{action:'keys'}],['windows',{action:'keys'}],['windows',{action:'lock'}],['linux',{action:'keys'}],['linux',{action:'lock'}]]);
  } finally {
   if(oldWindow===undefined)delete globalThis.window;else globalThis.window=oldWindow;
   if(oldLocation===undefined)delete globalThis.location;else globalThis.location=oldLocation;

@@ -106,7 +106,9 @@ MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to 
 | Windows 10/11, 64-bit Intel/AMD | Standalone portable app | [Download](https://github.com/orkunisitmak/banana-studio/releases/download/v0.1.2/Banana-Studio-0.1.2-windows-x64.zip) · [Installation guide](docs/en/desktop.md#windows-download-and-open) |
 | Other computers, phones and tablets | Web version in a browser | Open a deployed workspace; its owner manages access and provider keys. |
 
-**Desktop quick start:** download → unzip → open (Mac: move to Applications first) → **Provider keys** → add the key for your model → generate. Both standalone apps need **no Supabase, Vercel, Google sign-in or separate Node installation**. The gallery stays on your computer. API keys stay in macOS Keychain or Windows Credential Manager. Keep the app open while jobs run; minimizing is fine. [First-open permissions, updates and backups →](docs/en/desktop.md)
+**Linux x86-64:** a native GTK/WebKitGTK port can be [built from source](docs/en/development.md#build-the-linux-app). It bundles Node and uses your desktop keyring. See [Linux installation and dependencies](docs/en/desktop.md#linux-build-and-open); a prebuilt Linux release is not yet published.
+
+**Desktop quick start:** download → unzip → open (Mac: move to Applications first) → **Provider keys** → add the key for your model → generate. Both standalone apps need **no Supabase, Vercel, Google sign-in or separate Node installation**. The gallery stays on your computer. API keys stay in macOS Keychain, Windows Credential Manager or Linux Secret Service. Keep the app open while jobs run; minimizing is fine. [First-open permissions, updates and backups →](docs/en/desktop.md)
 
 ## Models and API keys
 
@@ -131,7 +133,7 @@ OpenRouter Seedance currently supports text, first/last frames and image referen
 
 ## How it is built
 
-The shared interface is **React + TypeScript + Vite**. The native Mac shell uses **AppKit + WKWebView**, bundles a **Node.js** server, saves to **SQLite + local files**, keeps credentials in **Keychain** and updates through **Sparkle**. Windows uses **WinForms + WebView2**, the same Node/SQLite workspace and **Windows Credential Manager**. The hosted web version uses **Vercel Functions / Queues / Cron** and **Supabase Postgres / Auth / private Storage**, with Google sign-in.
+The shared interface is **React + TypeScript + Vite**. The native Mac shell uses **AppKit + WKWebView**, bundles a **Node.js** server, saves to **SQLite + local files**, keeps credentials in **Keychain** and updates through **Sparkle**. Windows uses **WinForms + WebView2**, the same Node/SQLite workspace and **Windows Credential Manager**. The Linux shell uses **GTK 3 + WebKitGTK 4.1**, the same Node/SQLite workspace and **Secret Service**. The hosted web version uses **Vercel Functions / Queues / Cron** and **Supabase Postgres / Auth / private Storage**, with Google sign-in.
 
 Selected prompts and references go to the provider handling the task. Desktop and web galleries are separate; the desktop apps have no automatic cloud sync. [Data boundaries](SECURITY.md) · [Architecture and developer setup](docs/en/development.md) · [Release procedure](docs/RELEASING.md)
 

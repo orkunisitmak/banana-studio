@@ -1653,7 +1653,7 @@ export const Controls: React.FC<ControlsProps> = ({
         return;
       }
 
-      if (e.key === 'Escape' && isBrainstormPanelOpen) {
+      if (e.key === 'Escape' && !e.defaultPrevented && isBrainstormPanelOpen) {
         e.preventDefault();
         setIsBrainstormPanelOpen(false);
         return;

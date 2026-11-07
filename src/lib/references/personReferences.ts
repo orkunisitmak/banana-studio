@@ -71,7 +71,7 @@ const replaceSavedPersonPhotos = <T extends PersonDraft>(draft: T, person: Saved
   const reclaim = (ref: ReferenceImage) => getPersonId(ref) == null && !ref.isFirstFrame && !ref.isLastFrame && !ref.isDraftImage && !ref.isVideoContext && ref.id.startsWith(`saved-person:${person.id}:`) && person.photos.some(photo => ref.id === `saved-person:${person.id}:${photo.id}`);
   const remaining = draft.referenceImages.filter(ref => getPersonId(ref) !== group.id && !reclaim(ref));
   const photos = person.photos.filter((photo, index, all) => all.findIndex(other => other.id === photo.id || other.data === photo.data) === index);
-  if (remaining.length + photos.length > maxImages) throw new Error(`This person needs ${photos.length} photo slots; ${Math.max(0, maxImages - remaining.length)} available (limit ${maxImages}).`);
+  if (remaining.length + photos.length > maxImages) throw new Error(`This person needs ${photos.length} photo ${photos.length === 1 ? 'slot' : 'slots'}; ${Math.max(0, maxImages - remaining.length)} available (limit ${maxImages}).`);
   if (photos.some(photo => remaining.some(ref => ref.id === photo.id || ref.id === `saved-person:${person.id}:${photo.id}` || ref.data === photo.data))) {
     throw new Error('One of these photos already has another role. Unassign it before updating this person.');
   }
@@ -115,7 +115,7 @@ export const addSavedPersonToDraft = <T extends PersonDraft>(draft: T, person: S
       pending.push(assignReferencePerson({ id: photoId, data: photo.data, mimeType: photo.mimeType }, id, name));
     }
   }
-  if (references.length + pending.length > maxImages) throw new Error(`This person needs ${pending.length} more photo slots; ${Math.max(0, maxImages - references.length)} available (limit ${maxImages}).`);
+  if (references.length + pending.length > maxImages) throw new Error(`This person needs ${pending.length} more photo ${pending.length === 1 ? 'slot' : 'slots'}; ${Math.max(0, maxImages - references.length)} available (limit ${maxImages}).`);
   if (!linked) definitions.push({ id, name, savedPersonId: person.id });
   else linked.savedPersonId = person.id;
   return { ...draft, personGroups: definitions, referenceImages: [...references, ...pending] };

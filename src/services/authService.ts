@@ -29,6 +29,8 @@ export const signInWithGoogle = async () => {
     provider: 'google',
     options: {
       redirectTo: redirectUrl,
+      // Without this Google reuses the signed-in account, so a wrong account could not be swapped.
+      queryParams: { prompt: 'select_account' },
     }
   });
   if (error) throw error;

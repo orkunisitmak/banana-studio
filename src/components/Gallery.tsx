@@ -1,6 +1,7 @@
 import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
 import { videoProviderName, brokenVideoProviderLabel, brokenVideoExpiryText } from '../lib/video/videoProviderName';
+import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -24,6 +25,7 @@ import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { canGenerateVariation } from '../lib/gallery/recreateDraft';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { getCountLabel } from '../lib/gallery/countLabel';
 import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
 import { FolderPreview } from './FolderPreview';
@@ -534,7 +536,8 @@ const CustomVideoPlayer: React.FC<{
   useEffect(() => {
     const handlePlayerKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (target?.matches('input, textarea, select, button, [role="button"], [contenteditable="true"]')) return;
+      if (target?.closest('[role="dialog"]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const key = event.key.toLowerCase();
@@ -892,6 +895,9 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Popup Preview State
   const [previewRefImage, setPreviewRefImage] = useState<ReferenceImage | null>(null);
+  const previewOpenerRef = useRef<HTMLElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const openRefPreview = (ref: ReferenceImage, opener: HTMLElement) => { previewOpenerRef.current = opener; setPreviewRefImage(ref); };
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
@@ -1352,6 +1358,19 @@ export const Gallery: React.FC<GalleryProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
+
+  useEffect(() => {
+    if (!previewRefImage) return;
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setPreviewRefImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      const opener = previewOpenerRef.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [previewRefImage]);
 
   // --- Actions ---
 
@@ -2075,7 +2094,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             ) : (
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-semibold text-white sm:text-base">{showFavoritesOnly ? 'Favorites' : 'Gallery'}</h2>
-                <p className="hidden text-[11px] text-gray-500 lg:block">{visibleImages.length} items</p>
+                <p className="hidden text-[11px] text-gray-500 lg:block">{getCountLabel(visibleImages.length, 'item', 'items')}</p>
               </div>
             )}
           </div>
@@ -2597,14 +2616,14 @@ export const Gallery: React.FC<GalleryProps> = ({
               </button>
               </div>
             </div>
-            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{getCountLabel(selectedIds.size - comparableSelection.length, 'unavailable or non-image item', 'unavailable or non-image items')} excluded from comparison</p>}
             {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p role="status" className="text-xs text-gray-400">
                     {isPreparingPhotos ? `Preparing photos ${photoProgress.completed}/${photoProgress.total || selectedIds.size}…`
-                      : preparedPhotos ? `${preparedPhotos.length} photos ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
+                      : preparedPhotos ? `${getCountLabel(preparedPhotos.length, 'photo', 'photos')} ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
                       : 'Save originals to Photos using your phone’s share sheet.'}
                   </p>
                   {isPreparingPhotos && (
@@ -3035,8 +3054,8 @@ export const Gallery: React.FC<GalleryProps> = ({
 
       {/* Reference Image Preview Popup */}
       {previewRefImage && (
-        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200" onClick={() => setPreviewRefImage(null)}>
-          <button aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
+        <div role="dialog" aria-modal="true" aria-label="Reference photo preview" tabIndex={-1} className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200 outline-none" onClick={() => setPreviewRefImage(null)} onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); previewCloseRef.current?.focus(); } }}>
+          <button type="button" ref={previewCloseRef} autoFocus aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
           <img src={previewRefImage.data} alt="Reference" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>
       )}
@@ -3250,7 +3269,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Duration</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
+                      {selectedMedia.h3MaxMode && H3_MAX_CAPABILITIES[selectedMedia.h3MaxMode]?.duration === null
+                        ? selectedMedia.videoOutputDuration ? `${Number(selectedMedia.videoOutputDuration.toFixed(1))}s` : '—'
+                        : selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
                     </span>
                   </div>
                   <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
@@ -3280,7 +3301,12 @@ export const Gallery: React.FC<GalleryProps> = ({
                           ? 'Edit'
                           : selectedMedia.videoOperation === 'extend'
                             ? 'Extend'
-                            : 'Generate'}
+                            : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
+                              : selectedMedia.h3MaxMode === 'recast' ? 'Recast'
+                                : selectedMedia.h3MaxMode === 'relight' ? 'Relight'
+                                  : selectedMedia.h3MaxMode === 'extend_video' ? 'Extend'
+                                    : selectedMedia.h3MaxMode === 'insert_video' ? 'Insert'
+                                      : 'Generate'}
                     </span>
                   </div>
                   {selectedMedia.generationCost && (
@@ -3405,8 +3431,16 @@ export const Gallery: React.FC<GalleryProps> = ({
                       return (
                         <div
                           key={idx}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isEditSource ? 'Preview edit source reference' : `Preview reference photo ${idx + 1}`}
                           className="aspect-square rounded-lg border border-gray-700 overflow-hidden bg-black/50 relative isolate group cursor-pointer"
-                          onClick={() => setPreviewRefImage(ref)}
+                          onClick={e => openRefPreview(ref, e.currentTarget)}
+                          onKeyDown={e => {
+                            if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                            e.preventDefault();
+                            openRefPreview(ref, e.currentTarget);
+                          }}
                         >
                           <img src={ref.data} alt={isEditSource ? 'Edit source reference' : 'Reference image'} className="w-full h-full object-cover" />
 

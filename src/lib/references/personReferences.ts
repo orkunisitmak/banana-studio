@@ -1,4 +1,5 @@
 import { bindImageReferences, getStableImageTag, mapUnquotedPrompt, resolveStableImageReferences } from './referenceTokens.js';
+import { normalizeSearch } from '../normalizeSearch.js';
 import type { GenerationConfig, PersonGroupDefinition, ReferenceImage, SavedPerson } from '../../types.js';
 
 /** Stable identity numbers; legacy Me/2nd flags remain readable without a migration. */
@@ -150,7 +151,7 @@ export const removePersonGroup = <T extends PersonDraft>(draft: T, personId: num
 });
 
 export const findPersonMentions = (references: ReferenceImage[], query: string) => getPersonGroups(references)
-  .filter(group => `${group.tag} ${group.label} ${getPersonLabel(group.id)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  .filter(group => normalizeSearch(`${group.tag} ${group.label} ${getPersonLabel(group.id)}`).includes(normalizeSearch(query)));
 
 /** Never renumber inputs by person. Quoted output text is literal, not a reference. */
 export const normalizeReferencePrompt = (prompt: string, references: ReferenceImage[], inputs = references): string => {

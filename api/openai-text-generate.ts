@@ -98,11 +98,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }), provider.signal);
     providerRequestId = response.headers.get('x-request-id');
     providerStatus = response.status;
-    const data = await waitForTask(response.json(), provider.signal);
-    provider.dispose();
+    // Check the status first: a gateway error page is not JSON, and parsing
+    // it would replace the status-specific message with a generic one.
     if (!response.ok) {
+      provider.dispose();
       return fail(response.status, openAIErrorMessage(response.status, undefined, true));
     }
+    const data = await waitForTask(response.json(), provider.signal);
+    provider.dispose();
 
     // A truncated/refused response can still be billed. Record returned usage
     // before checking output; the client skips logging a second copy.

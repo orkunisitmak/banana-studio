@@ -2267,18 +2267,39 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
   };
 };
 
+const MOVE_BATCH_SIZE = 100;
+
+/** Some batches were committed before a later one failed. */
+export class MoveImagesError extends Error {
+  constructor(message: string, readonly movedIds: string[]) { super(message); }
+}
+
 export const moveImagesToFolder = async (imageIds: string[], folderId: string | null): Promise<void> => {
   const uniqueIds = Array.from(new Set(imageIds));
   if (uniqueIds.length === 0) return;
 
+  let cachedIds = uniqueIds;
+  let cloudError: MoveImagesError | null = null;
   if (supabase) {
     const userId = await getCurrentUserId();
     if (!userId) throw new Error('Not authenticated');
-    const { error } = await supabase.from('generations')
-      .update({ folder_id: folderId })
-      .eq('user_id', userId)
-      .in('id', uniqueIds);
-    if (error) throw new Error(`Media could not be moved: ${error.message}`);
+    // A large range selection would exceed the request URL limit as a single
+    // `in` filter, so move it in batches like the other bulk ID writes.
+    const movedIds: string[] = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += MOVE_BATCH_SIZE) {
+      const ids = uniqueIds.slice(offset, offset + MOVE_BATCH_SIZE);
+      const { error } = await supabase.from('generations')
+        .update({ folder_id: folderId })
+        .eq('user_id', userId)
+        .in('id', ids);
+      if (error) {
+        if (!movedIds.length) throw new Error(`Media could not be moved: ${error.message}`);
+        cloudError = new MoveImagesError(`Media could not be moved: ${error.message}`, movedIds);
+        break;
+      }
+      movedIds.push(...ids);
+    }
+    cachedIds = movedIds;
   }
 
   // Persist the cache only after the authoritative cloud write succeeds. A
@@ -2289,7 +2310,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
 
-      uniqueIds.forEach(id => {
+      cachedIds.forEach(id => {
         const req = store.get(id);
         req.onsuccess = () => {
           const img = req.result as GeneratedMedia;
@@ -2310,6 +2331,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
     if (!supabase) throw error;
     console.warn('Media moved in cloud, but local cache could not be updated:', error);
   }
+  if (cloudError) throw cloudError;
 };
 
 export const moveFolderToFolder = async (folderId: string, targetParentId: string | null): Promise<void> => {

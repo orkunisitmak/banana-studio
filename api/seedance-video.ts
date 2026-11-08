@@ -59,6 +59,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (['FAILED','failed','cancelled','expired'].includes(data?.status)) return res.status(200).json({ status: 'FAILED', error: 'The provider could not generate this video. Check its task history.' });
     if (data?.status !== 'COMPLETED' && data?.status !== 'completed') return res.status(200).json({ status:'RUNNING', progress: data?.status === 'IN_QUEUE' || data?.status === 'pending' ? .05 : .5 });
     if (provider === 'fal') {
+      // fal reports a failed request as COMPLETED with `error`. Its result
+      // route repeats the model's error status (often 5xx), which would be
+      // retried as "not available yet" for the whole recovery window.
+      if (data?.error) {
+        const reason = typeof data.error === 'string' && data.error.trim() ? `: ${data.error.trim().slice(0, 500)}` : '. Check its task history.';
+        return res.status(200).json({ status:'FAILED', error:`fal.ai could not generate this video${reason}` });
+      }
       const result = await fetch(base, { headers, redirect:'error', signal:AbortSignal.timeout(45_000) });
       if ([400,422].includes(result.status)) return res.status(200).json({ status:'FAILED', error:'fal.ai could not generate this video. Check its task history for the model rejection.' });
       if (!result.ok) return res.status(503).json({ error:'The completed video is not available yet.', retryable:true });

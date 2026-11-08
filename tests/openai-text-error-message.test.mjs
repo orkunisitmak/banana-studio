@@ -32,3 +32,13 @@ for (const status of [500, 503]) {
     assert.doesNotMatch(res.body.error, /image/i, res.body.error);
   });
 }
+
+for (const [status, message] of [[503, /HTTP 503/], [429, /rate limited/]]) {
+  test(`GPT-6.1 Sol text: a non-JSON upstream ${status} keeps its status and message`, async () => {
+    globalThis.fetch = async () => new Response('<html>gateway error</html>', { status, headers: { 'content-type': 'text/html' } });
+    const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; }, on() {}, off() {} };
+    await handler({ method: 'POST', headers: {}, body: { model: 'gpt-6.1-sol', contents: { parts: [{ text: 'a brief' }] }, usageContext: { action: 'enhance', prompt: 'p' } } }, res);
+    assert.equal(res.code, status);
+    assert.match(res.body.error, message);
+  });
+}

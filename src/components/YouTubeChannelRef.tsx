@@ -21,6 +21,7 @@ import { getPersonGroups } from '../lib/references/personReferences';
 import type { PersonGroupDefinition, ReferenceImage } from '../types';
 import type { YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
 import { normalizeSearch } from './gallerySearch';
+import { getCountLabel } from '../lib/gallery/countLabel';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { TextTaskStage } from '../services/geminiClient';
 
@@ -573,7 +574,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                             }}
                             className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs transition-colors ${selectedPersonIds.includes(group.id) ? 'border-violet-500/50 bg-violet-500/15 text-violet-200' : 'border-gray-700 text-gray-500'}`}>
                             {selectedPersonIds.includes(group.id) && <Check className="h-3 w-3 shrink-0" />}
-                            <span className="truncate">{group.label}</span><span className="text-[10px] opacity-60">{group.images.length} photos</span>
+                            <span className="truncate">{group.label}</span><span className="text-[10px] opacity-60">{getCountLabel(group.images.length, 'photo', 'photos')}</span>
                           </button>)}
                         </div> : <p className="mt-1 text-xs leading-relaxed text-gray-400">Add saved people or assign reference photos for consistent faces. You can also prepare ideas without selected people.</p>}
                       </div>

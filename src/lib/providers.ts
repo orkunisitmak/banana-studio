@@ -18,6 +18,7 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
   'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
   'anthropic/claude-opus-5.5': ['openrouter'],
+  'openrouter/free': ['openrouter'],
   'gpt-6.1-sol': ['openai', 'openrouter'],
   'gemini-3.8-flash': ['gemini', 'openrouter'],
   'seedance-2.0': ['evolink', 'fal', 'openrouter'],
@@ -44,5 +45,6 @@ export const OPENROUTER_MODELS: Record<string, string> = {
   'gemini-nano-banana-2.1': 'google/gemini-nano-banana-2.1',
   'gpt-6.1-sol': 'openai/gpt-6.1-sol', 'gemini-3.8-flash': 'google/gemini-3.8-flash',
   'anthropic/claude-opus-5.5': 'anthropic/claude-opus-5.5',
+  'openrouter/free': 'openrouter/free',
   'seedance-2.0': 'bytedance/seedance-2.0', 'seedance-2.5': 'bytedance/seedance-2.5',
 };

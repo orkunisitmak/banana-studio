@@ -66,7 +66,7 @@ export const TextModelSettings: React.FC = () => {
           </label>
         ))}
       </div>
-      {selectedModel !== OPENAI_TEXT_MODEL && selectedModel !== OPENROUTER_TEXT_MODEL && (
+      {selectedModel === 'gemini-3.8-flash' && (
         <label className="mt-4 block text-sm text-gray-300">
           Gemini thinking
           <select aria-label="Gemini thinking" value={thinkingLevel}
@@ -77,13 +77,13 @@ export const TextModelSettings: React.FC = () => {
           <span className="mt-2 block text-xs leading-relaxed text-gray-500">Higher thinking gives complex briefs more reasoning time.</span>
         </label>
       )}
-      {(selectedModel === OPENAI_TEXT_MODEL || selectedModel === OPENROUTER_TEXT_MODEL) && (
+      {(selectedModel === OPENAI_TEXT_MODEL || selectedModel === OPENROUTER_TEXT_MODEL || selectedModel === 'openrouter/free') && (
         <label className="mt-4 block text-sm text-gray-300">
-          {selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'}
-          <select aria-label={selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'} value={reasoningEffort}
+          {selectedModel === OPENAI_TEXT_MODEL ? 'GPT-6.1 Sol reasoning' : selectedModel === 'openrouter/free' ? 'Thinking / reasoning' : 'Opus 5.5 thinking'}
+          <select aria-label={selectedModel === OPENAI_TEXT_MODEL ? 'GPT-6.1 Sol reasoning' : selectedModel === 'openrouter/free' ? 'Thinking / reasoning' : 'Opus 5.5 thinking'} value={reasoningEffort}
             onChange={event => { setReasoningEffort(event.target.value as OpenAIReasoningEffort); changed(); }}
             className="mt-2 block w-full rounded-xl border border-gray-700 bg-gray-900 p-3 text-base sm:text-sm text-white outline-none focus:border-violet-400">
-            {(selectedModel === OPENROUTER_TEXT_MODEL ? OPENROUTER_REASONING_EFFORTS : OPENAI_REASONING_EFFORTS).map(value => <option key={value} value={value}>{({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' })[value]}{value === (selectedModel === OPENROUTER_TEXT_MODEL ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING) ? ' · Default' : ''}</option>)}
+            {(selectedModel === OPENAI_TEXT_MODEL ? OPENAI_REASONING_EFFORTS : OPENROUTER_REASONING_EFFORTS).map(value => <option key={value} value={value}>{({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' })[value]}{value === (selectedModel === OPENAI_TEXT_MODEL ? DEFAULT_OPENAI_REASONING : DEFAULT_OPENROUTER_REASONING) ? ' · Default' : ''}</option>)}
           </select>
           <span className="mt-2 block text-xs leading-relaxed text-gray-500">High gives briefs more reasoning time. Lower levels respond faster; higher levels may take longer. Applies to new requests.</span>
         </label>

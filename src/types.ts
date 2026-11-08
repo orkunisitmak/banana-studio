@@ -87,13 +87,18 @@ export const VIDEO_DURATION_OPTIONS: { label: string; value: VideoDuration }[] =
   }
 );
 
-export type TextModelId = 'gemini-3.8-flash' | 'gpt-6.1-sol' | 'anthropic/claude-opus-5.5';
+export type TextModelId = 'gemini-3.8-flash' | 'gpt-6.1-sol' | 'anthropic/claude-opus-5.5' | 'openrouter/free';
 
 export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; description: string }[] = [
   {
     label: 'Claude Opus 5.5',
     value: 'anthropic/claude-opus-5.5',
     description: 'Default via OpenRouter. Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
+  },
+  {
+    label: 'Free Models Router (OpenRouter)',
+    value: 'openrouter/free',
+    description: '100% Free routing via OpenRouter. Dynamically routes to zero-cost models for prompt Enhance, brainstorm, and variations.',
   },
   {
     label: 'Gemini 3.8 Flash',

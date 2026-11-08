@@ -56,7 +56,7 @@ The local database is not separately encrypted; macOS account protection, FileVa
 
 This is an **unsigned community build**. Windows may show an unrecognized-publisher warning. Check that the archive came from this repository's release and compare its SHA-256 with `verification-windows-x64.json`. Do not disable Windows security or use a package from a different source.
 
-The local gallery is under `%LOCALAPPDATA%\Banana Studio\`. Open **File → Open Local Data Folder** to find it. Quit before backing up the whole folder. Keys are separate in Credential Manager. Windows updates are manual: **File → Check for Updates…** opens GitHub Releases; quit the app, extract the new folder and open it. Gallery and keys remain outside the application folder.
+The local gallery is under `%LOCALAPPDATA%\Banana Studio\`. Open **File → Open Local Data Folder** to find it. Quit before backing up the whole folder. Keys are separate in Credential Manager. **File → Check for Updates…** installs a verified update and reopens the app when the build has an update key; let running jobs finish first. If the new version cannot start, the previous one is restored. A build without a key opens GitHub Releases instead: quit the app, extract the new folder and open it. Gallery and keys remain outside the application folder.
 
 Mac and Windows use the same React interface and SQLite workspace code. Native menus, file dialogs and key vaults follow each operating system. The Windows package has build, Credential Manager and protected-edit integration checks on Windows CI; an interactive Windows UI session is still needed for a full release acceptance test. [Platform comparison and shortcuts](desktop-parity.md).
 

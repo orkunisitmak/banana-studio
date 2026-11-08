@@ -1,6 +1,6 @@
 import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
-import { videoProviderName, brokenVideoProviderLabel } from '../lib/video/videoProviderName';
+import { videoProviderName, brokenVideoProviderLabel, brokenVideoExpiryText } from '../lib/video/videoProviderName';
 import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
@@ -3133,7 +3133,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <AlertCircle className="w-12 h-12 text-red-400" />
                   <span className="text-sm font-semibold">Video unavailable</span>
                   <span className="text-xs text-gray-500">
-                    {selectedMedia.error || `The source URL is no longer accessible. ${videoProviderName(selectedMedia.taskId, selectedMedia.videoModel === 'minimax-h3')} media URLs expire after a period of time and the file was not cached locally.`}
+                    {selectedMedia.error || brokenVideoExpiryText(selectedMedia)}
                   </span>
                   {!isReadOnly && <div className="flex items-center gap-2">
                     {selectedMedia.taskId && onRecoverVideo && (

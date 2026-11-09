@@ -111,6 +111,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const falStatus = statusData?.status;
     // fal status values observed: IN_QUEUE | IN_PROGRESS | COMPLETED | ERROR
     if (falStatus === 'COMPLETED') {
+      // fal reports a failed request as COMPLETED with `error`. Its result
+      // route repeats the model's error status (often 5xx), which the client
+      // would otherwise retry as a transient poll failure.
+      if (statusData?.error) {
+        return res.status(200).json({
+          status: 'FAILED',
+          error: extractFalErrorMessage(statusData.error),
+          progress: 0,
+        });
+      }
       const resultRes = await fetch(
         `${FAL_QUEUE_BASE}/${queueBase}/requests/${encodeURIComponent(requestId)}`,
         { headers: { Authorization: `Key ${apiKey}` } }

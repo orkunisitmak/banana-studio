@@ -1170,7 +1170,6 @@ export const Controls: React.FC<ControlsProps> = ({
   const hasBrainstormInput = brainstormCategory === 'simple' || config.youtubeSource
     ? Boolean(config.prompt.trim() || config.referenceImages.length) : config.referenceImages.length > 0;
   // Like Generate: a Re-create's saved references must finish loading first.
-  const canBrainstormGenerate = config.mode === 'image' && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const isBrainstormActive = config.mode === 'image' && isBrainstormPanelOpen && !isMinimized;
 
   const handleBrainstorm = async () => {
@@ -1972,6 +1971,8 @@ export const Controls: React.FC<ControlsProps> = ({
   const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
   const isSunburst = config.imageModel === SUNBURST_MODEL;
   const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
+  // Like Generate: a route that cannot run would bill the Brainstorm text request and then fail every image.
+  const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
     : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
@@ -2756,30 +2757,35 @@ export const Controls: React.FC<ControlsProps> = ({
                                      </div>
                                  ) : (
                                      templates.map(t => (
-                                         <div 
-                                           key={t.id} 
-                                           className="flex items-center gap-3 group p-3 hover:bg-gray-800/50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-gray-700/50"
+                                         <div
+                                           key={t.id}
+                                           className="flex items-center group hover:bg-gray-800/50 rounded-xl transition-all border border-transparent hover:border-gray-700/50"
+                                         >
+                                             <button
+                                                type="button"
                                                 onClick={() => {
                                                     onSelectTemplate(t);
                                                     setIsTemplateMenuOpen(false);
                                                 }}
-                                         >
+                                                className="flex flex-1 min-w-0 items-center gap-3 p-3 text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                             >
                                              {/* Template Icon */}
-                                             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/20 flex items-center justify-center shrink-0">
+                                             <span className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/20 flex items-center justify-center shrink-0">
                                                <LayoutTemplate className="w-5 h-5 text-violet-400" />
-                                             </div>
+                                             </span>
                                              
                                              {/* Template Info */}
-                                             <div className="flex-1 min-w-0">
+                                             <span className="flex-1 min-w-0">
                                                  <span className="text-sm font-medium text-gray-200 group-hover:text-white block truncate">{t.name}</span>
-                                                 <div className="flex items-center gap-2 mt-0.5">
+                                                 <span className="flex items-center gap-2 mt-0.5">
                                                    <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoQuality || '720p' : t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
                                                    {(t.config.mode === 'video' || t.config.imageModel !== SUNBURST_MODEL) && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoAspectRatio || t.config.aspectRatio || '—' : t.config.aspectRatio}</span>}
-                                                 </div>
-                                             </div>
+                                                 </span>
+                                             </span>
+                                             </button>
                                              
                                              {/* Actions */}
-                                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                             <div className="flex items-center gap-1 pr-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                                                 <button 
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -2934,7 +2940,7 @@ export const Controls: React.FC<ControlsProps> = ({
                           <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, config.count, brainstormImageCount)}</p>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
                             disabled={!canBrainstormGenerate}
-                            title={brainstormCostPreview.description}
+                            title={routeInputError || brainstormCostPreview.description}
                             className="w-full rounded-xl bg-gradient-to-r from-lime-400 to-emerald-400 px-3 py-3 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:from-gray-800 disabled:to-gray-800 disabled:text-gray-500">
                             <span className="flex items-center justify-center gap-2"><Play className="h-4 w-4 shrink-0" />Brainstorm &amp; generate {brainstormImageCount}</span>
                             <span className="mt-1 block text-xs font-medium">{brainstormCostPreview.label}</span>

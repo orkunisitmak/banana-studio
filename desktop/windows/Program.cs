@@ -116,15 +116,24 @@ internal sealed class StudioWindow : Form
         public override Color MenuItemBorder => MenuBorder;
     }
     private bool Local(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && origin != null && uri.Scheme == origin.Scheme && uri.Host == origin.Host && uri.Port == origin.Port;
+    /// <summary>
+    /// Opens an external https URL in the default browser. Only https URLs without user info are allowed.
+    /// Shows a warning message if the URL cannot be opened.
+    /// </summary>
     private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) OpenWithShell(uri.AbsoluteUri, "The link could not be opened. Check that a default web browser is set in Windows Settings."); }
-    // The folder is only created once the workspace starts, so create it here as well:
-    // opening it before then, or after a WebView2 failure, must not end in an unhandled exception.
+    /// <summary>
+    /// Creates the local data folder if it does not exist yet, then opens it in Windows Explorer.
+    /// Shows a warning with the folder path if it cannot be opened.
+    /// </summary>
     private void OpenDataFolder()
     {
         try { Directory.CreateDirectory(WorkspaceProcess.DataDirectory); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         OpenWithShell(WorkspaceProcess.DataDirectory, "The local data folder could not be opened. It is at " + WorkspaceProcess.DataDirectory + ".");
     }
+    /// <summary>
+    /// Attempts to open a file or folder using the Windows shell. Shows a failure message if the shell cannot handle the target.
+    /// </summary>
     private void OpenWithShell(string target, string failure)
     {
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }

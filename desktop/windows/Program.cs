@@ -124,9 +124,6 @@ internal sealed class StudioWindow : Form
         public override Color MenuBorder => Color.FromArgb(55, 65, 81);
         public override Color MenuItemBorder => MenuBorder;
     }
-    /// <summary>
-    /// Checks whether the given URI string refers to the app's own local origin (same scheme, host and port).
-    /// </summary>
     private bool Local(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && origin != null && uri.Scheme == origin.Scheme && uri.Host == origin.Host && uri.Port == origin.Port;
     /// <summary>
     /// Opens an external https URL in the default browser. Only https URLs without user info are allowed.
@@ -151,13 +148,7 @@ internal sealed class StudioWindow : Form
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { MessageBox.Show(this, failure, "Banana Studio", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
-    /// <summary>
-    /// Displays a failure message in the status label and brings it to the front.
-    /// </summary>
     private void ShowFailure(string message) { status.Text = message; status.Visible = true; status.BringToFront(); }
-    /// <summary>
-    /// Starts the WebView2 workspace environment, loads the local bootstrap page, and sets up all WebView2 event handlers.
-    /// </summary>
     private async Task StartWorkspace()
     {
         try
@@ -215,9 +206,6 @@ internal sealed class StudioWindow : Form
     private FormBorderStyle previousBorder;
     private FormWindowState previousState;
     private Rectangle previousBounds;
-    /// <summary>
-    /// Toggles the window between normal and fullscreen mode, preserving bounds and state.
-    /// </summary>
     private void ToggleFullScreen()
     {
         CaptureNormalWindowBounds(); fullscreenTransition = true;
@@ -229,9 +217,6 @@ internal sealed class StudioWindow : Form
         finally { fullscreenTransition = false; CaptureNormalWindowBounds(); }
     }
     private bool keysOpen;
-    /// <summary>
-    /// Shows a dialog for the user to add, remove or save provider API keys stored in Windows Credential Manager.
-    /// </summary>
     private async Task ShowKeys()
     {
         if (keysOpen || origin == null) return;

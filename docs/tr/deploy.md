@@ -69,6 +69,7 @@ Ortam değişkeni, Vercel'in uygulamaya verdiği isimli bir ayardır. Kurulum ek
 | `CRON_SECRET` | Parola yöneticinle ürettiğin yeni rastgele sır; tercihen en az 32 karakter | Evet |
 | `OPENAI_API_KEY` | OpenAI anahtarı | GPT Image 2.5 ve/veya GPT-6.1 Sol için |
 | `OPENROUTER_API_KEY` | OpenRouter anahtarı | Başlangıç yaratıcı modeli Opus 5.5 için |
+| `ANTHROPIC_API_KEY` | Anthropic anahtarı | Opus 5.5'i doğrudan çalıştırır; ikisi de varsa OpenRouter'dan önce kullanılır |
 | `GEMINI_API_KEY` | Google Gemini anahtarı | Gemini metin görevleri ve video analizi için |
 | `FAL_KEY` | fal.ai anahtarı | Nano Banana, H3 Max ve desteklenen video ön işlemleri için |
 | `EVOLINK_API_KEY` | EvoLink anahtarı | Seedance için |
@@ -118,7 +119,7 @@ Script, örnek adresi ve doğrulanmamış/bulunmayan hesapları özellikle redde
 
 ## 8. Uçtan uca kontrol et
 
-1. **AI settings** bölümünde anahtarını girdiğin metin sağlayıcısını seç. Başlangıçtaki Opus 5.5 / Medium, OpenRouter ister.
+1. **AI settings** bölümünde anahtarını girdiğin metin sağlayıcısını seç. Başlangıçtaki Opus 5.5 / Medium, Anthropic ya da OpenRouter ister.
 2. Ayarladığın görsel modelini seç; örneğin OpenAI anahtarıyla GPT Image 2.5.
 3. Kendi promptunla tek bir test görseli gönder. Bu gerçek sağlayıcı isteğidir, bakiyenden kullanım yapar.
 4. Sonucun tamamlandığını, sayfayı yenileyince galeride kaldığını ve indirildiğini doğrula.

@@ -27,7 +27,7 @@ Mevcut sürüm **v0.1.2**, gereken sistem **macOS 13.5 veya sonrası**. Çalış
 3. Anahtarı ilgili kutuya yapıştır ve **Save** seç. Anahtarı üretim promptuna yazma.
 4. O servise ait görsel/video modelini seç. Enhance veya Brainstorm için **AI settings** bölümünde anahtarını eklediğin bir metin modeli de seç.
 
-Başlangıçta GPT Image 2.5 + Opus 5.5 / Medium seçilidir; OpenAI + OpenRouter gerekir. Yalnızca OpenAI kullanmak istiyorsan hesabının erişimi varsa metin modelini de GPT-6.1 Sol seç. Enhance/Brainstorm'u kullanmadan doğrudan görsel promptu da yazabilirsin.
+Başlangıçta GPT Image 2.5 + Opus 5.5 / Medium seçilidir; OpenAI + Anthropic ya da OpenRouter gerekir. Yalnızca OpenAI kullanmak istiyorsan hesabının erişimi varsa metin modelini de GPT-6.1 Sol seç. Enhance/Brainstorm'u kullanmadan doğrudan görsel promptu da yazabilirsin.
 
 **Kontrol:** yeniden açınca kayıtlı alan **Saved in Keychain** yazar. Boş bıraktığın alan mevcut anahtarı korur; **Remove** yalnızca o sağlayıcının kayıtlı anahtarını siler. Anahtarlar macOS Anahtar Zinciri'ndedir; Banana Studio bulut hesabına gönderilmez.
 

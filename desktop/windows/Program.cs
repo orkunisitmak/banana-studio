@@ -78,25 +78,16 @@ internal sealed class StudioWindow : Form
         workspace.Failed += () => { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => ShowFailure("The local workspace stopped. Reopen Banana Studio. Your saved gallery is kept on this PC.")); };
     }
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
-    /// <summary>
-    /// Captures the current window bounds when the window is in a normal state and not transitioning to fullscreen.
-    /// </summary>
     private void CaptureNormalWindowBounds()
     {
         if (placementReady && !fullscreenTransition && FormBorderStyle != FormBorderStyle.None && WindowState == FormWindowState.Normal) normalWindowBounds = Bounds;
     }
-    /// <summary>
-    /// Applies constrained window bounds within the primary screen's working area, respecting the minimum window size.
-    /// </summary>
     private void ApplyWindowBounds(Rectangle bounds)
     {
         var fitted = WindowPlacement.Constrain(bounds, Screen.AllScreens.OrderByDescending(screen => screen.Primary).Select(screen => screen.WorkingArea).ToArray(), new Size(760, 560));
         MinimumSize = new Size(Math.Min(760, fitted.Width), Math.Min(560, fitted.Height));
         Bounds = fitted;
     }
-    /// <summary>
-    /// Keeps the window within reachable screen bounds by re-applying current bounds and capturing them.
-    /// </summary>
     private void KeepWindowReachable()
     {
         if (IsDisposed || !placementReady || FormBorderStyle == FormBorderStyle.None || WindowState != FormWindowState.Normal) return;

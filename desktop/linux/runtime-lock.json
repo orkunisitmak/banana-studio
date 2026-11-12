@@ -1,0 +1,64 @@
+{
+  "target": "linux-x64",
+  "electron": {
+    "version": "44.10.0",
+    "url": "https://github.com/electron/electron/releases/download/v44.10.0/electron-v44.10.0-linux-x64.zip",
+    "sha256": "62df9375ef035f2835a18cd7f9bff1959a185da22f2ecba1daa37cd9caee1dc5"
+  },
+  "packages": [
+    {
+      "name": "sharp",
+      "version": "0.35.5",
+      "lockPath": "node_modules/sharp",
+      "url": "https://registry.npmjs.org/sharp/-/sharp-0.35.5.tgz",
+      "sha256": "3b6bbbe6b308f5c383938ca4a31926cd5d79c4651ed8c5fda16a97da2014a9ac"
+    },
+    {
+      "name": "@img/colour",
+      "version": "1.1.0",
+      "lockPath": "node_modules/@img/colour",
+      "url": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
+      "sha256": "6c2df3ac33d4b8647191ad8942a579e6004be00c25846677eab85f04702d85b1"
+    },
+    {
+      "name": "detect-libc",
+      "version": "2.1.2",
+      "lockPath": "node_modules/detect-libc",
+      "url": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+      "sha256": "270dec0fc06cff86481da8af2dd8f18dee6b602790b14ef0e1c2c18d7da39427"
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "lockPath": "node_modules/sharp/node_modules/semver",
+      "url": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+      "sha256": "d85045d4300d7d57c891336b95df532e73f34c22ffcd222452b6d08b9d127d5d"
+    },
+    {
+      "name": "@img/sharp-linux-x64",
+      "version": "0.35.5",
+      "lockPath": "node_modules/@img/sharp-linux-x64",
+      "url": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.5.tgz",
+      "sha256": "556787285d3244c07686a355de5b5a4c4d0019a12785bf24764e756a96ea3334"
+    },
+    {
+      "name": "@img/sharp-libvips-linux-x64",
+      "version": "1.3.4",
+      "lockPath": "node_modules/@img/sharp-libvips-linux-x64",
+      "url": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.4.tgz",
+      "sha256": "e371cb713fc8822c96a0d3fb60a3d092799d0aefab6d7f1fb3b72d8d75f1d109"
+    }
+  ],
+  "binaryAndLicenseSha256": {
+    "LICENSE": "5154e165bd6c2cc0cfbcd8916498c7abab0497923bafcd5cb07673fe8480087d",
+    "LICENSES.chromium.html": "3375e2a9bd7bc631738fde10be6548a76efe8cf5e4b8826b8140ba8b0c4d6353",
+    "chrome-sandbox": "a4f6dfd7325ddd55f94ddc0c487d22726d40ef099ded6475d5dffe236e277896",
+    "chrome_crashpad_handler": "00da0d510f0537109c7379e9f5f934ef1a841f734016869992060c7481997a9a",
+    "banana-studio-bin": "fe48bf9d2cb07a14e63e9adf0afa8a669872a70e6cffe130f12b560b6fbe756a",
+    "libffmpeg.so": "2eff1a6a9f99d4cdfb8f1c1738fb14b64a536fa5a357e478b9e6afd0ceff564c",
+    "libvk_swiftshader.so": "97f696053ce608c5ee388a5d498f36b0b74332979a4a1050d66fe8b9212860f7",
+    "libvulkan.so.1": "1536c33d755df9b9a098fcba82c4a887463e504228087ed0ca15f2c5a397c7b5",
+    "resources/workspace/node_modules/@img/sharp-linux-x64/lib/sharp-linux-x64-0.35.5.node": "cf896cc1b7f3ae9c3e8eb3d7b2b198b8de2824ff7d0681d684bab5a825def335",
+    "resources/workspace/node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.18.7": "4aa73553408c3964071728f4a231a8e86918e39bc49f1fbae75355f7ea933ea9"
+  }
+}

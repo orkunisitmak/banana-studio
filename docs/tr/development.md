@@ -21,7 +21,7 @@ flowchart TD
   Mac --> Updates[İmzalı GitHub akışları + Sparkle]
 ```
 
-Yerel sunucu rastgele loopback portunda çalışır; tek kullanımlık bootstrap ve HttpOnly oturum çerezi ister. Host/origin kontrolü yerel yazmaları korur. Anahtarlar arayüz ayarından değil, yerel süreç pipe'ından geçer. Webde sunucu kullanıcıyı ve erişim listesi üyeliğini doğrular; kullanıcı kapsamındaki sorgular veritabanı kurallarını korur. Ayrıcalıklı sunucu istemcisi yalnızca sunucunun yönettiği görevler içindir.
+Yerel sunucu rastgele loopback portunda çalışır; her başlatmada üretilen bootstrap kimlik bilgisi ve HttpOnly oturum çerezi ister. Host/origin kontrolü yerel yazmaları korur. Anahtarlar arayüz ayarından değil, yerel süreç pipe'ından geçer. Webde sunucu kullanıcıyı ve erişim listesi üyeliğini doğrular; kullanıcı kapsamındaki sorgular veritabanı kurallarını korur. Ayrıcalıklı sunucu istemcisi yalnızca sunucunun yönettiği görevler içindir.
 
 ## Kaynak haritası
 
@@ -139,3 +139,7 @@ node scripts/test-local-generation.mjs
 ```
 
 Paket `.build/staging-windows/Banana Studio/` altında oluşur. Dosyaları bütün olarak tut. [Platform davranışları](desktop-parity.md) ve [yayın prosedürü](../RELEASING.md).
+
+## Bağımsız Linux masaüstü
+
+Ubuntu/CachyOS gereksinimleri, komutlar ve doğrulanması gereken Linux kontrolleri için [Linux masaüstü kılavuzuna](linux-alpha.md) bakın. Ayrı Electron kabuğu mevcut arayüzü ve yerel sunucuyu kullanır.

@@ -1,0 +1,11 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Ubuntu 24.04 application-specific user namespace permission. Chromium still
+# applies its own namespace/seccomp renderer sandbox. No global policy changes.
+# This shim is intentionally NOT an enforced filesystem/network confinement
+# policy. Its attachment is limited to this root-owned installed executable.
+/opt/banana-studio/banana-studio-bin flags=(unconfined) {
+  userns,
+  include if exists <local/banana-studio>
+}

@@ -43,7 +43,7 @@ internal sealed class StudioWindow : Form
         var file = new ToolStripMenuItem("File");
         var keyItem = new ToolStripMenuItem("Provider API Keys…", null, async (_, _) => await ShowKeys()) { ShortcutKeys = Keys.Control | Keys.Oemcomma, ShortcutKeyDisplayString = "Ctrl+," };
         file.DropDownItems.Add(keyItem);
-        file.DropDownItems.Add("Open Local Data Folder", null, (_, _) => Process.Start(new ProcessStartInfo(WorkspaceProcess.DataDirectory) { UseShellExecute = true }));
+        file.DropDownItems.Add("Open Local Data Folder", null, (_, _) => OpenDataFolder());
         file.DropDownItems.Add("Check for Updates…", null, (_, _) => OpenExternal("https://github.com/orkunisitmak/banana-studio/releases/latest"));
         file.DropDownItems.Add("Exit", null, (_, _) => Close());
         var view = new ToolStripMenuItem("View");
@@ -116,7 +116,29 @@ internal sealed class StudioWindow : Form
         public override Color MenuItemBorder => MenuBorder;
     }
     private bool Local(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && origin != null && uri.Scheme == origin.Scheme && uri.Host == origin.Host && uri.Port == origin.Port;
-    private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+    /// <summary>
+    /// Opens an external https URL in the default browser. Only https URLs without user info are allowed.
+    /// Shows a warning message if the URL cannot be opened.
+    /// </summary>
+    private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) OpenWithShell(uri.AbsoluteUri, "The link could not be opened. Check that a default web browser is set in Windows Settings."); }
+    /// <summary>
+    /// Creates the local data folder if it does not exist yet, then opens it in Windows Explorer.
+    /// Shows a warning with the folder path if it cannot be opened.
+    /// </summary>
+    private void OpenDataFolder()
+    {
+        try { Directory.CreateDirectory(WorkspaceProcess.DataDirectory); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        OpenWithShell(WorkspaceProcess.DataDirectory, "The local data folder could not be opened. It is at " + WorkspaceProcess.DataDirectory + ".");
+    }
+    /// <summary>
+    /// Attempts to open a file or folder using the Windows shell. Shows a failure message if the shell cannot handle the target.
+    /// </summary>
+    private void OpenWithShell(string target, string failure)
+    {
+        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { MessageBox.Show(this, failure, "Banana Studio", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
     private void ShowFailure(string message) { status.Text = message; status.Visible = true; status.BringToFront(); }
     private async Task StartWorkspace()
     {

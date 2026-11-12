@@ -43,7 +43,7 @@ const mount = props => {
   const click = async label => { const button = nodes().find(n => n.type === 'button' && ((n.props['aria-label'] || text(n.props.children)).startsWith(label))); assert.ok(button, `Expected available button: ${label}`); button.props.onClick({ stopPropagation() {}, preventDefault() {} }); await settle(); };
   const type = async value => { nodes().find(n => n.type === 'input').props.onChange({ target: { value } }); await settle(); };
   render();
-  return { settle, click, type, text: () => text(tree), update: values => { Object.assign(props, values); render(); }, unmount: () => { destroyed = true; slots.forEach(slot => slot?.cleanup?.()); } };
+  return { settle, click, type, nodes, text: () => text(tree), update: values => { Object.assign(props, values); render(); }, unmount: () => { destroyed = true; slots.forEach(slot => slot?.cleanup?.()); } };
 };
 const videos = (channel, count) => Array.from({ length: count }, (_, i) => ({ id: `${channel}${i}`, title: `${channel} video ${i}`, publishedAt: '2026-01-01', thumbnailUrl: `${channel}${i}`, viewCount: 1, likeCount: 0, duration: 60 }));
 
@@ -206,4 +206,28 @@ test('an abandoned thumbnail rejection leaves the new request active and retryab
   assert.doesNotMatch(ui.text(), /Cancelled old request/);
   requests.find(request => request.url === 'B0').resolve(); await ui.settle();
   assert.deepEqual(added.map(ref => ref.data), ['data:image/jpeg;base64,B0']);
+});
+
+test('Escape closes the open YouTube reference panel and ignores other keys', async () => {
+  const listeners = [];
+  globalThis.document = { addEventListener: (type, fn) => listeners.push([type, fn]), removeEventListener(type, fn) { const i = listeners.findIndex(l => l[0] === type && l[1] === fn); if (i >= 0) listeners.splice(i, 1); } };
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  const ui = mount({ onAddReferences() {}, onPrepareBrainstorm() {}, draftKey: 'k', remainingSlots: 14 });
+  await ui.settle(); await ui.click('YT');
+  assert.match(ui.text(), /YouTube Ref/);
+  let focused = 0; ui.nodes().find(n => n.type === 'button' && n.props.ref).props.ref.current = { focus: () => focused++, contains: () => false, getBoundingClientRect: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }) };
+  const press = async event => { listeners.filter(l => l[0] === 'keydown').forEach(l => l[1](event)); await ui.settle(); };
+  await press({ key: 'Enter' });
+  await press({ key: 'Escape', defaultPrevented: true });
+  assert.match(ui.text(), /YouTube Ref/);
+  assert.equal(focused, 0);
+  let prevented = false; await press({ key: 'Escape', preventDefault() { prevented = true; } });
+  assert.ok(prevented, 'the handled Escape is marked so the Brainstorm panel stays open');
+  assert.doesNotMatch(ui.text(), /YouTube Ref/);
+  assert.equal(focused, 1, 'focus returns to the trigger');
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 1, 'closing the panel does not stack a second keydown listener');
+  await ui.click('YT');
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 1, 'reopening does not stack a second keydown listener');
+  ui.unmount();
+  assert.equal(listeners.filter(l => l[0] === 'keydown').length, 0, 'unmounting removes the keydown listener');
 });

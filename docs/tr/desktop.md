@@ -72,3 +72,25 @@ Mac ve Windows aynı React arayüzünü ve SQLite çalışma alanını kullanır
 | Kaynak kod zip'ini indirdin | [Yayın sayfasındaki](https://github.com/orkunisitmak/banana-studio/releases/latest) işlemcine uygun uygulama zip'ini indir. |
 
 Geliştiriciler: [geliştirme paketi oluşturma](development.md#mac-uygulamasını-derle). Yayın sorumluları: [imzalı yayın prosedürü](../RELEASING.md).
+
+## Linux: derle ve aç
+
+Linux x86-64 portu GTK 3 ve WebKitGTK 4.1 kullanır. Henüz hazır Linux yayını yoktur.
+[Taşınabilir paketi derle](development.md#linux-uygulamasını-derle), arşivi çıkar ve
+`Banana Studio` klasöründe `./banana-studio` çalıştır. Node ve yerel veritabanı
+çalışma zamanı paketlidir; Python/PyGObject, GTK, WebKitGTK ve libsecret sistemden
+kullanılır. [Bağımlılık kurulum komutları](../../desktop/linux/README.md).
+
+Normal masaüstü oturumunda, kilidi açık Secret Service kasasıyla (GNOME Keyring
+veya KWallet) çalıştır. Anahtarlar kasada tutulur; düz metin dosyasına kaydedilmez.
+**Provider keys** veya **Ctrl+,** ile anahtar ekle/sil; boş alan kayıtlı anahtarı
+korur. **F11** tam ekranı açar/kapatır. İndirmeler GTK kayıt penceresiyle yapılır.
+Dış HTTPS bağlantıları sistem tarayıcısında açılır.
+
+Yerel galeri `$XDG_DATA_HOME/banana-studio` (normalde
+`~/.local/share/banana-studio`) altındadır. **File → Open Local Data Folder** ile aç.
+Yedeklemeden önce uygulamayı kapat; klasörün tamamını kopyala. **File → Check for
+Updates…** GitHub Releases sayfasını açar. Yeni sürümü ayrı klasöre çıkar; galeri ve
+anahtarlar uygulama klasörünün dışındadır. Arşiv imzasızdır; SHA-256 değerini
+aynı paketin doğrulama kaydıyla karşılaştır. Video codec desteği dağıtımın
+WebKitGTK/GStreamer paketlerine bağlıdır. ARM ve musl/Alpine paketi sunulmaz.

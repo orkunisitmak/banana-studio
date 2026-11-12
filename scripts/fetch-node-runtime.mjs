@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 const root=path.resolve(import.meta.dirname,'..');
 const lock=JSON.parse(fs.readFileSync(path.join(root,'desktop/node-runtime.json')));
 const release=lock.releases[`${process.platform}-${process.arch}`];
-if(!['darwin','win32'].includes(process.platform)||!release)throw new Error('No pinned official runtime is available for this operating system and architecture.');
+if(!release)throw new Error('No pinned official runtime is available for this operating system and architecture.');
 const url=new URL(release.url);
 if(url.protocol!=='https:'||url.hostname!=='nodejs.org'||url.username||url.password)throw new Error('The runtime must come from the official Node.js distribution host.');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -22,7 +22,7 @@ try {
  const windows=process.platform==='win32';
  const archive=path.join(temporary,windows?'official-node.zip':'official-node.tar.gz');fs.writeFileSync(archive,bytes,{mode:0o600});
  execFileSync(windows?'tar':'/usr/bin/tar',['-xf',archive,'-C',temporary],{stdio:['ignore','pipe','pipe']});
- const extracted=path.join(temporary,`node-v${lock.version}-${windows?'win':'darwin'}-${process.arch}`);
+ const extracted=path.join(temporary,`node-v${lock.version}-${windows?'win':process.platform}-${process.arch}`);
  if(digest(fs.readFileSync(path.join(extracted,windows?'node.exe':'bin/node')))!==release.binarySha256||digest(fs.readFileSync(path.join(extracted,'LICENSE')))!==release.licenseSha256)throw new Error('Extracted runtime or license checksum mismatch.');
  const target=path.join(root,'.build/node-runtime');fs.rmSync(target,{recursive:true,force:true});fs.renameSync(extracted,target);
  console.log(windows?'.build/node-runtime/node.exe':'.build/node-runtime/bin/node');

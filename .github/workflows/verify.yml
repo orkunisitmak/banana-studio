@@ -37,6 +37,46 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-16
           PG_TEST_BIN=/usr/lib/postgresql/16/bin npm run test:database
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Install native desktop and isolated keyring test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 gir1.2-secret-1 gnome-keyring dbus-x11 xvfb
+      - run: npm ci --ignore-scripts --no-fund
+      - run: npm run build
+      - run: npm run build:desktop
+      - run: node scripts/fetch-node-runtime.mjs
+      - run: npm run package:linux
+      - run: npm run test:linux
+      - name: Test isolated Secret Service and real GTK/WebKit startup
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/banana-linux-test-data"
+          mkdir -p "$XDG_DATA_HOME"
+          dbus-run-session -- bash -e -c '
+            printf "%s" "synthetic-test-only" | gnome-keyring-daemon --unlock --components=secrets
+            python3 desktop/linux/test_shell.py --vault
+            xvfb-run -a python3 desktop/linux/test_shell.py --smoke ".build/staging-linux/Banana Studio"
+          '
+      - run: node scripts/test-local-generation.mjs
+      - run: node scripts/audit-distribution.mjs '.build/staging-linux/Banana Studio'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: prepared-linux-x64
+          path: |
+            .build/Banana-Studio-*-linux-x64.tar.gz
+            .build/verification-linux-x64.json
+          if-no-files-found: error
+          retention-days: 7
   macos:
     strategy:
       fail-fast: false

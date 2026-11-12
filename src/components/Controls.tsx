@@ -99,12 +99,13 @@ const getMimeType = (file: File | Blob, name?: string): string => {
   return 'application/octet-stream';
 };
 
-const readFileAsBase64 = (file: File | Blob): Promise<string> => {
+const readFileAsBase64 = (file: File | Blob, mimeType?: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    // The data URL carries the Blob's type, and the upload later takes its content type from it.
+    reader.readAsDataURL(mimeType && file.type !== mimeType ? new Blob([file], { type: mimeType }) : file);
   });
 };
 
@@ -692,17 +693,38 @@ export const Controls: React.FC<ControlsProps> = ({
       const currentImages = config.referenceImages || [];
       const remainingSlots = Math.max(0, MAX_IMAGES - currentImages.length);
 
-      if (files.length > remainingSlots) {
-        setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
+      // Image providers only read these formats; the Gallery editor refuses the rest up front too.
+      // Drop unsupported files before counting slots, so one of them cannot use up the slot a valid file needs.
+      // A gallery download can come back with no content type or file name, so look at its first bytes.
+      const sniffImageType = async (file: File | Blob) => {
+        const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+        if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png';
+        if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+        if (String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WEBP') return 'image/webp';
+        return '';
+      };
+      // In image mode the first bytes decide the format, so a GIF named photo.jpg is refused too.
+      // A file whose first bytes cannot be read counts as unrecognised, so it cannot reject the other files.
+      const kinds = await Promise.all(files.map(async file => {
+        const named = getMimeType(file, (file as File).name);
+        if (config.mode === 'image') return await sniffImageType(file).catch(() => '');
+        if (named === 'application/octet-stream') return await sniffImageType(file).catch(() => '') || named;
+        return named;
+      }));
+      const supported = config.mode !== 'image' ? files : files.filter((_, index) => ['image/png', 'image/jpeg', 'image/webp'].includes(kinds[index]));
+      const unsupportedFormat = supported.length < files.length;
+
+      if (supported.length > remainingSlots) {
+        addAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       }
 
-      const filesToProcess = files.slice(0, remainingSlots);
+      const filesToProcess = supported.slice(0, remainingSlots);
       const newImages: ReferenceImage[] = [];
 
       for (const file of filesToProcess) {
-          let data = await readFileAsBase64(file);
           const name = (file as File).name;
-          let mimeType = getMimeType(file, name);
+          let mimeType = kinds[files.indexOf(file)];
+          let data = await readFileAsBase64(file, mimeType);
 
           // Keep image-edit sources intact, including imports made before the
           // user switches from Nano Banana to Sunburst. Image generation sends
@@ -724,6 +746,8 @@ export const Controls: React.FC<ControlsProps> = ({
             mimeType
           });
       }
+
+      if (unsupportedFormat) addAttachmentError('Choose a PNG, JPG or WebP reference image.');
 
       if (newImages.length > 0) {
         // Merge into the latest draft: reading/compressing the files awaited,

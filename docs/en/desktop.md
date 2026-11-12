@@ -27,7 +27,7 @@ The current release is **v0.1.2** and requires **macOS 13.5 or later**. It inclu
 3. Paste it into the matching field and select **Save**. Do not paste API keys into the generation prompt.
 4. Select the corresponding image/video model. If you use Enhance or Brainstorm, open **AI settings** and select a configured text model too.
 
-The initial pairing is GPT Image 2.5 + Opus 5.5 / Medium, so it needs OpenAI + OpenRouter. For an OpenAI-only setup, select GPT-6.1 Sol for the text model as well, if your provider account can access it. You can also skip Enhance/Brainstorm and write image prompts directly.
+The initial pairing is GPT Image 2.5 + Opus 5.5 / Medium, so it needs OpenAI + Anthropic or OpenRouter. For an OpenAI-only setup, select GPT-6.1 Sol for the text model as well, if your provider account can access it. You can also skip Enhance/Brainstorm and write image prompts directly.
 
 **Checkpoint:** a saved field says **Saved in Keychain** when you reopen it. Blank fields keep an existing key; the **Remove** checkbox clears only that provider's saved key. Keys are stored in macOS Keychain and are not sent to a Banana Studio cloud account.
 

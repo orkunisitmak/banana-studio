@@ -1,14 +1,14 @@
 /** Application routes, verified against the providers' catalogues on 2026-10-20.
  * Auto selects an available route BEFORE submission, never after a paid call. */
-export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink' | 'codex';
+export type AIProvider = 'openai' | 'openrouter' | 'anthropic' | 'gemini' | 'fal' | 'evolink' | 'codex';
 /** Codex uses the desktop user's own ChatGPT sign-in instead of an API key. */
 export type KeyedProvider = Exclude<AIProvider, 'codex'>;
 export type ProviderChoice = AIProvider | 'auto';
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)',
+  openai: 'OpenAI', openrouter: 'OpenRouter', anthropic: 'Anthropic', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink', codex: 'ChatGPT plan (Codex)',
 };
 export const PROVIDER_KEYS: Record<KeyedProvider, string> = {
-  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
+  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
 };
 export const providerSetup = (provider: AIProvider): string => provider === 'codex'
   ? 'install the Codex CLI and run `codex login` with your ChatGPT account (desktop app only)'
@@ -17,7 +17,7 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'codex'],
   'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
   'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
-  'anthropic/claude-opus-5.5': ['openrouter'],
+  'anthropic/claude-opus-5.5': ['anthropic', 'openrouter'],
   'gpt-6.1-sol': ['openai', 'openrouter'],
   'gemini-3.8-flash': ['gemini', 'openrouter'],
   'seedance-2.0': ['evolink', 'fal', 'openrouter'],

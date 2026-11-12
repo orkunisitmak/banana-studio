@@ -18,7 +18,7 @@ Once accepted, an image job keeps its provider across reloads and app restarts. 
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT plan (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY`, or [Codex sign-in](#use-gpt-image-with-a-chatgpt-plan) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Opus 5.5 — default creative model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
+| Opus 5.5 — default creative model, Medium | Anthropic → OpenRouter | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, variations | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — text and footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
@@ -34,7 +34,7 @@ Images count toward your ChatGPT plan's Codex usage limits instead of API billin
 
 All three image providers support reference-based generation. Uploading references does not enable protected editing automatically: explicitly select **Edit area** for that. The final selected area is composited onto the source; outside pixels stay original regardless of provider. Tier-based Nano outputs may be resized to the source canvas before compositing, only when their proportions match. A different canvas ratio is rejected. A provider's reference-image API may be named “edit”; the app's reference-generation prompt does not carry an area edit's source-preservation instructions.
 
-Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable Enhance or Brainstorm: fal's deprecated Any LLM endpoint is not used. An Anthropic key is not an OpenRouter key. A saved key still needs model access and sufficient API credit.
+Thinking/reasoning remains in AI settings. Choosing fal.ai alone does not enable Enhance or Brainstorm: fal's deprecated Any LLM endpoint is not used. An Anthropic key runs Opus 5.5 directly; it is not an OpenRouter key and does not cover other models. A saved key still needs model access and sufficient API credit.
 
 ## Video differences
 
@@ -63,6 +63,7 @@ Create an account with the provider, open its key dashboard, create a key and co
 | --- | --- | --- |
 | OpenAI | [API keys](https://platform.openai.com/api-keys) | [OpenAI API quickstart](https://developers.openai.com/api/docs/quickstart) |
 | OpenRouter | [API keys](https://openrouter.ai/settings/keys) | [Quickstart](https://openrouter.ai/docs/quickstart) |
+| Anthropic | [Claude Console API keys](https://console.anthropic.com/settings/keys) | [Claude API quickstart](https://docs.anthropic.com/en/docs/get-started) |
 | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) | [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key) |
 | fal.ai | [Key dashboard](https://fal.ai/dashboard/keys) | [fal quickstart](https://fal.ai/docs/documentation/quickstart) |
 | EvoLink | [EvoLink account](https://evolink.ai) | [API documentation](https://docs.evolink.ai) |

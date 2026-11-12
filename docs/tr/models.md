@@ -18,7 +18,7 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | --- | --- | --- |
 | GPT Image 2.5 | OpenAI → OpenRouter → fal.ai → ChatGPT aboneliği (Codex) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` ya da [Codex girişi](#chatgpt-aboneliğiyle-gpt-image) |
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Opus 5.5 — varsayılan yaratıcı model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
+| Opus 5.5 — varsayılan yaratıcı model, Medium | Anthropic → OpenRouter | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, varyasyon | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
 | Gemini 3.8 Flash — metin ve video analizi | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
@@ -34,7 +34,7 @@ Görseller API faturası yerine ChatGPT aboneliğinin Codex kullanım limitinden
 
 Üç görsel sağlayıcısı da referanslı yeni üretimi destekler. Referans eklemek kendiliğinden korumalı editi açmaz: bunun için **Edit area** seç. Son seçili alan kaynak görsele yerleştirilir; dışındaki pikseller sağlayıcıdan bağımsız olarak korunur. Nano'nun çözünürlük katmanlarından gelen çıktı, oranı kaynakla uyuşuyorsa birleştirmeden önce kaynak boyutuna ölçeklenebilir; farklı oran reddedilir. Sağlayıcının referans görsel kabul eden API adı “edit” olabilir; bu, uygulamada otomatik alan editi anlamına gelmez.
 
-Düşünme seviyesi AI settings'ten seçilir. Yalnızca fal.ai anahtarı Enhance/Brainstorm açmaz; artık desteklenmeyen Any LLM bağlantısını kullanmıyoruz. Anthropic anahtarı OpenRouter anahtarı değildir. Anahtarın model erişimi ve API bakiyesi bulunmalıdır.
+Düşünme seviyesi AI settings'ten seçilir. Yalnızca fal.ai anahtarı Enhance/Brainstorm açmaz; artık desteklenmeyen Any LLM bağlantısını kullanmıyoruz. Anthropic anahtarı Opus 5.5'i doğrudan çalıştırır; OpenRouter anahtarı yerine geçmez ve diğer modelleri açmaz. Anahtarın model erişimi ve API bakiyesi bulunmalıdır.
 
 ## Video farkları
 
@@ -63,6 +63,7 @@ Sağlayıcıda hesap aç, anahtar panelinden yeni anahtar oluştur ve Mac veya W
 | --- | --- | --- |
 | OpenAI | [API anahtarları](https://platform.openai.com/api-keys) | [OpenAI API başlangıç rehberi](https://developers.openai.com/api/docs/quickstart) |
 | OpenRouter | [API anahtarları](https://openrouter.ai/settings/keys) | [Başlangıç rehberi](https://openrouter.ai/docs/quickstart) |
+| Anthropic | [Claude Console API anahtarları](https://console.anthropic.com/settings/keys) | [Claude API başlangıç rehberi](https://docs.anthropic.com/en/docs/get-started) |
 | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) | [Gemini API anahtarları](https://ai.google.dev/gemini-api/docs/api-key) |
 | fal.ai | [Anahtar paneli](https://fal.ai/dashboard/keys) | [fal başlangıç rehberi](https://fal.ai/docs/documentation/quickstart) |
 | EvoLink | [EvoLink hesabı](https://evolink.ai) | [API dokümanları](https://docs.evolink.ai) |

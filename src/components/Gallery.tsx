@@ -34,6 +34,7 @@ import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
 import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
 import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
+import { galleryCardLabel, isCardActivationKey } from '../lib/gallery/cardKeyboard';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
 
@@ -2749,7 +2750,7 @@ export const Gallery: React.FC<GalleryProps> = ({
           })}
 
           {/* Images */}
-          {visibleImages.map((media) => {
+          {visibleImages.map((media, mediaIndex) => {
             const isSelected = selectedIds.has(media.id);
             const aspectRatio = getMediaDisplayAspectRatio(media);
             const cardStyle = getGalleryCardStyle(aspectRatio, targetRowHeight);
@@ -2848,23 +2849,34 @@ export const Gallery: React.FC<GalleryProps> = ({
               );
             }
 
+            const activateCard = (shiftKey: boolean) => {
+              if (shiftKey && !isSelectionMode) {
+                setIsSelectionMode(true);
+                setSelectedIds(new Set([media.id]));
+                setLastSelectedId(media.id);
+                setSelectedMediaId(null);
+              } else if (isSelectionMode) {
+                toggleSelection(media.id, shiftKey);
+              } else {
+                setSelectedMediaId(media.id);
+              }
+            };
+
             return (
               <div
                 key={media.id}
                 data-gallery-media-id={media.id}
                 draggable={!isReadOnly && !isMoving}
                 onDragStart={(e) => handleDragStart(e, 'image', media.id, media)}
-                onClick={(e) => {
-                  if (e.shiftKey && !isSelectionMode) {
-                    setIsSelectionMode(true);
-                    setSelectedIds(new Set([media.id]));
-                    setLastSelectedId(media.id);
-                    setSelectedMediaId(null);
-                  } else if (isSelectionMode) {
-                    toggleSelection(media.id, e.shiftKey);
-                  } else {
-                    setSelectedMediaId(media.id);
-                  }
+                role="button"
+                tabIndex={0}
+                aria-label={galleryCardLabel(media.mediaType, media.prompt, isSelectionMode, isSelected, mediaIndex + 1, visibleImages.length)}
+                aria-pressed={isSelectionMode ? isSelected : undefined}
+                onClick={(e) => activateCard(e.shiftKey)}
+                onKeyDown={(e) => {
+                  if (!isCardActivationKey(e.key, e.target === e.currentTarget, e.repeat)) return;
+                  e.preventDefault();
+                  activateCard(e.shiftKey);
                 }}
                 style={cardStyle}
                 className={`group relative bg-gray-800 rounded-2xl overflow-hidden border transition-all shadow-lg ${isSelected

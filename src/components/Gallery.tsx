@@ -2528,6 +2528,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     setDragOverTarget(null);
                     setMoveMenuOpen(true);
                   }}
+                  aria-label="Move"
                   aria-haspopup="menu"
                   aria-expanded={moveMenuOpen}
                   className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-colors ${moveMenuOpen ? 'border-violet-400/50 bg-violet-500/15 text-violet-200' : 'border-white/[0.08] bg-[#161b22] text-gray-300 hover:border-white/15 hover:text-white'}`}

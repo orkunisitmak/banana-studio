@@ -17,7 +17,7 @@ export const GalleryEditResults: React.FC<{
   return <section aria-label="Edit results" className="rounded-2xl border border-white/[0.08] bg-[#161b22] p-3">
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
       <span className="font-semibold text-gray-200">Edit results <span className="ml-1 font-normal text-gray-500">{ready} ready{failed > 0 ? ` · ${failed} failed` : ''}</span></span>
-      <span role="status" className={pending.length ? 'flex items-center gap-1.5 text-violet-300' : 'flex items-center gap-1.5 text-lime-300'}>{pending.length ? <><Loader2 className="h-3 w-3 animate-spin" />{pending.length} generating in background</> : <><Check className="h-3 w-3" />{localOnly ? 'Available in gallery' : 'Saved in gallery'}</>}</span>
+      {(pending.length > 0 || ready > 0) && <span role="status" className={pending.length ? 'flex items-center gap-1.5 text-violet-300' : 'flex items-center gap-1.5 text-lime-300'}>{pending.length ? <><Loader2 className="h-3 w-3 animate-spin" />{pending.length} generating in background</> : <><Check className="h-3 w-3" />{localOnly ? 'Available in gallery' : 'Saved in gallery'}</>}</span>}
     </div>
     <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Source and edited images">
       <button type="button" onClick={() => onSelect()} aria-label="View edit source" aria-pressed={!selectedId} className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-xl border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400 ${!selectedId ? 'border-lime-400' : 'border-transparent hover:border-gray-500'}`}>

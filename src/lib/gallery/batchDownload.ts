@@ -4,14 +4,18 @@ import { readMediaDownloadBlob } from './mediaDownload';
 export interface BatchDownloadFile { name: string; blob: Blob }
 
 /** Fetch every selected item on its own, so one failed download no longer
- * cancels the whole ZIP. Items missing from the loaded list count as failed. */
+ * cancels the whole ZIP. Items missing from the loaded list count as failed.
+ * Image URLs are signed for a limited time, so renew them first, as single
+ * downloads do; keep the loaded URL if renewal fails. */
 export const collectBatchDownload = async (
   ids: string[], media: Pick<GeneratedMedia, 'id' | 'url' | 'mediaType'>[], fetcher: typeof fetch = fetch,
+  refreshUrl: (url: string) => Promise<string> = async url => url,
 ): Promise<{ files: BatchDownloadFile[]; failed: number }> => {
   const results = await Promise.allSettled(ids.map(async id => {
     const item = media.find(entry => entry.id === id);
     if (!item?.url) throw new Error('This item is not available.');
-    const response = await fetcher(item.url);
+    const url = item.mediaType === 'video' ? item.url : await refreshUrl(item.url).catch(() => item.url);
+    const response = await fetcher(url);
     // An error page must never be saved as the media file, even with HTTP 200.
     const blob = await readMediaDownloadBlob(response);
     const ext = item.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';

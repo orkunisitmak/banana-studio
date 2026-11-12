@@ -25,6 +25,7 @@ const isValidShape = (region: unknown): region is ImageEditRegion => {
 
 export const isValidEditRegion = (region: unknown): region is ImageEditRegion => {
   if (!isValidShape(region)) return false;
+  if (region.expandsCanvas !== undefined && typeof region.expandsCanvas !== 'boolean') return false;
   if (region.layers === undefined) return true;
   if (region.points != null || !Array.isArray(region.layers) || !region.layers.length || region.layers.length > MAX_EDIT_LAYERS) return false;
   const ids = new Set<string>();
@@ -60,14 +61,18 @@ export const copyEditRegion = (region: ImageEditRegion): ImageEditRegion => {
   if (!isValidEditRegion(region)) throw new Error('Invalid edit area.');
   const shape = (value: ImageEditRegion) => ({ x: value.x, y: value.y, width: value.width, height: value.height,
     ...(value.points ? { points: value.points.map(point => ({ x: point.x, y: point.y })) } : {}) });
-  return { ...shape(region), ...(region.layers ? { layers: region.layers.map(layer => ({ ...shape(layer), id: layer.id, tool: layer.tool })) } : {}) };
+  return { ...shape(region), ...(region.layers ? { layers: region.layers.map(layer => ({ ...shape(layer), id: layer.id, tool: layer.tool })) } : {}),
+    ...(region.expandsCanvas ? { expandsCanvas: true } : {}) };
 };
 
 /** Bounded provider guidance describes each object separately. Full contours
  * are retained for compositing; sampling here cannot change protected pixels. */
 export const describeEditRegion = (region: ImageEditRegion, width: number, height: number): string => {
   const layers = getEditRegionLayers(region);
-  return `EDIT AREAS\nApply the requested change only to the union of these ${layers.length} selected areas on the ${width}x${height} SOURCE canvas. Gaps between areas remain unchanged. Preserve source alignment; do not move, scale or crop the scene.\n` + layers.map((layer, index) => {
+  const intro = region.expandsCanvas
+    ? `EXPAND CANVAS\nThe ${width}x${height} SOURCE canvas holds the original image plus ${layers.length} new areas that only contain placeholder fill. Paint these areas as a natural continuation of the original scene: continue its perspective, lighting, colors, textures and any objects cut by the original border. Do not add frames, borders or text. Keep the original image exactly where it is; do not move, scale or crop it.\n`
+    : `EDIT AREAS\nApply the requested change only to the union of these ${layers.length} selected areas on the ${width}x${height} SOURCE canvas. Gaps between areas remain unchanged. Preserve source alignment; do not move, scale or crop the scene.\n`;
+  return intro + layers.map((layer, index) => {
     const bounds = editRegionPixels(layer, width, height);
     let line = `Area ${index + 1}: x=${bounds.left}, y=${bounds.top}, width=${bounds.width}, height=${bounds.height}.`;
     if (layer.points) {
@@ -81,7 +86,10 @@ export const describeEditRegion = (region: ImageEditRegion, width: number, heigh
 
 export const describeEditRegionPercent = (region: ImageEditRegion): string => {
   const percent = (value: number) => Number((value * 100).toFixed(2));
-  return 'EDIT AREAS\nEdit only the union of the following selected objects. Coordinates are percentages of SOURCE image width and height. Keep gaps, faces and everything outside these selections unchanged; preserve source alignment.\n' + getEditRegionLayers(region).map((layer, index) => {
+  const intro = region.expandsCanvas
+    ? 'EXPAND CANVAS\nThe SOURCE image is the original picture plus new areas that only contain placeholder fill. Paint these areas as a natural continuation of the original scene: continue its perspective, lighting, colors, textures and any objects cut by the original border. Do not add frames, borders or text. Coordinates are percentages of SOURCE image width and height. Keep the original picture unchanged and in place.\n'
+    : 'EDIT AREAS\nEdit only the union of the following selected objects. Coordinates are percentages of SOURCE image width and height. Keep gaps, faces and everything outside these selections unchanged; preserve source alignment.\n';
+  return intro + getEditRegionLayers(region).map((layer, index) => {
     let line = `Area ${index + 1}: x=${percent(layer.x)}%, y=${percent(layer.y)}%, width=${percent(layer.width)}%, height=${percent(layer.height)}%.`;
     if (layer.points) {
       const count = Math.min(12, layer.points.length);

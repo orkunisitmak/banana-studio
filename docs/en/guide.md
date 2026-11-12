@@ -64,6 +64,12 @@ The Generate button becomes available for another submission once the job has be
 
 Use **Edit this result** to continue from a result or return to the source for another attempt. Results are separate gallery items.
 
+## Expand the canvas
+
+In **Edit image**, choose **Expand canvas** to turn an image into another ratio, for example a square cover into 16:9 or a 16:9 thumbnail into a 9:16 Short. Pick the new ratio and where the original should stay (left, centered, right or top/bottom). The preview shows the new canvas: the dashed frame is the original, the blurred areas are what the model paints. A prompt is optional; without one the model continues the scene.
+
+The original is kept pixel for pixel except a thin seam (8–32 px) where both sides are blended. Expanded canvases use sizes both GPT Image 2.5 and Nano Banana accept; the original is scaled when needed to stay between 0.66 and 8.3 megapixels and within 3840 px.
+
 ## Plan a YouTube thumbnail
 
 1. Open **YT** and find a channel or video. Lookup uses a YouTube Data API key.

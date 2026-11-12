@@ -28,9 +28,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       p_offset: mediaId ? 0 : offset, p_media_id: mediaId || null,
     });
     if (error) throw error;
-    if (!data || (mediaId && !data.images.length)) return res.status(404).json({ error: 'This share link is unavailable or expired.' });
+    if (!data) return res.status(404).json({ error: 'This share link is unavailable or expired.' });
     const ttl = Math.min(URL_LIFETIME_SECONDS, Math.floor((Date.parse(data.expiresAt) - Date.now()) / 1000));
     if (!Number.isFinite(ttl) || ttl < 1) return res.status(404).json({ error: 'This share link is unavailable or expired.' });
+    if (mediaId && !data.images.length) return res.status(404).json({ error: 'This image is no longer available in the shared folder.' });
     const rows: SharedRow[] = data.images.slice(0, mediaId ? 1 : PAGE_SIZE);
     // Only paths that passed the database's current folder + trusted storage ownership checks.
     const paths = [...new Set(rows.map(row => mediaId ? row.storagePath : row.thumbnailPath || row.storagePath))];

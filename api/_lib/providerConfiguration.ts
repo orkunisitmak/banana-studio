@@ -3,9 +3,11 @@ export const missingProviderMessage = (provider: string, variable: string): stri
   : `${provider} is not configured. The workspace owner must add ${variable} to the server environment.`;
 import { PROVIDER_KEYS, resolveProvider, type AIProvider, type ProviderAvailability } from '../../src/lib/providers.js';
 import { codexAvailable } from './codexImage.js';
+import { claudeAvailable } from './claudeText.js';
 
 export const providerAvailability = (): ProviderAvailability => ({
   ...Object.fromEntries(Object.entries(PROVIDER_KEYS).map(([provider, key]) => [provider, Boolean(process.env[key]?.trim()) && process.env[`${provider.toUpperCase()}_ENABLED`] !== 'false'])),
+  claude: claudeAvailable(),
   codex: codexAvailable(),
 });
 export const chooseProvider = (model: string, preference?: unknown) => resolveProvider(model, preference, providerAvailability());

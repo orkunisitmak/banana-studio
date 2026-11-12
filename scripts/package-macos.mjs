@@ -32,6 +32,14 @@ fs.copyFileSync(path.join(root,'.build/desktop/server.mjs'),path.join(resources,
 fs.writeFileSync(path.join(resources,'workspace/package.json'),JSON.stringify({name:'banana-studio-local-runtime',private:true,type:'module'}));
 fs.cpSync(path.join(root,'dist'),path.join(resources,'workspace/web'),{recursive:true});
 const copied=[]; // macOS ImageIO handles raster encoding; no native image libraries are bundled.
+// The Claude plan provider falls back to the SDK's own native build when Claude Code is not installed.
+const claudeSdk=`@anthropic-ai/claude-agent-sdk-darwin-${process.arch}`;
+const claudeSdkSource=path.join(root,'node_modules',claudeSdk);
+if(!fs.existsSync(path.join(claudeSdkSource,'package.json')))throw new Error('Missing runtime dependency: '+claudeSdk);
+const claudeSdkTarget=path.join(resources,'workspace','node_modules',claudeSdk);
+fs.mkdirSync(path.dirname(claudeSdkTarget),{recursive:true});
+fs.cpSync(claudeSdkSource,claudeSdkTarget,{recursive:true,dereference:true});
+copied.push(claudeSdk);
 const assertContained=directory=>{for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink()){const link=fs.readlinkSync(file);if(path.isAbsolute(link)||!fs.realpathSync(file).startsWith(app+path.sep))throw new Error('An app dependency has an external symlink. Packaging stopped.');}else if(entry.isDirectory())assertContained(file);}};
 assertContained(app);
 const iconset=path.join(root,'.build/BananaStudio.iconset');fs.mkdirSync(iconset,{recursive:true});for(const size of [16,32,128,256,512])for(const scale of [1,2]){

@@ -9,7 +9,8 @@ internal static class KeyVault
     internal static readonly (string Name, string Label)[] Providers = [
         ("OPENAI_API_KEY", "OpenAI"), ("OPENROUTER_API_KEY", "OpenRouter"),
         ("GEMINI_API_KEY", "Google Gemini"), ("FAL_KEY", "fal.ai"),
-        ("EVOLINK_API_KEY", "EvoLink"), ("YOUTUBE_API_KEY", "YouTube Data API")
+        ("EVOLINK_API_KEY", "EvoLink"), ("YOUTUBE_API_KEY", "YouTube Data API"),
+        ("CLAUDE_CODE_OAUTH_TOKEN", "Claude plan token")
     ];
     private const string Prefix = "com.bananastudio.provider-keys/";
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

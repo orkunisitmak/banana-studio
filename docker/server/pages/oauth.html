@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Banana Studio · Connected apps</title>
+  <link rel="icon" href="/icon-192.png">
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d1117; color: #e6edf3; font: 15px/1.5 system-ui, sans-serif; }
+    main { width: min(30rem, calc(100% - 2.5rem)); padding: 1.75rem; border: 1px solid #30363d; border-radius: 1rem; background: #161b22; }
+    h1 { margin: 0 0 .25rem; font-size: 1.2rem; }
+    p { margin: .5rem 0; color: #9da7b3; }
+    strong { color: #e6edf3; }
+    ul { padding-left: 1.2rem; color: #9da7b3; }
+    .actions { display: flex; gap: .75rem; margin-top: 1.25rem; }
+    button, a.button { flex: 1; font: inherit; text-align: center; text-decoration: none; padding: .7rem 1rem; border-radius: .6rem; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; }
+    button.primary, a.primary { background: #7c3aed; border-color: #7c3aed; }
+    button:disabled { opacity: .6; cursor: progress; }
+    .grant { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 0; border-top: 1px solid #30363d; }
+    .grant button { flex: 0 0 auto; }
+    .error { color: #f85149; }
+  </style>
+  <script type="module" src="/oauth/oauth.js"></script>
+</head>
+<body>
+  <main id="app" aria-live="polite"><p>Loading…</p></main>
+</body>
+</html>

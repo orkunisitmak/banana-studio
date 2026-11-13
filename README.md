@@ -118,6 +118,7 @@ An API key is a private credential that lets the app use your account with an AI
 | Nano Banana Pro / Nano Banana 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Claude Opus 5.5 — Enhance, Brainstorm, variations and creative briefs | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — text features | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
+| ChatGPT plan (Codex) — Enhance, Brainstorm and variations, desktop only | Codex only; no API fallback | No API key: `codex login` with ChatGPT, then select **AI settings → Text model → ChatGPT plan (Codex)** |
 | Gemini 3.8 Flash — text and YouTube footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter (supported modes) | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
 | MiniMax H3 Max — text/image/reference to video, extend, lip sync and recast | fal.ai | `FAL_KEY` |

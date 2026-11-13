@@ -20,6 +20,7 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 | Nano Banana Pro / 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Opus 5.5 — varsayılan yaratıcı model, Medium | OpenRouter | `OPENROUTER_API_KEY` |
 | GPT-6.1 Sol — Enhance, Brainstorm, varyasyon | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
+| ChatGPT plan (Codex) — masaüstü metin özellikleri | Yalnızca Codex; API'ye geçiş yok | ChatGPT ile `codex login`; API anahtarı gerekmez |
 | Gemini 3.8 Flash — metin ve video analizi | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
 | Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
 | H3 Max — Text/Image/Reference to Video, Extend, Lip Sync, Recast | fal.ai | `FAL_KEY` |
@@ -31,6 +32,15 @@ Kabul edilen görsel işi, sayfa yenilense veya uygulama yeniden açılsa da sa�
 Mac ve Windows'ta GPT Image 2.5, ChatGPT hesabınla giriş yapılmış resmi [Codex CLI](https://developers.openai.com/codex/cli) üzerinden API anahtarı olmadan çalışabilir. Codex'i kur, `codex login` çalıştırıp **Sign in with ChatGPT** seç, sonra Provider routing'de **ChatGPT plan (Codex)** seç ya da GPT Image anahtarı yoksa Auto'da bırak. Banana Studio kendi `codex` programını salt okunur bir sandbox'ta başlatır, prompt'u stdin ile gönderir ve kaydedilen görseli okur. Codex token'larını hiçbir zaman okumaz veya iletmez; rotanın uygun görünmesi için `~/.codex/auth.json` içindeki yalnızca giriş türü kontrol edilir. Codex alışılmadık bir yerdeyse `CODEX_BIN` değişkenine çalıştırılabilir dosyanın tam yolunu yaz; Windows'ta uygulama `PATH` üzerinde `codex.exe` arar. Codex en az ortam değişkeniyle çalışır, API anahtarların ona hiç aktarılmaz.
 
 Görseller API faturası yerine ChatGPT aboneliğinin Codex kullanım limitinden düşer. Her görsel yaklaşık bir dakika sürer, Codex istenen orana en yakın desteklenen tuvali seçer, kalite/moderasyon ayarları iletilmez. Korumalı editlerde yine yalnızca seçili alan birleştirilir; Codex farklı oranda görsel döndürürse sonuç reddedilir. Web kurulumları bu rotayı kullanamaz. Codex her üretilen görselin bir kopyasını `CODEX_HOME` altında (varsayılan `~/.codex`) kendisi de saklar; Banana Studio bu kopyayı silmez.
+
+### ChatGPT aboneliğiyle Brainstorm
+
+`codex login` ile giriş yaptıktan sonra **AI settings → Text model** altında **ChatGPT plan (Codex)** seçip kaydet. Bu seçim görsel sağlayıcısından ayrıdır: GPT Image için Codex seçmek Brainstorm'un metin modelini değiştirmez. Seçenek yalnızca masaüstünde görünür; mevcut API modelleri ve varsayılan seçim değişmez.
+
+Brainstorm, Enhance ve varyasyonlar, Codex CLI'nin varsayılan modelini Low, Medium, High veya Extra high düşünme seviyesiyle kullanır; belirli bir API modelinin çalıştırıldığı iddia edilmez. Görsel referansları, alıntılanmış yazılar, istenen fikir sayısı ve kıyafet seçimleri korunur. Metin istekleri geçici, salt okunur oturumlarda çalışır; komut, tarayıcı, uygulama/eklenti ve görsel üretim araçları kapalıdır. Geçici referans dosyaları işlem bitince veya iptal edilince silinir. Güncel resmî CLI gerekir (0.167.2 ile test edildi).
+
+Kullanım API kredisi yerine ChatGPT aboneliğinin Codex limitinden düşer. Giriş, kota veya üretim hatasında ücretli sağlayıcıya geçilmez. API maliyeti sıfır kaydedilir; bu, aboneliğin ücretsiz veya sınırsız olduğu anlamına gelmez. YouTube'un son yaratıcı brief'i Codex ile yazılabilir; **önce** görüntüyü okuyan Gemini ve YouTube araması için ilgili sağlayıcılar hâlâ gerekir.
+
 
 Üç görsel sağlayıcısı da referanslı yeni üretimi destekler. Referans eklemek kendiliğinden korumalı editi açmaz: bunun için **Edit area** seç. Son seçili alan kaynak görsele yerleştirilir; dışındaki pikseller sağlayıcıdan bağımsız olarak korunur. Nano'nun çözünürlük katmanlarından gelen çıktı, oranı kaynakla uyuşuyorsa birleştirmeden önce kaynak boyutuna ölçeklenebilir; farklı oran reddedilir. Sağlayıcının referans görsel kabul eden API adı “edit” olabilir; bu, uygulamada otomatik alan editi anlamına gelmez.
 

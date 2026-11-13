@@ -244,6 +244,7 @@ const estimateUsageCost = (
   }
 
   if (metadata?.openrouterUsage) return calculateOpenRouterTextCost(metadata.openrouterUsage, model);
+  if (model === 'codex-text') return 0; // Subscription usage, not a metered API charge.
   if (model === OPENAI_TEXT_MODEL) return calculateOpenAITextCost(metadata?.openaiUsage);
   if (model === OPENROUTER_TEXT_MODEL) return calculateOpenRouterTextCost(metadata?.openrouterUsage);
 

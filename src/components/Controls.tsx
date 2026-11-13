@@ -2947,7 +2947,7 @@ export const Controls: React.FC<ControlsProps> = ({
                           </button>
                           <p className="text-xs text-gray-400">Close Brainstorm to generate your prompt directly.</p>
                           {brainstormCostPreview.note && <p className="text-center text-[10px] text-gray-400">{brainstormCostPreview.note}</p>}
-                          <p className="text-[10px] leading-relaxed text-gray-500">{brainstormCostPreview.basis === 'output' ? 'Output estimate. Prompt, references and Brainstorm text are billed separately.' : 'Image estimate. Brainstorm text usage is billed separately.'}</p>
+                          <p className="text-[10px] leading-relaxed text-gray-500">{brainstormCostPreview.basis === 'output' ? 'Output estimate; prompt and reference costs are separate.' : 'Image estimate only.'} Brainstorm follows the selected text model's API billing or subscription limits.</p>
                           {isBrainstormPreparing && <p role="status" className="text-xs text-amber-300">Preparing in the gallery. Generate again to start another batch.</p>}
                           {!hasBrainstormInput && <p className="text-xs text-gray-500">{brainstormCategory === 'simple' ? 'Describe your concept or add reference images.' : 'Add reference images first.'}</p>}
                           {brainstormError && <p role="alert" className="text-xs text-amber-300">{brainstormError}</p>}

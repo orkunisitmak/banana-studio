@@ -85,7 +85,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const isStale = config ? isEnhancedPromptStale(config) : false;
   const busy = isEnhancing || isGenerating || isUploading;
   const nanoCanvasSupported = canvas ? canUseNanoEditCanvas(canvas) : true;
-  const canvasError = canvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${canvas.width}x${canvas.height}`)
+  const canvasError = canvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${canvas.width}x${canvas.height}`, providerRoute.provider)
     : !nanoCanvasSupported ? 'Choose GPT Image 2.5 to keep this canvas.' : null : null;
   const canGenerate = !providerRoute.error && !busy && !preview && !!prompt.trim() && !!config && !isStale && !canvasError && !referenceError;
   const imageCostPreview = config ? getImageCostPreview({ ...config, imageProvider: providerRoute.provider }) : undefined;

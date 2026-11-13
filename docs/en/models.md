@@ -33,6 +33,8 @@ On Mac and Windows, GPT Image 2.5 can run through the official [Codex CLI](https
 
 Images count toward your ChatGPT plan's Codex usage limits instead of API billing. Each image takes about a minute, Codex chooses the nearest supported canvas for the requested ratio, and quality/moderation settings are not forwarded. Protected edits still composite only the selected area and are rejected if Codex returns a different aspect ratio. Hosted web workspaces cannot use this route. Codex also keeps its own copy of each generated image under `CODEX_HOME` (by default `~/.codex`); Banana Studio does not delete it.
 
+For Codex protected edits, the source canvas does not need 16-pixel alignment or the API's 3840-pixel edge limit. Positive integer dimensions are accepted up to the local raster decoder's 33,554,432-pixel limit. The original canvas stays unchanged: a differently sized generated result is resized only when its aspect ratio matches within the existing 1% rounding tolerance, then composited inside the selected layers. Every outside pixel is preserved. A larger ratio mismatch rejects the result rather than stretching or cropping it. API routes retain their existing size restrictions.
+
 ### Use Brainstorm with a ChatGPT plan
 
 After signing in with `codex login`, open **AI settings → Text model**, choose **ChatGPT plan (Codex)** and save. This is a separate selection from the image provider: selecting Codex for GPT Image does not change Brainstorm's text model. The option is available only in desktop workspaces; existing API models and the default selection are unchanged.

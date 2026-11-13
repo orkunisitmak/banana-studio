@@ -59,7 +59,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   const key = providerKey(provider) || '';
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
   let size = getOpenAIImageSize({ ...body, openaiImageOptions: options });
-  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(size);
+  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(size, provider);
   if (optionError) return res.status(400).json({ error: optionError });
   const refs = body.referenceImages ?? [];
   if (!Array.isArray(refs) || refs.length > (body.model === SUNBURST_MODEL ? 16 : 14) || refs.some((r: any) => !r || !isImageUrl(r.data))) return res.status(400).json({ error: 'Provide up to 16 HTTPS reference images.' });
@@ -93,7 +93,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       protectedSource = await readEditSource(db, editReference.data, user.id);
       size = `${protectedSource.info.width}x${protectedSource.info.height}`;
       // OpenAI's size rules apply to API routes; Codex picks its own canvas and is resized to the source at the same ratio.
-      const sourceSizeError = body.model === SUNBURST_MODEL && provider !== 'codex' ? validateOpenAIImageSize(size) : null;
+      const sourceSizeError = body.model === SUNBURST_MODEL ? validateOpenAIImageSize(size, provider) : null;
       if (sourceSizeError) return res.status(400).json({ error: `Protected edits use the source canvas (${size}). ${sourceSizeError}` });
       generationPrompt += '\n\n' + describeEditRegion(editReference.editRegion, protectedSource.info.width, protectedSource.info.height);
     } else if (safeRefs.some(ref => ref.editRegion)) {

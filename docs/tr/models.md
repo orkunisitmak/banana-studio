@@ -33,6 +33,8 @@ Mac ve Windows'ta GPT Image 2.5, ChatGPT hesabınla giriş yapılmış resmi [Co
 
 Görseller API faturası yerine ChatGPT aboneliğinin Codex kullanım limitinden düşer. Her görsel yaklaşık bir dakika sürer, Codex istenen orana en yakın desteklenen tuvali seçer, kalite/moderasyon ayarları iletilmez. Korumalı editlerde yine yalnızca seçili alan birleştirilir; Codex farklı oranda görsel döndürürse sonuç reddedilir. Web kurulumları bu rotayı kullanamaz. Codex her üretilen görselin bir kopyasını `CODEX_HOME` altında (varsayılan `~/.codex`) kendisi de saklar; Banana Studio bu kopyayı silmez.
 
+Codex ile korumalı editte kaynak tuvalin 16'nın katı olması veya API'nin 3840 piksel kenar sınırına uyması gerekmez. Yerel görsel işleyicisinin 33.554.432 toplam piksel sınırına kadar pozitif tam sayı boyutlar kabul edilir. Orijinal tuval değişmez: farklı boyutta gelen sonuç, oranı mevcut %1 yuvarlama toleransı içinde uyuşuyorsa kaynak boyutuna ölçeklenip yalnızca seçili layer'lara birleştirilir. Seçim dışındaki pikseller korunur. Daha büyük oran farkında görsel gerilmez veya kırpılmaz; sonuç reddedilir. API bağlantılarının boyut kuralları değişmez.
+
 ### ChatGPT aboneliğiyle Brainstorm
 
 `codex login` ile giriş yaptıktan sonra **AI settings → Text model** altında **ChatGPT plan (Codex)** seçip kaydet. Bu seçim görsel sağlayıcısından ayrıdır: GPT Image için Codex seçmek Brainstorm'un metin modelini değiştirmez. Seçenek yalnızca masaüstünde görünür; mevcut API modelleri ve varsayılan seçim değişmez.

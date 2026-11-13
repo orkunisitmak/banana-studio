@@ -78,7 +78,7 @@ export const getImageCostPreview = (config: CostConfig, count = config.count, hi
   }
   const options = getOpenAIImageOptions(config.openaiImageOptions);
   const size = getOpenAIImageSize(config);
-  if (!Number.isInteger(count) || count < 0 || validateOpenAIImageOptions(options) || validateOpenAIImageSize(size)) {
+  if (!Number.isInteger(count) || count < 0 || validateOpenAIImageOptions(options) || validateOpenAIImageSize(size, config.imageProvider)) {
     return { min: null, max: null, label: 'Choose valid size', description: 'Choose valid image settings to preview cost.', note: '', basis: 'unknown' };
   }
   const refs = getSunburstReferences(config.referenceImages);

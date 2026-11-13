@@ -34,7 +34,7 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   let provider;
   try { provider = chooseProvider(body.model, body.provider); } catch (error) { return invalid((error as Error).message); }
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
-  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...body, openaiImageOptions: options }));
+  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...body, openaiImageOptions: options }), provider);
   if (optionError) invalid(optionError);
   if (body.originalPrompt != null && (typeof body.originalPrompt !== 'string' || body.originalPrompt.length > 32000)) invalid('Invalid original prompt.');
   if (body.imagePromptCategory != null && !['simple','youtube_thumbnail','product_shot','portrait','social_media','custom'].includes(body.imagePromptCategory)) invalid('Invalid image category.');

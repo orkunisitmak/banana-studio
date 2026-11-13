@@ -1162,9 +1162,11 @@ export const Controls: React.FC<ControlsProps> = ({
     setIsBrainstormPanelOpen(!isBrainstormPanelOpen);
   };
 
+  const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
+  const providerRoute = useProviderRoute(config.mode === 'video' ? selectedVideoModel : config.imageModel);
   const sunburstError = config.imageModel === SUNBURST_MODEL && config.mode === 'image' && (
     validateOpenAIImageOptions(getOpenAIImageOptions(config.openaiImageOptions))
-    || validateOpenAIImageSize(getOpenAIImageSize(config))
+    || validateOpenAIImageSize(getOpenAIImageSize(config), providerRoute.provider)
     || (config.referenceImages.length > 16 ? 'Sunburst accepts up to 16 reference images.' : null)
   );
   const hasBrainstormInput = brainstormCategory === 'simple' || config.youtubeSource
@@ -1179,7 +1181,7 @@ export const Controls: React.FC<ControlsProps> = ({
     try {
       const pendingPreferences = resolveTextModelPreferences();
       const preferences = pendingPreferences instanceof Promise ? await pendingPreferences : pendingPreferences;
-      onBrainstormGenerate({ settings: config, category: brainstormCategory, ideaCount: brainstormIdeaCount,
+      onBrainstormGenerate({ settings: { ...config, imageProvider: providerRoute.provider }, category: brainstormCategory, ideaCount: brainstormIdeaCount,
         textModel: preferences.model, reasoningEffort: preferences.reasoningEffort, thinkingLevel: preferences.thinkingLevel });
     } catch (error) {
       setBrainstormError(error instanceof Error ? error.message : 'Could not start Brainstorm.');
@@ -1888,8 +1890,6 @@ export const Controls: React.FC<ControlsProps> = ({
   // --- Render Helpers ---
 
   const imageModelOptions = IMAGE_MODEL_OPTIONS;
-  const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
-  const providerRoute = useProviderRoute(config.mode === 'video' ? selectedVideoModel : config.imageModel);
   const selectedVideoOperation = config.videoOperation || 'generate';
   const selectedVideoIntent = getVideoPromptIntent(config);
   const videoModelOptions = VIDEO_MODEL_OPTIONS.map(option => option.value === 'seedance-2.5' && providerRoute.provider !== 'evolink' ? { ...option, label: 'Seedance 2.5' } : option);
@@ -3009,7 +3009,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 ) : (
                   <>
                     <Dropdown label="Model" value={config.imageModel} options={imageModelOptions} onSelect={(val) => updateConfig('imageModel', val)} icon={ImageIcon} compact />
-                    {isSunburst ? <OpenAIImageSettings config={config} onChange={onChange} onSizeAdjustment={setSizeAdjustment} /> : <>
+                    {isSunburst ? <OpenAIImageSettings config={config} provider={providerRoute.provider} onChange={onChange} onSizeAdjustment={setSizeAdjustment} /> : <>
                       <Dropdown label="Aspect Ratio" value={config.aspectRatio} options={aspectRatioOptions} onSelect={(val) => updateConfig('aspectRatio', val)} icon={Ratio} compact />
                       <Dropdown label="Resolution" value={config.resolution} options={resolutionOptions} onSelect={(val) => updateConfig('resolution', val)} icon={Scan} compact />
                     </>}

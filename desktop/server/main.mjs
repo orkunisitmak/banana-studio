@@ -8,6 +8,7 @@ import { setQueueWake } from './queue.mjs';
 import { createMediaUploader } from './uploads.mjs';
 import { runImageJob, ImageJobWait } from '../../api/_lib/imageJobRunner.ts';
 import openaiText from '../../api/openai-text-generate.ts';
+import codexText from '../../api/codex-text-generate.ts';
 import openrouterText from '../../api/openrouter-text-generate.ts';
 import geminiGenerate from '../../api/gemini-generate.ts';
 import geminiStatus from '../../api/gemini-status.ts';
@@ -49,6 +50,7 @@ const wake=()=>{
 };
 setQueueWake(wake);
 const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
+routes['codex-text-generate']=codexText;
 const prepareMedia=createMediaUploader(workspace);
 routes['seedance-video']=async(req,res)=>{
  if(req.method==='POST'){

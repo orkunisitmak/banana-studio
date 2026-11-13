@@ -119,7 +119,7 @@ export const generateOpenAIImage = async (
   config.imageProvider = config.imageProvider || await selectProvider(config.imageModel);
   validateImageGenerationReferences({ ...config, prompt });
   const options = getOpenAIImageOptions(config.imageModel === SUNBURST_MODEL ? config.openaiImageOptions : undefined);
-  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }));
+  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }), config.imageProvider);
   if (optionError) throw new Error(optionError);
   const refs = getSunburstReferences(config.referenceImages || []);
   const referenceError = imageReferenceError(config.imageModel, refs);

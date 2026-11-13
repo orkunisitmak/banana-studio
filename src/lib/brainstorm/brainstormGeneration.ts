@@ -35,7 +35,7 @@ export const createBrainstormBatch = (request: BrainstormGenerationRequest, fold
   }
   validateImageGenerationReferences(settings);
   if (settings.imageModel === SUNBURST_MODEL) {
-    const error = validateOpenAIImageOptions(getOpenAIImageOptions(settings.openaiImageOptions)) || validateOpenAIImageSize(getOpenAIImageSize(settings));
+    const error = validateOpenAIImageOptions(getOpenAIImageOptions(settings.openaiImageOptions)) || validateOpenAIImageSize(getOpenAIImageSize(settings), settings.imageProvider);
     if (error) throw new Error(error);
   }
   const id = `brainstorm-${crypto.randomUUID()}`;

@@ -60,6 +60,9 @@ const activeImageJobs = new Map<string, Promise<GeneratedMedia>>();
 export const resumeOpenAIImage = async (
   pending: GeneratedMedia, onProgress?: (progress: number) => void, onStage?: ImageGenerationContext['onStage'],
 ): Promise<GeneratedMedia> => {
+  // The UI observer must never interrupt recovery of an already accepted job.
+  // In particular, resumeOpenAIImage is also called directly after a page reload.
+  const notifyStage = createImageStageNotifier(onStage);
   let session: Session;
   for (let attempt = 1; ; attempt++) {
     try { session = await getImageSession(); break; }
@@ -95,9 +98,9 @@ export const resumeOpenAIImage = async (
     const durable = saved?.imageQueue?.version === 1 || pending.imageQueue?.version === 1;
     if (!saved && durable && Date.now() > missingDeadline) throw new Error('The saved image job could not be found. Refresh the gallery before submitting again.');
     if (durable && (!saved || saved.status === 'pending')) {
-      onStage?.('queued',saved?.imageQueueWaitReason);
+      notifyStage('queued',saved?.imageQueueWaitReason);
     } else {
-      onStage?.('generating');
+      notifyStage('generating');
       onProgress?.(estimateImageProgress(saved?.openaiStartedAt || pending.openaiStartedAt || pending.createdAt));
     }
     if (!durable && Date.now() > deadline) break;

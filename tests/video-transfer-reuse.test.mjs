@@ -185,3 +185,77 @@ test('saves of one video that overlap do not let a retry reuse a file the other 
     assert.equal(globalThis.__objects.get('u1/v4.mp4'), 'https://p/A.mp4');
   } finally { globalThis.__signGate = null; globalThis.__blobSource = false; Object.assign(console, { warn, error }); globalThis.fetch = fetchImpl; }
 });
+
+test('two browser tabs serialize the same generation across independent module instances', async () => {
+  // Two separately loaded bundles simulate independent tab-local queues.
+  const secondBundleUrl = 'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64') + '#another-tab';
+  const {saveVideo: saveFromOtherTab} = await import(secondBundleUrl);
+  const previousLocks = Object.getOwnPropertyDescriptor(globalThis.navigator, 'locks');
+  const lockQueues = new Map();
+  const acquiredLocks = [];
+  Object.defineProperty(globalThis.navigator, 'locks', {
+    configurable: true, value: {
+      async request(name, work) {
+        acquiredLocks.push(name);
+        const previous = lockQueues.get(name) || Promise.resolve();
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const tail = previous.then(() => gate);
+        lockQueues.set(name, tail);
+        await previous;
+        try { return await work({name}); }
+        finally { release(); if (lockQueues.get(name) === tail) lockQueues.delete(name); }
+      },
+    },
+  });
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn, originalError = console.error;
+  console.warn = console.error = () => {};
+  globalThis.__ops = []; globalThis.__rows = []; globalThis.__objects = new Map();
+  globalThis.__blobSource = true; globalThis.__sessionReads = 0;
+  globalThis.__uploads = []; globalThis.__signFails = null;
+  globalThis.__db = op => {
+    if (op.op === 'upsert') globalThis.__rows.push(op.value);
+    return {data:null,error:null};
+  };
+  globalThis.fetch = async url => new Response(String(url), {status:200,headers:{'content-type':'video/mp4'}});
+  let releaseFirst;
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  let gated = false;
+  globalThis.__signGate = path => {
+    if (path === 'u1/v-cross.mp4' && !gated) { gated = true; return firstGate; }
+  };
+  const media = (url,prompt) => ({
+    id:'v-cross',url,prompt,mediaType:'video',createdAt:1,videoModel:'seedance-2.5',referenceImages:[],
+  });
+  let first,second;
+  try {
+    first = saveVideo(media('https://p/A.mp4','source A'));
+    const until = Date.now() + 5000;
+    while (!gated && Date.now() < until) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(gated, 'first tab must pause while its saved video is being signed');
+
+    const beforeSecond = globalThis.__sessionReads;
+    second = saveFromOtherTab(media('https://p/B.mp4','source B'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(globalThis.__sessionReads, beforeSecond,
+      'the second tab must not enter the same-generation save while the first is paused');
+    assert.deepEqual(acquiredLocks,['banana-video-save:v-cross','banana-video-save:v-cross']);
+
+    releaseFirst();
+    await Promise.all([first,second]);
+    const finalRow = globalThis.__rows.at(-1);
+    assert.equal(finalRow.prompt,'source B','second saved row should follow the first');
+    assert.equal(globalThis.__objects.get(finalRow.storage_path),'https://p/B.mp4',
+      'the final database row and stored video bytes must agree');
+  } finally {
+    releaseFirst();
+    await Promise.allSettled([first,second].filter(Boolean));
+    globalThis.__signGate = null; globalThis.__signFails = null;
+    globalThis.__blobSource = false;
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn; console.error = originalError;
+    if (previousLocks) Object.defineProperty(globalThis.navigator,'locks',previousLocks);
+    else delete globalThis.navigator.locks;
+  }
+});

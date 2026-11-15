@@ -1525,6 +1525,13 @@ export const saveVideo = async (
   if (!supabase) return undefined;
   const release = await acquireVideoSave(media.id);
   try {
+    // A module-local queue cannot protect the same generation in another tab.
+    // Web Locks are origin-wide; hold the lock through both the file upload and DB upsert.
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      return await navigator.locks.request(`banana-video-save:${media.id}`,
+        () => saveVideoWithoutQueue(media, expectedUserId));
+    }
+    // Non-browser and older clients retain the original same-tab serialization.
     return await saveVideoWithoutQueue(media, expectedUserId);
   } finally {
     release();

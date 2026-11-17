@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
 const stubs = {
+  guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
   auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});',
   providerTasks: `
     export const prepareTaskRegistry=async()=>({});
@@ -29,6 +30,7 @@ const out = await build({
         path: args.path.includes('providerTasks') ? 'providerTasks' : 'auth',
         namespace: 'stub',
       }));
+      b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({
         contents: stubs[args.path],
         loader: 'js',

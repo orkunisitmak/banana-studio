@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 const { build } = await import('esbuild');
 const { fileURLToPath } = await import('node:url');
 const stubs = {
+  guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
   auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({});',
   providerTasks: `
     export const prepareTaskRegistry=async()=>({});
@@ -28,6 +29,7 @@ const compiled = await build({
       namespace: 'stub',
     }));
     b.onResolve({ filter: /\/evolink-generate\.js$/ }, () => ({ path: 'evolink', namespace: 'stub' }));
+    b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }));
     b.onResolve({ filter: /^[^./]/ }, args => (
       args.path.startsWith('node:') ? undefined : { path: import.meta.resolve(args.path), external: true }

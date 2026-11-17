@@ -21,14 +21,15 @@ const pickers = await transform(`export const createPicker = (getMimeType, initi
   const onChange = update => { config = typeof update === 'function' ? update(config) : update; };
   const maxReferenceImages = 14, maxReferenceAudios = 3, isH3VideoConfig = false;
   const attachLimitsRef = { current: { images: 14, audios: 3 } }, audioInputRef = { current: null };
-  const setAttachmentError = error => { if (error) throw new Error(error); };
+  let attachmentError = null;
+  const setAttachmentError = error => { attachmentError = error; };
   const addAttachmentError = setAttachmentError, flushSync = callback => callback();
   const readAudioDuration = async () => 3, estimateBase64Size = data => data.length;
   const readFileAsBase64 = async file => 'data:' + file.type + ';base64,' + Buffer.from(await file.arrayBuffer()).toString('base64');
   const compressImage = () => { throw new Error('Unexpected compression'); };
   ${controls.slice(imageStart, imageEnd)}
   ${controls.slice(audioStart, audioEnd)}
-  return { processImageFiles, handleAudioFileUpload, getConfig: () => config };
+  return { processImageFiles, handleAudioFileUpload, getConfig: () => config, getError: () => attachmentError };
 };`, { loader: 'ts', format: 'esm' });
 const { createPicker } = await import('data:text/javascript;base64,' + Buffer.from(pickers.code).toString('base64'));
 const picker = () => createPicker(getMimeType, { mode: 'image', prompt: 'Synthetic', referenceImages: [], referenceAudios: [] });
@@ -140,6 +141,31 @@ test('unrecognized binary uploads still fail the media MIME gate', async t => {
   assert.equal(state.uploads.length, 0);
 });
 
+for (const type of ['', 'application/octet-stream', 'text/plain', 'image/png']) {
+  test(`audio picker rejects non-audio MIME ${type || '(empty)'} before creating a reference`, async t => {
+    const createUrl = t.mock.method(URL, 'createObjectURL', () => { throw new Error('Invalid audio must not create an object URL'); });
+    const input = picker();
+    await input.handleAudioFileUpload({ target: { files: [new File(['unknown'], 'data.bin', { type })] } });
+    assert.deepEqual(input.getConfig().referenceAudios, []);
+    assert.equal(input.getConfig().mode, 'image');
+    assert.match(input.getError(), /data\.bin.*audio file/);
+    assert.equal(createUrl.mock.callCount(), 0);
+  });
+}
+
+test('audio picker retains valid inferred audio from a mixed selection', async t => {
+  const input = picker();
+  await input.handleAudioFileUpload({ target: { files: [
+    new File(['unknown'], 'data.bin', { type: 'application/octet-stream' }),
+    new File(['synthetic-mp3'], 'clip.mp3', { type: 'application/octet-stream' }),
+  ] } });
+  const refs = input.getConfig().referenceAudios;
+  t.after(() => refs.forEach(ref => URL.revokeObjectURL(ref.url)));
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].mimeType, 'audio/mpeg');
+  assert.match(input.getError(), /data\.bin.*audio file/);
+});
+
 for (const [mime, bytes] of [
   ['image/png', Buffer.from('89504e470d0a1a0a00000000', 'hex')],
   ['image/jpeg', Buffer.from('ffd8ffe000000000', 'hex')],
@@ -173,9 +199,10 @@ test('generic legacy bytes cannot use a data URL label as proof of image type', 
 test('template MIME rejections retain their reason while ordinary uploads keep returning null', async t => {
   setup(t);
   const file = new File(['unknown'], 'data.bin', { type: 'application/octet-stream' });
-  const input = picker();
-  await input.handleAudioFileUpload({ target: { files: [file] } });
-  const config = input.getConfig();
+  // Existing saved drafts can predate picker validation and still need clear save errors.
+  const config = { mode: 'image', prompt: 'Synthetic', referenceImages: [], referenceAudios: [
+    { id: 'legacy-audio', url: URL.createObjectURL(file), mimeType: file.type, name: file.name, size: file.size, duration: 3 },
+  ] };
   t.after(() => config.referenceAudios.forEach(ref => URL.revokeObjectURL(ref.url)));
   await assert.rejects(saveTemplate({ id: 'template', name: 'Rejected', createdAt: 1, config }), /Unsupported media type.*application\/octet-stream/);
   assert.equal(state.rows.length, 0);

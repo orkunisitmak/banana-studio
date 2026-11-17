@@ -820,8 +820,13 @@ export const Controls: React.FC<ControlsProps> = ({
   const processAudioFiles = async (files: File[], switchToVideo = false) => {
     const MAX_AUDIOS = maxReferenceAudios;
     const room = Math.max(0, MAX_AUDIOS - (config.referenceAudios?.length || 0));
-    if (files.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
-    const toAdd = files.slice(0, room);
+    const validFiles = files.filter(file => {
+      if (getMimeType(file, file.name).startsWith('audio/')) return true;
+      addAttachmentError(`${file.name || 'Audio'} must be an audio file.`);
+      return false;
+    });
+    if (validFiles.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
+    const toAdd = validFiles.slice(0, room);
     if (toAdd.length === 0) return;
     const newRefs = await Promise.all(toAdd.map(async file => {
       const url = URL.createObjectURL(file);

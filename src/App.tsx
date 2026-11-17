@@ -32,7 +32,7 @@ import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
-import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
+import { refreshPendingVideoSubmission, saveVideoTaskId, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { hasUnresumableVideoSubmission, useUnloadWarning } from './lib/shared/unloadWarning';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
@@ -1013,10 +1013,9 @@ const AuthorizedWorkspace: React.FC<{
         h3MaxMode, h3MaxOptions: config.h3MaxOptions,
           },
         });
-        // Also store task_id
-        if (supabase) {
-          await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
-        }
+        // Also store task_id. Until the row holds it, a reload cannot resume
+        // this video, so the close warning stays on.
+        const taskIdSaved = !supabase || await saveVideoTaskId(supabase, userId, videoId, taskId);
         clearInterval(submissionHeartbeat);
 
         // Log as soon as EvoLink accepts/reserves credits for the task. The
@@ -1029,7 +1028,7 @@ const AuthorizedWorkspace: React.FC<{
         if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+          item.id === videoId ? { ...item, status: 'processing', taskId, taskIdUnsaved: !taskIdSaved || undefined, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
         ));
 
         const videoResult = await pollVideoTask(taskId, (progress) => {

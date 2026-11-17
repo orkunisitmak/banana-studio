@@ -615,6 +615,8 @@ export interface GeneratedMedia {
   taskId?: string;
   status?: 'pending' | 'processing' | 'completed' | 'failed';
   // UI state
+  /** The provider task ID is known to this tab only; a reload could not resume it. */
+  taskIdUnsaved?: boolean;
   isLoading?: boolean;
   videoProgress?: number;
   videoStage?: 'generating' | 'saving';

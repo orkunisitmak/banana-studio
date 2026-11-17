@@ -82,6 +82,15 @@ const normalizeStoredMedia = (media: GeneratedMedia): GeneratedMedia => {
   };
 };
 
+/** The workspace session check failed. `completed` is set when it failed after the wrapped call had already finished, with that call's value in `result`. */
+class SessionChangedError extends Error {
+  completed?: { result: unknown };
+  constructor(message: string, completed?: { result: unknown }) {
+    super(message);
+    this.completed = completed;
+  }
+}
+
 export default function App() {
   return <AuthBoundary>{({ userId, profile }, onSignOut) => (
     <AuthorizedWorkspace key={userId} userId={userId} userProfile={profile} onSignOut={onSignOut} />
@@ -100,15 +109,21 @@ const AuthorizedWorkspace: React.FC<{
     workspaceActive.current = true;
     return () => { workspaceActive.current = false; };
   }, []);
-  const assertWorkspaceSession = async () => {
-    const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new Error('Session changed. Sign in again to continue.');
+  const assertWorkspaceSession = async (completed?: { result: unknown }) => {
+    const changed = () => new SessionChangedError('Session changed. Sign in again to continue.', completed);
+    let session: Awaited<ReturnType<typeof getSession>>;
+    try {
+      session = await getSession();
+    } catch {
+      throw changed();
+    }
+    if (!workspaceActive.current || session?.user.id !== userId) throw changed();
   };
   const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {
       await assertWorkspaceSession();
       const result = await operation(...args);
-      await assertWorkspaceSession();
+      await assertWorkspaceSession({ result });
       return result;
     };
   const saveImage = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveImage(media, userId));
@@ -1293,6 +1308,14 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  // Put items whose delete never ran back where they were in the list (new items made meanwhile sort first).
+  const restoreDeletedMedia = (items: GeneratedMedia[]) => {
+    items.forEach(item => deletedMediaIdsRef.current.delete(item.id));
+    const position = new Map<string, number>(generatedMedia.map((m, index) => [m.id, index]));
+    setGeneratedMedia(prev => [...prev, ...items.filter(item => !prev.some(p => p.id === item.id))]
+      .sort((a, b) => (position.get(a.id) ?? -1) - (position.get(b.id) ?? -1)));
+  };
+
   const handleDelete = async (media: GeneratedMedia) => {
     deletedMediaIdsRef.current.add(media.id);
     setGeneratedMedia(prev => prev.filter(m => m.id !== media.id));
@@ -1300,7 +1323,14 @@ const AuthorizedWorkspace: React.FC<{
       await deleteImage(media);
     } catch (e) {
       console.error("Delete failed", e);
-      toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      // The delete finished and only the session check after it failed: it is gone, so keep it gone.
+      if (e instanceof SessionChangedError && e.completed) return;
+      if (e instanceof workspaceStorage.DeleteNotQueuedError || e instanceof SessionChangedError) {
+        restoreDeletedMedia([media]);
+        toast.error('Delete Failed', 'The image could not be deleted and is back in your library. Try again.');
+      } else {
+        toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      }
     }
   };
 
@@ -1308,13 +1338,25 @@ const AuthorizedWorkspace: React.FC<{
     const toDelete = generatedMedia.filter(m => mediaIds.includes(m.id));
     mediaIds.forEach(id => deletedMediaIdsRef.current.add(id));
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
+    let notQueued: GeneratedMedia[] = [], queued: GeneratedMedia[] = [];
     try {
-      await deleteImages(toDelete);
-      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
+      ({ notQueued, queued } = await deleteImages(toDelete));
     } catch (e) {
       console.error("Batch delete failed", e);
-      toast.error('Delete Failed', 'Some images could not be fully deleted. They will be retried automatically.');
+      // A session check after the deletes keeps their results; one before them means nothing ran.
+      if (e instanceof SessionChangedError && e.completed) ({ notQueued, queued } = e.completed.result as Awaited<ReturnType<typeof workspaceStorage.deleteImages>>);
+      else notQueued = toDelete;
     }
+    if (notQueued.length === 0 && queued.length === 0) {
+      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
+      return;
+    }
+    if (notQueued.length > 0) restoreDeletedMedia(notQueued);
+    const messages = [
+      notQueued.length > 0 && `${describeMediaCount(notQueued.map(m => m.id), notQueued)} could not be deleted and ${notQueued.length === 1 ? 'is' : 'are'} back in your library. Try again.`,
+      queued.length > 0 && `${describeMediaCount(queued.map(m => m.id), queued)} could not be fully deleted. ${queued.length === 1 ? 'It' : 'They'} will be retried automatically.`,
+    ].filter(Boolean);
+    toast.error('Delete Failed', messages.join(' '));
   };
 
   const handleToggleFavorite = async (media: GeneratedMedia) => {

@@ -2,7 +2,7 @@ import { selectProvider } from './providerRouting';
 import { videoProviderName } from '../lib/video/videoProviderName';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
-import { getQuotedPromptPattern } from '../lib/references/referenceTokens';
+import { getMultilineQuotedPromptPattern } from '../lib/references/referenceTokens';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
 import { logUsage, supabase } from './authService';
 import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublicUrl, refreshMediaAccessUrl } from './storageService';
@@ -673,7 +673,7 @@ export const prepareSeedanceReferenceGenerationPrompt = (
   const literals: string[] = [];
   let literalMarker = '\uE000';
   while (prompt.includes(literalMarker)) literalMarker += literalMarker;
-  const protectedPrompt = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const protectedPrompt = prompt.replace(getMultilineQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
   const rephrased = protectedPrompt
     .replace(/\[(?:EDIT|EXTEND)(?:\s+DIRECTION)?\]/gi, '[NEW SHOT DIRECTION]')
     .replace(
@@ -771,7 +771,7 @@ const cleanPromptForVideoModel = (
   const literals: string[] = [];
   let literalMarker = '\uE000';
   while (prompt.includes(literalMarker)) literalMarker += literalMarker;
-  let cleaned = prompt.replace(getQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  let cleaned = prompt.replace(getMultilineQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
   const restoreLiterals = (value: string): string => value
     .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
   if (videoModel === 'minimax-h3') {

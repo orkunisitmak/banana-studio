@@ -78,3 +78,9 @@ test('edit preambles cannot consume quoted multi-sentence copy', () => {
   assert.ok(prepareThroughCleanup('Edit @video1 to show "Hello. Goodbye".')
     .endsWith('Compose @video1 to show "Hello. Goodbye".'));
 });
+
+test('an unmatched quote does not protect text past a blank line', () => {
+  const result = prepareSeedanceReferenceGenerationPrompt('He says "wait.\n\nRemove the hat. She says "go".', '16:9', 1);
+  assert.ok(result.includes('the hat is absent from the new shot.'), result);
+  assert.ok(result.endsWith('She says "go".'), result);
+});

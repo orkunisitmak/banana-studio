@@ -72,7 +72,9 @@ const isH3MetadataOnlyUpdate = (before: GenerationConfig, after: GenerationConfi
 };
 
 const getMimeType = (file: File | Blob, name?: string): string => {
-  if (file.type) return file.type;
+  // Pickers may report recognized media as generic binary. Infer those files
+  // from their known extension before sending MIME-restricted Storage uploads.
+  if (file.type && file.type !== 'application/octet-stream') return file.type;
   if (name) {
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {

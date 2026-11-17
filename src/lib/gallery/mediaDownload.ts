@@ -9,7 +9,21 @@ export const sniffMediaType = async (blob: Blob): Promise<string | undefined> =>
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'image/webp';
   if (ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a') return 'image/gif';
-  if (ascii(4, 4) === 'ftyp') return 'video/mp4';
+  if (bytes.length >= 14 && ascii(0, 2) === 'BM' && bytes.slice(6, 10).every(byte => byte === 0)) return 'image/bmp';
+  if (ascii(4, 4) === 'ftyp') {
+    // AVIF shares its container with MP4, but has an image brand (avif/avis).
+    // Inspect a bounded FileTypeBox, including compatible brands after minor_version.
+    const boxSize = new DataView(bytes.buffer).getUint32(0);
+    if (boxSize >= 16 && boxSize <= blob.size) {
+      const brands = new Uint8Array(await blob.slice(8, Math.min(boxSize, 256)).arrayBuffer());
+      for (let offset = 0; offset + 4 <= brands.length; offset += 4) {
+        if (offset === 4) continue; // minor_version is not a brand.
+        const brand = String.fromCharCode(...brands.slice(offset, offset + 4));
+        if (brand === 'avif' || brand === 'avis') return 'image/avif';
+      }
+    }
+    return 'video/mp4';
+  }
   if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return 'video/webm';
 };
 

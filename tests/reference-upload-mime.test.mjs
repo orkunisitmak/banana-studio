@@ -36,6 +36,7 @@ const picker = () => createPicker(getMimeType, { mode: 'image', prompt: 'Synthet
 
 const state = { uploads: [], rows: [], allowedMimeTypes: null };
 globalThis.__referenceMimeUpload = {
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'user-1' } } } }) },
   storage: { from: bucket => {
     assert.equal(bucket, 'media');
     return {
@@ -51,12 +52,16 @@ globalThis.__referenceMimeUpload = {
     };
   } },
   from: table => {
-    assert.equal(table, 'templates');
-    return { upsert: async row => { state.rows.push(row); return { error: null }; } };
+    assert.ok(['templates', 'generations'].includes(table));
+    const query = {
+      select: () => query, eq: () => query, maybeSingle: async () => ({ data: null, error: null }),
+      upsert: async row => { state.rows.push(row); return { error: null }; },
+    };
+    return query;
   },
 };
 const compiled = await build({ stdin: {
-  contents: "export { uploadBase64ToPublicUrl, saveTemplate } from './src/services/storageService';",
+  contents: "export { uploadBase64ToPublicUrl, saveTemplate, saveImage, saveVideo } from './src/services/storageService';",
   resolveDir: fileURLToPath(new URL('..', import.meta.url)), loader: 'ts',
 }, bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'reference-mime-upload', setup(b) {
   b.onResolve({ filter: /\/authService$|^tus-js-client$|^@supabase\/supabase-js$/ }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -64,15 +69,16 @@ const compiled = await build({ stdin: {
     "export const isAuthSessionMissingError = () => false;" :
     "export const supabase = globalThis.__referenceMimeUpload, getCurrentUserId = async () => 'user-1', SUPABASE_URL = 'https://storage.invalid';" }));
 } }] });
-const { uploadBase64ToPublicUrl, saveTemplate } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { uploadBase64ToPublicUrl, saveTemplate, saveImage, saveVideo } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 function setup(t) {
   state.uploads = []; state.rows = []; state.allowedMimeTypes = null;
   t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
 }
 
 test('empty and generic picker MIME types use recognized media extensions', () => {
-  const cases = { PNG: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+  const cases = { PNG: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif',
     mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogg: 'audio/ogg', oga: 'audio/ogg', aac: 'audio/aac',
     m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aif: 'audio/aiff', aiff: 'audio/aiff' };
   for (const type of ['', 'application/octet-stream']) {
@@ -136,6 +142,10 @@ for (const [mime, bytes] of [
   ['image/png', Buffer.from('89504e470d0a1a0a00000000', 'hex')],
   ['image/jpeg', Buffer.from('ffd8ffe000000000', 'hex')],
   ['image/webp', Buffer.from('524946460400000057454250', 'hex')],
+  ['image/avif', Buffer.from('00000018667479706176696600000000617669666d696631', 'hex')],
+  ['image/avif', Buffer.from('00000018667479706176697300000000617669736d736631', 'hex')],
+  ['image/avif', Buffer.from('00000018667479706d69663100000000617669666d696631', 'hex')],
+  ['image/bmp', Buffer.from('424d3a000000000000003600000028000000', 'hex')],
 ]) {
   test(`legacy generic references infer ${mime} from bytes without changing them`, async t => {
     setup(t);
@@ -149,7 +159,10 @@ for (const [mime, bytes] of [
 
 test('generic legacy bytes cannot use a data URL label as proof of image type', async t => {
   setup(t);
-  for (const bytes of [Buffer.from('unknown'), Buffer.from('000000146674797069736f6d', 'hex'), Buffer.from('89504e47', 'hex')]) {
+  for (const bytes of [Buffer.from('unknown'), Buffer.from('000000146674797069736f6d', 'hex'), Buffer.from('89504e47', 'hex'),
+    Buffer.from('00000018667479706176696600000000', 'hex'), // truncated FileTypeBox
+    Buffer.from('00000010667479706d70343261766966', 'hex'), // avif in minor_version, not a brand
+    Buffer.from('424d', 'hex'), Buffer.from('424d3a0000000100000036000000', 'hex')]) {
     assert.equal(await uploadBase64ToPublicUrl(`data:image/jpeg;base64,${bytes.toString('base64')}`, 'application/octet-stream'), null);
   }
   assert.equal(state.uploads.length, 0);
@@ -173,3 +186,51 @@ test('legacy image inference does not bypass a narrower custom MIME allowlist', 
   assert.equal(await uploadBase64ToPublicUrl(bytes.toString('base64'), 'application/octet-stream'), null);
   assert.equal(state.uploads.length, 0);
 });
+
+for (const [kind, save] of [['image', saveImage], ['video', saveVideo]]) {
+  const result = { id: `generated-${kind}`, url: `data:${kind === 'image' ? 'image/png' : 'video/mp4'};base64,c3ludGhldGlj`, prompt: 'Synthetic', mediaType: kind, createdAt: 1 };
+  test(`${kind} persistence retains a generic PNG picker's inferred MIME and bytes`, async t => {
+    setup(t);
+    const file = new File(['synthetic-png'], 'photo.png', { type: 'application/octet-stream' });
+    const input = picker();
+    await input.processImageFiles([file]);
+    const referenceImages = input.getConfig().referenceImages;
+    assert.ok(await save({ ...result, referenceImages }, 'user-1'));
+    const uploaded = state.uploads.find(upload => upload.path.includes('/refs/'));
+    assert.equal(uploaded.contentType, 'image/png');
+    assert.equal(uploaded.blob.type, 'image/png');
+    assert.equal(await uploaded.blob.text(), 'synthetic-png');
+    assert.equal(state.rows[0].reference_images[0].mimeType, 'image/png');
+    assert.match(state.rows[0].reference_images[0].data, /\/storage\/v1\/object\/authenticated\/media\//);
+  });
+
+  test(`${kind} persistence detects legacy generic references and records the corrected MIME`, async t => {
+    setup(t);
+    const bytes = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+    for (const mimeType of ['application/octet-stream', undefined]) {
+      state.rows = []; state.uploads = [];
+      const referenceImages = [{ id: 'legacy', data: `data:application/octet-stream;base64,${bytes.toString('base64')}`, mimeType }];
+      assert.ok(await save({ ...result, referenceImages }, 'user-1'));
+      const uploaded = state.uploads.find(upload => upload.path.includes('/refs/'));
+      assert.equal(uploaded.contentType, 'image/png');
+      assert.deepEqual(Buffer.from(await uploaded.blob.arrayBuffer()), bytes);
+      assert.equal(state.rows[0].reference_images[0].mimeType, 'image/png');
+    }
+  });
+
+  test(`${kind} persistence respects narrower custom MIME lists without relabeling PNG as JPEG`, async t => {
+    setup(t); state.allowedMimeTypes = ['image/jpeg', 'video/mp4'];
+    const referenceImages = [{ id: 'png', data: 'data:application/octet-stream;base64,iVBORw0KGgoAAAAA', mimeType: 'application/octet-stream' }];
+    assert.equal(await save({ ...result, referenceImages }, 'user-1'), undefined);
+    assert.equal(state.uploads.filter(upload => upload.path.includes('/refs/')).length, 0);
+    assert.equal(state.rows.length, 0);
+  });
+
+  test(`${kind} persistence rejects unknown generic references without completing the row`, async t => {
+    setup(t);
+    const referenceImages = [{ id: 'unknown', data: 'data:application/octet-stream;base64,dW5rbm93bg==', mimeType: 'application/octet-stream' }];
+    assert.equal(await save({ ...result, referenceImages }, 'user-1'), undefined);
+    assert.equal(state.uploads.filter(upload => upload.path.includes('/refs/')).length, 0);
+    assert.equal(state.rows.length, 0);
+  });
+}

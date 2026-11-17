@@ -245,6 +245,18 @@ export const uploadVideoBlobToPublicUrl = async (
   }
 };
 
+// Reference metadata can be more specific than a generic picker data URL.
+// Legacy references have no filename, so infer only recognizable image bytes.
+const normalizeReferenceImageBlob = async (blob: Blob, mimeType = blob.type): Promise<Blob> => {
+  let contentType = (mimeType || '').split(';', 1)[0].trim().toLowerCase();
+  if (!contentType || contentType === 'application/octet-stream') {
+    const detected = await sniffMediaType(blob);
+    if (!detected?.startsWith('image/')) throw new Error('Reference image type could not be recognized. Attach the image again.');
+    contentType = detected;
+  }
+  return blob.type === contentType ? blob : blob.slice(0, blob.size, contentType);
+};
+
 export const uploadBase64ToPublicUrl = async (base64Data: string, mimeType: string, prefix = 'ref'): Promise<string | null> => {
   if (!supabase) return null;
   try {
@@ -253,19 +265,8 @@ export const uploadBase64ToPublicUrl = async (base64Data: string, mimeType: stri
     const byteChars = atob(raw);
     const byteArray = new Uint8Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
-    let blob = new Blob([byteArray], { type: mimeType });
-    let uploadMime = mimeType;
-    const normalizedMime = (mimeType || '').split(';', 1)[0].trim().toLowerCase();
-    if (!normalizedMime || normalizedMime === 'application/octet-stream') {
-      // Saved legacy references have no filename to infer from. Inspect their
-      // bytes instead of relabeling every generic image as JPEG.
-      const detected = await sniffMediaType(blob);
-      if (!detected?.startsWith('image/')) throw new Error('Reference image type could not be recognized. Attach the image again.');
-      uploadMime = detected;
-      blob = blob.slice(0, blob.size, detected);
-    }
-
-    return uploadBlobToPublicUrl(blob, uploadMime, prefix, 'jpg');
+    const blob = await normalizeReferenceImageBlob(new Blob([byteArray], { type: mimeType }));
+    return uploadBlobToPublicUrl(blob, blob.type, prefix, 'jpg');
   } catch (e: any) {
     console.warn('uploadBase64ToPublicUrl error:', e.message);
     return null;
@@ -1044,14 +1045,14 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
         try {
           const refPath = `${userId}/refs/${media.id}_${ref.id}.jpg`;
           const res = await fetch(ref.data);
-          const refBlob = await res.blob();
+          const refBlob = await normalizeReferenceImageBlob(await res.blob(), ref.mimeType || undefined);
 
           await assertSameUser();
 
           const { error: refUploadError } = await supabase.storage
             .from(MEDIA_BUCKET_NAME)
             .upload(refPath, refBlob, {
-              contentType: refBlob.type || 'image/jpeg',
+              contentType: refBlob.type,
               cacheControl: '0',
               upsert: true
             });
@@ -1059,7 +1060,7 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
           if (!refUploadError) {
             const publicUrl = getStorageReferenceUrl(refPath);
             if (publicUrl) {
-              return { ...ref, data: publicUrl };
+              return { ...ref, data: publicUrl, mimeType: refBlob.type };
             }
           }
         } catch (e) {
@@ -1399,12 +1400,12 @@ export const saveVideo = async (
       try {
         const refPath = `${userId}/refs/${media.id}_${ref.id}.jpg`;
         const res = await fetch(ref.data);
-        const refBlob = await res.blob();
+        const refBlob = await normalizeReferenceImageBlob(await res.blob(), ref.mimeType || undefined);
         await assertSameUser();
-        const { error: refUploadError } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(refPath, refBlob, { contentType: refBlob.type || 'image/jpeg', cacheControl: '0', upsert: true });
+        const { error: refUploadError } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(refPath, refBlob, { contentType: refBlob.type, cacheControl: '0', upsert: true });
         if (!refUploadError) {
           const refPublicUrl = getStorageReferenceUrl(refPath);
-          if (refPublicUrl) return { ...ref, data: refPublicUrl };
+          if (refPublicUrl) return { ...ref, data: refPublicUrl, mimeType: refBlob.type };
         }
       } catch (e) { console.warn("Failed to upload video ref image", e); }
       throw new Error(`Reference image ${ref.id || 'unknown'} could not be persisted. The generated video was kept locally; retry saving after the connection recovers.`);

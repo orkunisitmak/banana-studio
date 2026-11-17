@@ -82,6 +82,8 @@ const getMimeType = (file: File | Blob, name?: string): string => {
         case 'jpg': 
         case 'jpeg': return 'image/jpeg';
         case 'webp': return 'image/webp';
+        case 'avif': return 'image/avif';
+        case 'bmp': return 'image/bmp';
         case 'heic': return 'image/heic';
         case 'heif': return 'image/heif';
         case 'mp4': return 'video/mp4';

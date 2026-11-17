@@ -14,6 +14,7 @@ export const providerSetup = (provider: AIProvider): string => provider === 'cod
   ? 'install the Codex CLI and run `codex login` with your ChatGPT account (desktop app only)'
   : `add your ${PROVIDER_LABELS[provider]} key in Provider keys`;
 export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
+  'codex-text': ['codex'],
   'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal', 'codex'],
   'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
   'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
@@ -34,6 +35,7 @@ export function resolveProvider(model: string, choice: unknown, available: Provi
     return choice as AIProvider;
   }
   const selected = routes.find(provider => available[provider]);
+  if (!selected && routes.length === 1 && routes[0] === 'codex') throw new Error('Install the Codex CLI and run `codex login` with your ChatGPT account in the desktop app. No API key is needed.');
   if (!selected) throw new Error(`This model needs ${routes.map(provider => PROVIDER_LABELS[provider]).join(' or ')}. Add one key in Provider keys${routes.includes('codex') ? ' or sign in to Codex with ChatGPT' : ''}; the other keys are optional.`);
   return selected;
 }

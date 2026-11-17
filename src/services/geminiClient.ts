@@ -2,6 +2,8 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import { isLocalWorkspace } from '../lib/config/runtimeConfig';
+import { CODEX_TEXT_MODEL } from '../lib/prompts/codexText';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -161,6 +163,7 @@ const generateContent = async (
  * function so the API key never reaches the browser.
  */
 const routeTextContent = async (request: GenerateContentRequest, options?: TextTaskOptions) => {
+  if (request.model === CODEX_TEXT_MODEL && !isLocalWorkspace()) throw new Error('ChatGPT plan text generation is available only in the desktop app.');
   const provider = await selectProvider(request.model, options?.signal);
   const config = request.config as any;
   const video = (request.contents as any)?.parts?.some((part: any) => part.fileData);
@@ -169,7 +172,7 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  return generateContent(normalized, provider === 'codex' ? '/api/codex-text-generate' : provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
 };
 export const getGeminiClient = () => ({
   models: {

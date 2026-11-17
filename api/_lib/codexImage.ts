@@ -103,17 +103,27 @@ export const codexArguments = (imagePaths: string[], workingDirectory: string): 
   ...imagePaths.flatMap(file => ['--image', file]), '-',
 ];
 
-const runCodex = (binary: string, args: string[], prompt: string, signal?: AbortSignal) => new Promise<{ threadId: string; message: string }>((resolve, reject) => {
+export const runCodex = (binary: string, args: string[], prompt: string, signal?: AbortSignal) => {
+  const { promise, resolve, reject } = Promise.withResolvers<{ threadId: string; message: string }>();
+  if (signal?.aborted) { reject(signal.reason); return promise; }
   // The prompt goes through stdin, never through a shell or the argument list.
   const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: codexEnvironment(binary) });
   let threadId = '', message = '', failure = '', lastError = '', buffer = '', stderr = '';
-  const stop = (error: Error) => { child.kill('SIGTERM'); reject(error); };
-  const timer = setTimeout(() => stop(Object.assign(new Error('Codex did not finish the image in time.'), { name: 'TimeoutError' })), TIMEOUT_MS);
-  const abort = () => stop(Object.assign(new Error('The image request was cancelled.'), { name: 'AbortError' }));
+  let stopped: Error | undefined;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  const stop = (error: Error) => {
+    if (stopped) return;
+    stopped = error;
+    child.kill('SIGTERM');
+    killTimer = setTimeout(() => child.kill('SIGKILL'), 2_000);
+  };
+  const timer = setTimeout(() => stop(Object.assign(new Error('Codex did not finish the request in time.'), { name: 'TimeoutError' })), TIMEOUT_MS);
+  const abort = () => stop(Object.assign(new Error('The Codex request was cancelled.'), { name: 'AbortError' }));
   signal?.addEventListener('abort', abort, { once: true });
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', chunk => {
     buffer += chunk;
+    if (buffer.length > 4_100_000) { stop(new Error('Codex output exceeds the response limit.')); return; }
     for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
       const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
       try {
@@ -127,9 +137,11 @@ const runCodex = (binary: string, args: string[], prompt: string, signal?: Abort
     }
   });
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
-  child.on('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(error); });
+  const cleanup = () => { clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort); };
+  child.on('error', error => { cleanup(); reject(error); });
   child.on('close', code => {
-    clearTimeout(timer); signal?.removeEventListener('abort', abort);
+    cleanup();
+    if (stopped) return reject(stopped);
     if (failure) return reject(new Error(failure));
     if (code !== 0) return reject(new Error(lastError || `Codex exited with code ${code}. ${stderr.trim().split('\n').at(-1) || ''}`.trim()));
     if (!/^[a-zA-Z0-9-]{1,128}$/.test(threadId)) return reject(new Error('Codex did not report a session.'));
@@ -137,9 +149,10 @@ const runCodex = (binary: string, args: string[], prompt: string, signal?: Abort
   });
   child.stdin.on('error', () => { /* An early exit is reported by 'close'. */ });
   child.stdin.end(prompt);
-});
+  return promise;
+};
 
-const writeReference = (directory: string, value: string, index: number): string => {
+export const writeReference = (directory: string, value: string, index: number): string => {
   const match = value.match(/^data:image\/(png|jpeg|webp);base64,([a-zA-Z0-9+/=]+)$/);
   if (!match) throw new Error('This reference could not be prepared for Codex.');
   const file = path.join(directory, `image-${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`);

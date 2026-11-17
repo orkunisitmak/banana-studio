@@ -3,13 +3,15 @@ import { ArrowLeftRight, Ratio, Scan, Sparkles } from 'lucide-react';
 import type { AspectRatio, GenerationConfig, OpenAIImageOptions, Resolution } from '../types';
 import { correctOpenAIImageDimensions, getImageOutputRatio, getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_QUALITY_OPTIONS, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import { Dropdown } from './ControlDropdown';
+import type { AIProvider } from '../lib/providers';
 
 /** Sunburst controls live alongside the model picker, using the same toolbar UI. */
 export const OpenAIImageSettings: React.FC<{
   config: GenerationConfig;
+  provider?: AIProvider;
   onChange: (config: GenerationConfig) => void;
   onSizeAdjustment?: (notice: { size: string; text: string } | null) => void;
-}> = ({ config, onChange, onSizeAdjustment }) => {
+}> = ({ config, provider, onChange, onSizeAdjustment }) => {
   const options = getOpenAIImageOptions(config.openaiImageOptions);
   const sizeLocked = config.referenceImages.some(ref => ref.isEditSource && ref.editRegion);
   const [draft, setDraft] = useState({ width: String(options.width), height: String(options.height) });
@@ -47,7 +49,7 @@ export const OpenAIImageSettings: React.FC<{
     else update({ size: 'preset' }, { resolution: value as Resolution });
   };
   const customRatio = getImageOutputRatio(`${options.width}x${options.height}`);
-  const sizeError = options.size === 'custom' ? validateOpenAIImageSize(getOpenAIImageSize(config)) : null;
+  const sizeError = options.size === 'custom' ? validateOpenAIImageSize(getOpenAIImageSize(config), sizeLocked ? provider : undefined) : null;
   const numberField = (axis: 'width' | 'height') => (
     <label className="flex h-[42px] shrink-0 items-center gap-1 rounded-xl border border-white/[0.07] bg-[#171e28] px-2 text-xs text-gray-500" title={`${axis === 'width' ? 'Width' : 'Height'} (px)`}>
       <span>{axis === 'width' ? 'W' : 'H'}</span>

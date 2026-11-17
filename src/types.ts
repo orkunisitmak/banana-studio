@@ -87,7 +87,7 @@ export const VIDEO_DURATION_OPTIONS: { label: string; value: VideoDuration }[] =
   }
 );
 
-export type TextModelId = 'gemini-3.8-flash' | 'gpt-6.1-sol' | 'anthropic/claude-opus-5.5';
+export type TextModelId = 'gemini-3.8-flash' | 'gpt-6.1-sol' | 'anthropic/claude-opus-5.5' | 'codex-text';
 
 export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; description: string }[] = [
   {
@@ -104,6 +104,11 @@ export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; descriptio
     label: 'GPT-6.1 Sol',
     value: 'gpt-6.1-sol',
     description: 'Adjustable reasoning · High by default. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
+  },
+  {
+    label: 'ChatGPT plan (Codex)',
+    value: 'codex-text',
+    description: 'Desktop only. Uses your ChatGPT sign-in and the Codex default model for Brainstorm, Enhance and variations, including image references. Plan limits apply; no API fallback.',
   },
 ];
 

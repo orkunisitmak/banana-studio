@@ -1,4 +1,5 @@
 import type { AspectRatio, GeneratedMedia, GenerationConfig, OpenAIImageOptions, ReferenceImage, Resolution } from '../../types.js';
+import type { AIProvider } from '../providers.js';
 
 export const SUNBURST_MODEL = 'gpt-image-2.5-sunburst' as const;
 /** Models executeOpenAIImage saves under openai/<user>/<id>; their stored files can be recovered. */
@@ -68,10 +69,16 @@ export const getOpenAIImageSize = (config: Pick<GenerationConfig, 'openaiImageOp
   return SIZES[config.resolution]?.[config.aspectRatio] || '';
 };
 
-export const validateOpenAIImageSize = (size: unknown): string | null => {
+export const validateOpenAIImageSize = (size: unknown, provider: AIProvider = 'openai'): string | null => {
   if (size === 'auto') return null;
   if (typeof size !== 'string' || !/^\d+x\d+$/.test(size)) return 'Choose a valid image size.';
   const [w, h] = size.split('x').map(Number);
+  // Codex dimensions are a prompt hint, not an API size enum. Keep the local
+  // raster decoder's allocation limit without rejecting existing source canvases.
+  if (provider === 'codex') {
+    return Number.isSafeInteger(w) && Number.isSafeInteger(h) && w > 0 && h > 0 && w * h <= 33_554_432
+      ? null : 'Use positive whole-pixel dimensions up to 33,554,432 total pixels.';
+  }
   if (w <= 0 || h <= 0 || w % 16 || h % 16 || Math.max(w, h) > 3840) {
     return 'Width and height must be multiples of 16, up to 3840 px.';
   }

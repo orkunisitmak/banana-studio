@@ -1,6 +1,7 @@
 import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
 import { submitOnEnter } from './submitOnEnter';
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
+import { getMediaMimeType as getMimeType } from '../lib/references/mediaMimeType';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
@@ -69,38 +70,6 @@ const isH3MetadataOnlyUpdate = (before: GenerationConfig, after: GenerationConfi
     return Object.keys({ ...oldReference, ...newReference }).filter(key => key !== 'width' && key !== 'height').every(key => oldReference[key] === newReference[key]);
   });
   return sameReferences(beforeImages, afterImages) && sameReferences(beforeVideos || [], afterVideos || []);
-};
-
-const getMimeType = (file: File | Blob, name?: string): string => {
-  // Pickers may report recognized media as generic binary. Infer those files
-  // from their known extension before sending MIME-restricted Storage uploads.
-  if (file.type && file.type !== 'application/octet-stream') return file.type;
-  if (name) {
-    const ext = name.split('.').pop()?.toLowerCase();
-    switch (ext) {
-        case 'png': return 'image/png';
-        case 'jpg': 
-        case 'jpeg': return 'image/jpeg';
-        case 'webp': return 'image/webp';
-        case 'avif': return 'image/avif';
-        case 'bmp': return 'image/bmp';
-        case 'heic': return 'image/heic';
-        case 'heif': return 'image/heif';
-        case 'mp4': return 'video/mp4';
-        case 'mov': return 'video/quicktime';
-        case 'webm': return 'video/webm';
-        case 'ogg':
-        case 'oga': return 'audio/ogg';
-        case 'aac': return 'audio/aac';
-        case 'm4a': return 'audio/mp4';
-        case 'mp3': return 'audio/mpeg';
-        case 'wav': return 'audio/wav';
-        case 'flac': return 'audio/flac';
-        case 'aif':
-        case 'aiff': return 'audio/aiff';
-    }
-  }
-  return 'application/octet-stream';
 };
 
 const readFileAsBase64 = (file: File | Blob): Promise<string> => {

@@ -6,11 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 // Exercise the existing picker helper without mounting the entire workspace.
 const controls = fs.readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
-const start = controls.indexOf('const getMimeType =');
-const end = controls.indexOf('const readFileAsBase64 =', start);
-assert.ok(start >= 0 && end > start);
-const helper = await transform(`${controls.slice(start, end)}\nexport { getMimeType };`, { loader: 'ts', format: 'esm' });
-const { getMimeType } = await import('data:text/javascript;base64,' + Buffer.from(helper.code).toString('base64'));
+const helper = await build({ entryPoints: ['src/lib/references/mediaMimeType.ts'],
+  absWorkingDir: fileURLToPath(new URL('..', import.meta.url)), bundle: true, write: false, format: 'esm', platform: 'node' });
+const { getMediaMimeType: getMimeType } = await import('data:text/javascript;base64,' + Buffer.from(helper.outputFiles[0].text).toString('base64'));
+assert.match(controls, /import \{ getMediaMimeType as getMimeType \} from '\.\.\/lib\/references\/mediaMimeType'/);
 
 const imageStart = controls.indexOf('  const processImageFiles = async');
 const imageEnd = controls.indexOf('  // --- Upload Handlers ---', imageStart);
@@ -61,7 +60,7 @@ globalThis.__referenceMimeUpload = {
   },
 };
 const compiled = await build({ stdin: {
-  contents: "export { uploadBase64ToPublicUrl, saveTemplate, saveImage, saveVideo } from './src/services/storageService';",
+  contents: "export { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, saveTemplate, saveImage, saveVideo } from './src/services/storageService'; export { createReferenceUploader } from './src/lib/references/referenceUploadCache';",
   resolveDir: fileURLToPath(new URL('..', import.meta.url)), loader: 'ts',
 }, bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'reference-mime-upload', setup(b) {
   b.onResolve({ filter: /\/authService$|^tus-js-client$|^@supabase\/supabase-js$/ }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -69,10 +68,13 @@ const compiled = await build({ stdin: {
     "export const isAuthSessionMissingError = () => false;" :
     "export const supabase = globalThis.__referenceMimeUpload, getCurrentUserId = async () => 'user-1', SUPABASE_URL = 'https://storage.invalid';" }));
 } }] });
-const { uploadBase64ToPublicUrl, saveTemplate, saveImage, saveVideo } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, saveTemplate, saveImage, saveVideo, createReferenceUploader } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
 function setup(t) {
   state.uploads = []; state.rows = []; state.allowedMimeTypes = null;
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, options) => String(url).startsWith('https://provider.invalid/')
+    ? new Response('synthetic-video', { headers: { 'content-type': 'video/mp4' } }) : originalFetch(url, options));
   t.mock.method(console, 'warn', () => {});
   t.mock.method(console, 'error', () => {});
 }
@@ -175,7 +177,7 @@ test('template MIME rejections retain their reason while ordinary uploads keep r
   await input.handleAudioFileUpload({ target: { files: [file] } });
   const config = input.getConfig();
   t.after(() => config.referenceAudios.forEach(ref => URL.revokeObjectURL(ref.url)));
-  await assert.rejects(saveTemplate({ id: 'template', name: 'Rejected', createdAt: 1, config }), /application\/octet-stream.*MIME type is not allowed/);
+  await assert.rejects(saveTemplate({ id: 'template', name: 'Rejected', createdAt: 1, config }), /Unsupported media type.*application\/octet-stream/);
   assert.equal(state.rows.length, 0);
   assert.equal(await uploadBase64ToPublicUrl('dW5rbm93bg==', 'text/plain'), null);
 });
@@ -188,7 +190,7 @@ test('legacy image inference does not bypass a narrower custom MIME allowlist', 
 });
 
 for (const [kind, save] of [['image', saveImage], ['video', saveVideo]]) {
-  const result = { id: `generated-${kind}`, url: `data:${kind === 'image' ? 'image/png' : 'video/mp4'};base64,c3ludGhldGlj`, prompt: 'Synthetic', mediaType: kind, createdAt: 1 };
+  const result = { id: `generated-${kind}`, url: kind === 'image' ? 'data:image/png;base64,c3ludGhldGlj' : 'https://provider.invalid/video.mp4', prompt: 'Synthetic', mediaType: kind, createdAt: 1 };
   test(`${kind} persistence retains a generic PNG picker's inferred MIME and bytes`, async t => {
     setup(t);
     const file = new File(['synthetic-png'], 'photo.png', { type: 'application/octet-stream' });
@@ -229,8 +231,92 @@ for (const [kind, save] of [['image', saveImage], ['video', saveVideo]]) {
   test(`${kind} persistence rejects unknown generic references without completing the row`, async t => {
     setup(t);
     const referenceImages = [{ id: 'unknown', data: 'data:application/octet-stream;base64,dW5rbm93bg==', mimeType: 'application/octet-stream' }];
-    assert.equal(await save({ ...result, referenceImages }, 'user-1'), undefined);
+    assert.equal(await save({ ...result, id: `invalid-${kind}`, referenceImages }, 'user-1'), undefined);
     assert.equal(state.uploads.filter(upload => upload.path.includes('/refs/')).length, 0);
     assert.equal(state.rows.length, 0);
+    assert.equal(state.uploads.length, 0, 'Invalid references must fail before uploading the result video');
   });
 }
+
+for (const [name, mime] of [['photo.png', 'image/png'], ['clip.mp3', 'audio/mpeg']]) {
+  test(`shared blob uploads infer ${name} from a missing or generic File MIME`, async t => {
+    setup(t);
+    for (const type of ['', 'application/octet-stream']) {
+      state.uploads = [];
+      const file = new File(['synthetic'], name, { type });
+      assert.ok(await uploadBlobToPublicUrl(file));
+      assert.equal(state.uploads[0].contentType, mime);
+      assert.equal(await state.uploads[0].blob.text(), 'synthetic');
+    }
+  });
+}
+
+test('shared blob uploads reject unknown types clearly without trusting the fallback extension', async t => {
+  setup(t);
+  const unknown = new File(['unknown'], 'data.bin', { type: 'application/octet-stream' });
+  assert.equal(await uploadBlobToPublicUrl(unknown, undefined, 'ref', 'jpg'), null);
+  await assert.rejects(uploadBlobToPublicUrl(unknown, undefined, 'ref', 'jpg', { throwOnError: true }), /Unsupported media type.*application\/octet-stream/);
+  assert.equal(state.uploads.length, 0);
+});
+
+test('shared blob uploads preserve explicit non-media types rather than trusting a misleading filename', async t => {
+  setup(t);
+  const file = new File(['text'], 'photo.png', { type: 'text/plain' });
+  await assert.rejects(uploadBlobToPublicUrl(file, undefined, 'ref', 'jpg', { throwOnError: true }), /Unsupported media type.*text\/plain/);
+  assert.equal(state.uploads.length, 0);
+});
+
+test('generation uploads can opt into actionable errors without changing ordinary callers', async t => {
+  setup(t);
+  await assert.rejects(uploadBase64ToPublicUrl('dW5rbm93bg==', 'application/octet-stream', 'ref', { throwOnError: true }), /Reference image type could not be recognized/);
+  assert.equal(await uploadBase64ToPublicUrl('dW5rbm93bg==', 'application/octet-stream'), null);
+  state.allowedMimeTypes = ['image/jpeg'];
+  await assert.rejects(uploadBase64ToPublicUrl('iVBORw0KGgoAAAAA', 'image/png', 'ref', { throwOnError: true }), /image\/png.*MIME type is not allowed/);
+  assert.equal(await uploadBase64ToPublicUrl('iVBORw0KGgoAAAAA', 'image/png'), null);
+});
+
+for (const provider of ['falImageService', 'runwayService', 'openaiImageService']) {
+  const source = fs.readFileSync(new URL(`../src/services/${provider}.ts`, import.meta.url), 'utf8');
+  const openai = provider === 'openaiImageService';
+  const start = source.indexOf(openai ? 'const uploadReference =' : 'const resolveImageUrl =');
+  const end = openai ? source.indexOf('const activeImageJobs', start) : source.indexOf('\n};', start) + 3;
+  assert.ok(start >= 0 && end > start);
+  const transformed = await transform(`export const createResolver = (uploadBase64ToPublicUrl, createReferenceUploader) => {
+    const refreshMediaAccessUrl = async url => url;
+    ${source.slice(start, end)}
+    return ${openai ? "ref => uploadReference(ref.data, ref.mimeType, 'openai_ref', 'user-1')" : 'resolveImageUrl'};
+  };`, { loader: 'ts', format: 'esm' });
+  const { createResolver } = await import('data:text/javascript;base64,' + Buffer.from(transformed.code).toString('base64'));
+  test(`${provider} reference preparation preserves actionable upload errors`, async t => {
+    setup(t);
+    const resolve = createResolver(uploadBase64ToPublicUrl, createReferenceUploader);
+    await assert.rejects(resolve({ data: 'dW5rbm93bg==', mimeType: 'application/octet-stream' }), /Reference image type could not be recognized/);
+    state.allowedMimeTypes = ['image/jpeg'];
+    await assert.rejects(resolve({ data: 'iVBORw0KGgoAAAAA', mimeType: 'image/png' }), /image\/png.*MIME type is not allowed/);
+    state.allowedMimeTypes = null;
+    // Missing legacy MIME must reach signature inference, not a JPEG default.
+    assert.ok(await resolve({ data: 'iVBORw0KGgoAAAAA', mimeType: '' }));
+    assert.equal(state.uploads.at(-1).contentType, 'image/png');
+  });
+}
+
+test('video reference preflight rejects explicit non-image MIME before any uploads', async t => {
+  setup(t);
+  const referenceImages = [{ id: 'text', data: 'data:text/plain;base64,dW5rbm93bg==', mimeType: 'text/plain' }];
+  assert.equal(await saveVideo({ id: 'preflight-text', url: 'https://provider.invalid/video.mp4', referenceImages }, 'user-1'), undefined);
+  assert.equal(state.uploads.length, 0);
+  assert.equal(state.rows.length, 0);
+});
+
+test('video reference preflight reuses local blobs and does not download stored HTTP references', async t => {
+  setup(t);
+  const local = 'data:application/octet-stream;base64,iVBORw0KGgoAAAAA';
+  const stored = 'https://storage.invalid/storage/v1/object/authenticated/media/user-1/refs/stored.png';
+  const originalFetch = globalThis.fetch, fetched = [];
+  t.mock.method(globalThis, 'fetch', async url => { fetched.push(url); assert.notEqual(url, stored); return originalFetch(url); });
+  const referenceImages = [{ id: 'local', data: local, mimeType: 'application/octet-stream' }, { id: 'stored', data: stored, mimeType: 'image/png' }];
+  assert.ok(await saveVideo({ id: 'preflight-valid', url: 'https://provider.invalid/video.mp4', referenceImages }, 'user-1'));
+  assert.equal(fetched.filter(url => url === local).length, 1);
+  assert.equal(state.uploads.filter(upload => upload.path.includes('/refs/')).length, 1);
+  assert.equal(state.rows[0].reference_images[1].data, stored);
+});

@@ -1,3 +1,4 @@
+import { getMediaMimeType } from '../lib/references/mediaMimeType';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
@@ -135,7 +136,11 @@ export const uploadBlobToPublicUrl = async (
 ): Promise<string | null> => {
   if (!supabase) return null;
   try {
-    const contentType = mimeType || blob.type || 'application/octet-stream';
+    const filename = typeof File !== 'undefined' && blob instanceof File ? blob.name : undefined;
+    const contentType = getMediaMimeType({ type: mimeType || blob.type }, filename);
+    if (!/^(image|video|audio)\//.test(contentType)) {
+      throw new Error(`Unsupported media type: ${contentType}. Choose a recognized image, video or audio file.`);
+    }
     const ext = getStorageExtension(contentType, fallbackExtension);
     const userId = await bindMediaSession();
     if (!userId || (options?.expectedUserId && userId !== options.expectedUserId)) return null;
@@ -254,10 +259,16 @@ const normalizeReferenceImageBlob = async (blob: Blob, mimeType = blob.type): Pr
     if (!detected?.startsWith('image/')) throw new Error('Reference image type could not be recognized. Attach the image again.');
     contentType = detected;
   }
+  if (!contentType.startsWith('image/')) throw new Error(`Unsupported reference image type: ${contentType}. Attach an image again.`);
   return blob.type === contentType ? blob : blob.slice(0, blob.size, contentType);
 };
 
-export const uploadBase64ToPublicUrl = async (base64Data: string, mimeType: string, prefix = 'ref'): Promise<string | null> => {
+export const uploadBase64ToPublicUrl = async (
+  base64Data: string,
+  mimeType: string,
+  prefix = 'ref',
+  options?: { throwOnError?: boolean },
+): Promise<string | null> => {
   if (!supabase) return null;
   try {
     let raw = base64Data;
@@ -266,9 +277,10 @@ export const uploadBase64ToPublicUrl = async (base64Data: string, mimeType: stri
     const byteArray = new Uint8Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
     const blob = await normalizeReferenceImageBlob(new Blob([byteArray], { type: mimeType }));
-    return uploadBlobToPublicUrl(blob, blob.type, prefix, 'jpg');
+    return await uploadBlobToPublicUrl(blob, blob.type, prefix, 'jpg', options);
   } catch (e: any) {
     console.warn('uploadBase64ToPublicUrl error:', e.message);
+    if (options?.throwOnError) throw e;
     return null;
   }
 };
@@ -1251,6 +1263,16 @@ export const saveVideo = async (
     let thumbnailUrl = media.thumbnailUrl;
     let uploadedThumbnailPath: string | null = media.thumbnailPath || null;
 
+    // Reject invalid local references before uploading a potentially large video.
+    // Keep the normalized blobs for persistence; stored HTTP references stay URLs.
+    const referenceImages = (media.referenceImages || []).map(withoutLegacyMask);
+    const referenceBlobs = await Promise.all(referenceImages.map(async ref => {
+      if (!ref.data) throw new Error(`Reference image ${ref.id || 'unknown'} has no source data and was not saved.`);
+      if (ref.data.startsWith('http')) return undefined;
+      const response = await fetch(ref.data);
+      return normalizeReferenceImageBlob(await response.blob(), ref.mimeType || undefined);
+    }));
+
     const transferKey = `${userId}:${media.id}`;
     const previousTransfer = completedVideoTransfers.get(transferKey);
     // Another source overwrites the same stored file, so its entry no longer describes it.
@@ -1394,13 +1416,12 @@ export const saveVideo = async (
       }
     }
 
-    const safeReferenceImages = await Promise.all((media.referenceImages || []).map(withoutLegacyMask).map(async (ref) => {
+    const safeReferenceImages = await Promise.all(referenceImages.map(async (ref, index) => {
       if (!ref.data) throw new Error(`Reference image ${ref.id || 'unknown'} has no source data and was not saved.`);
       if (ref.data.startsWith('http')) return withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) });
       try {
         const refPath = `${userId}/refs/${media.id}_${ref.id}.jpg`;
-        const res = await fetch(ref.data);
-        const refBlob = await normalizeReferenceImageBlob(await res.blob(), ref.mimeType || undefined);
+        const refBlob = referenceBlobs[index]!;
         await assertSameUser();
         const { error: refUploadError } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(refPath, refBlob, { contentType: refBlob.type, cacheControl: '0', upsert: true });
         if (!refUploadError) {

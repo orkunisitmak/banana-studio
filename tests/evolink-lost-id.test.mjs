@@ -11,6 +11,9 @@ const stubs = {
     export const registerProviderTask=async()=>{
       if (globalThis.__registerFail) throw new Error('registry down');
     };
+    export const isGenerationId=()=>true;
+    export const requireSavedVideo=async()=>true;
+    export const saveGenerationTask=async()=>true;
   `,
 };
 

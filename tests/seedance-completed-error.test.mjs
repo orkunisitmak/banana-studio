@@ -5,7 +5,7 @@ const { fileURLToPath } = await import('node:url');
 const stubs = {
   auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({});',
   guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
-  providerTasks: 'export const prepareTaskRegistry=async()=>({});export const registerProviderTask=async()=>{};export const requireProviderTask=async()=>true;',
+  providerTasks: 'export const prepareTaskRegistry=async()=>({});export const registerProviderTask=async()=>{};export const requireProviderTask=async()=>true;export const isGenerationId=()=>true;export const requireSavedVideo=async()=>true;export const saveGenerationTask=async()=>true;',
   evolink: 'export default async()=>{throw new Error("evolink unused");};',
   imageStorage: 'export const signedMediaUrl=async()=>"https://signed";',
 };

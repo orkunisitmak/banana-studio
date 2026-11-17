@@ -12,6 +12,9 @@ const stubs = {
       globalThis.__registered = (globalThis.__registered || 0) + 1;
     };
     export const requireProviderTask=async()=>true;
+    export const isGenerationId=()=>true;
+    export const requireSavedVideo=async()=>true;
+    export const saveGenerationTask=async()=>true;
   `,
   evolink: 'export default async()=>{throw new Error("evolink unused");};',
   imageStorage: 'export const signedMediaUrl=async()=>"https://signed";',

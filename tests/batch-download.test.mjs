@@ -75,6 +75,26 @@ test('expired image URLs are renewed before the ZIP fetch, as single downloads d
   assert.deepEqual([fetched, fallback.failed], [['https://s/a.png?token=expired'], 1]);
 });
 
+test('a renewal that never answers falls back to the loaded URL instead of blocking the ZIP', async () => {
+  const signed = [
+    { id: 'a', url: 'https://s/a.png?token=current', mediaType: 'image' },
+    { id: 'b', url: 'https://s/b.png?token=current', mediaType: 'image' },
+  ];
+  const fetched = [];
+  const fetchSigned = async url => { fetched.push(url); return new Response(new Blob(['x'], { type: 'image/png' })); };
+  const hangingFor = [];
+  const renew = url => url.includes('/a.png')
+    ? new Promise(() => { hangingFor.push(url); })
+    : Promise.resolve(url.replace('token=current', 'token=renewed'));
+  const started = Date.now();
+  const { files, failed } = await collectBatchDownload(['a', 'b'], signed, fetchSigned, renew, 20);
+  assert.ok(Date.now() - started < 2_000);
+  assert.deepEqual(hangingFor, ['https://s/a.png?token=current']);
+  assert.deepEqual(files.map(file => file.name), ['banana-a.png', 'banana-b.png']);
+  assert.equal(failed, 0);
+  assert.deepEqual(fetched.sort(), ['https://s/a.png?token=current', 'https://s/b.png?token=renewed']);
+});
+
 test('the gallery batch download passes the signed URL renewer', () => {
   const gallery = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
   assert.match(gallery, /collectBatchDownload\(Array\.from\(selectedIds\), images, undefined, url => refreshMediaAccessUrl\(url, false\)\)/);

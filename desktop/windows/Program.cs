@@ -15,10 +15,34 @@ internal static class Program
         if (args.Contains("--test-window-placement")) { try { WindowPlacement.Test(); return 0; } catch { return 1; } }
         ApplicationConfiguration.Initialize();
         using var instance = new Mutex(true, "Local\\BananaStudio.Workspace", out var first);
-        if (!first) { MessageBox.Show("Banana Studio is already running. Open its existing window.", "Banana Studio"); return 0; }
+        if (!first)
+        {
+            if (!ActivateExistingWindow()) MessageBox.Show("Banana Studio is already running. Open its existing window.", "Banana Studio");
+            return 0;
+        }
         Application.Run(new StudioWindow());
         return 0;
     }
+    private static bool ActivateExistingWindow()
+    {
+        using var current = Process.GetCurrentProcess();
+        foreach (var other in Process.GetProcessesByName(current.ProcessName))
+        {
+            using (other)
+            {
+                var window = other.MainWindowHandle;
+                if (other.Id == current.Id || window == IntPtr.Zero) continue;
+                // SW_RESTORE keeps the window's maximized state.
+                if (IsIconic(window)) ShowWindowAsync(window, 9);
+                return SetForegroundWindow(GetLastActivePopup(window));
+            }
+        }
+        return false;
+    }
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr window);
 }
 
 internal sealed class StudioWindow : Form

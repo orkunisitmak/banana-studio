@@ -187,6 +187,48 @@ test('Ogg alias normalization does not relabel unknown containers or explicit vi
   assert.equal(getMimeType(new Blob([], { type: 'video/ogg' }), 'clip.ogg'), 'video/ogg');
 });
 
+const fileTypeBox = (major, compatible = [], minor = '\0\0\0\0') => {
+  const payload = Buffer.from(major + minor + compatible.join(''), 'binary');
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(8 + payload.length);
+  header.write('ftyp', 4);
+  return Buffer.concat([header, payload]);
+};
+
+for (const brand of ['heic', 'heix', 'heim', 'heis', 'mif1']) {
+  for (const type of ['', 'application/octet-stream']) {
+    test(`unnamed ${brand} image blob with ${type || 'missing'} MIME survives picker and reference upload`, async t => {
+      setup(t);
+      const expected = brand === 'mif1' ? 'image/heif' : 'image/heic';
+      // The generic brand comes first; codec-specific compatible brands take priority.
+      const bytes = fileTypeBox('mif1', ['mif1', brand]);
+      const input = picker();
+      await input.processImageFiles([new Blob([bytes], { type })]);
+      const ref = input.getConfig().referenceImages[0];
+      assert.ok(await uploadBase64ToPublicUrl(ref.data, ref.mimeType));
+      assert.equal(state.uploads[0].contentType, expected);
+      assert.deepEqual(Buffer.from(await state.uploads[0].blob.arrayBuffer()), bytes);
+    });
+  }
+}
+
+test('HEIF inference preserves AVIF precedence and rejects invalid image brands', async t => {
+  setup(t);
+  assert.ok(await uploadBase64ToPublicUrl(fileTypeBox('mif1', ['mif1', 'heic', 'avif']).toString('base64'), 'application/octet-stream'));
+  assert.equal(state.uploads[0].contentType, 'image/avif');
+  state.uploads = [];
+  for (const bytes of [fileTypeBox('mp42', [], 'heic'), fileTypeBox('mp42', [], 'mif1'), fileTypeBox('heic', ['mif1']).subarray(0, 18)]) {
+    assert.equal(await uploadBase64ToPublicUrl(bytes.toString('base64'), 'application/octet-stream'), null);
+  }
+  assert.equal(state.uploads.length, 0);
+});
+
+test('HEIC references still obey a narrower custom MIME allowlist', async t => {
+  setup(t); state.allowedMimeTypes = ['image/jpeg'];
+  assert.equal(await uploadBase64ToPublicUrl(fileTypeBox('heic', ['mif1', 'heic']).toString('base64'), 'application/octet-stream'), null);
+  assert.equal(state.uploads.length, 0);
+});
+
 for (const [mime, bytes] of [
   ['image/png', Buffer.from('89504e470d0a1a0a00000000', 'hex')],
   ['image/jpeg', Buffer.from('ffd8ffe000000000', 'hex')],

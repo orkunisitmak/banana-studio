@@ -1054,6 +1054,7 @@ export const createVideoTask = async (
         generateAudio: audioEnabled !== false,
         ...(videoOperation === 'reference_edit' ? { referenceEditMode: true } : {}),
         ...(videoOperation === 'edit' ? { editSourcePreparationVersion: 1 } : {}),
+        ...(context?.id ? { generationId: context.id } : {}),
       };
 
   if (imageUrls.length > 0) body.imageUrls = imageUrls;
@@ -1071,7 +1072,8 @@ export const createVideoTask = async (
   });
 
   const createData = await createRes.json().catch(() => null);
-  if (!createRes.ok) throw new Error(createData?.error || 'Failed to start video generation');
+  // As with H3, an accepted task stays usable if only its gallery save failed.
+  if (!createRes.ok && !createData?.taskId) throw new Error(createData?.error || 'Failed to start video generation');
   if (!createData?.taskId) throw new Error('No task ID returned');
 
   const usage = createData.usage && typeof createData.usage === 'object'

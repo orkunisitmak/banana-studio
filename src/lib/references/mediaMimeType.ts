@@ -2,6 +2,9 @@ export const getMediaMimeType = (file: Pick<Blob, 'type'>, name?: string): strin
   // Pickers may report recognized media as generic binary. Infer those files
   // from their known extension before sending MIME-restricted Storage uploads.
   const type = file.type?.split(';', 1)[0].trim().toLowerCase();
+  // Ogg audio pickers can report the container type instead of audio/ogg.
+  // Only normalize known audio extensions; do not relabel video/unknown Ogg.
+  if (type === 'application/ogg' && /\.(ogg|oga)$/i.test(name || '')) return 'audio/ogg';
   if (type && type !== 'application/octet-stream') return type;
   if (name) {
     const ext = name.split('.').pop()?.toLowerCase();

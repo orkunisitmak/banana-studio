@@ -166,6 +166,27 @@ test('audio picker retains valid inferred audio from a mixed selection', async t
   assert.match(input.getError(), /data\.bin.*audio file/);
 });
 
+for (const name of ['clip.oga', 'clip.ogg', 'clip.OGA']) {
+  test(`application/ogg ${name} retains an audio MIME through picker and template storage`, async t => {
+    setup(t);
+    const input = picker();
+    await input.handleAudioFileUpload({ target: { files: [new File(['synthetic-ogg'], name, { type: 'application/ogg; codecs=opus' })] } });
+    const config = input.getConfig();
+    t.after(() => config.referenceAudios.forEach(ref => URL.revokeObjectURL(ref.url)));
+    assert.equal(input.getError(), null);
+    assert.equal(config.referenceAudios[0].mimeType, 'audio/ogg');
+    await saveTemplate({ id: 'template', name: 'Ogg soundtrack', createdAt: 1, config });
+    assert.equal(state.uploads[0].contentType, 'audio/ogg');
+    assert.equal(await state.uploads[0].blob.text(), 'synthetic-ogg');
+  });
+}
+
+test('Ogg alias normalization does not relabel unknown containers or explicit video types', () => {
+  assert.equal(getMimeType(new Blob([], { type: 'application/ogg' }), 'clip.ogv'), 'application/ogg');
+  assert.equal(getMimeType(new Blob([], { type: 'application/ogg' })), 'application/ogg');
+  assert.equal(getMimeType(new Blob([], { type: 'video/ogg' }), 'clip.ogg'), 'video/ogg');
+});
+
 for (const [mime, bytes] of [
   ['image/png', Buffer.from('89504e470d0a1a0a00000000', 'hex')],
   ['image/jpeg', Buffer.from('ffd8ffe000000000', 'hex')],

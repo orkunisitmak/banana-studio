@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const load = async file => {
   const compiled = await build({ entryPoints: [fileURLToPath(new URL(file, import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' });
@@ -27,3 +28,11 @@ for (const [provider, prepare] of [['fal', body => falSeedanceInput(body).input]
     assert.equal(prepare(request(undefined)).prompt, '');
   });
 }
+
+test('the provider module loads in Node without a bundler and keeps the shared quoted-copy pattern', async () => {
+  const direct = await import('../src/lib/video/seedanceProviders.ts');
+  assert.equal(direct.openRouterSeedanceInput(request('Say "@IMAGE_1" over @IMAGE_1.')).prompt, 'Say "@IMAGE_1" over @Image1.');
+  const read = file => readFileSync(new URL(file, import.meta.url), 'utf8');
+  const pattern = read('../src/lib/references/referenceTokens.ts').match(/getQuotedPromptPattern = \(\): RegExp => (\/.*\/gu);/)[1];
+  assert.ok(read('../src/lib/video/seedanceProviders.ts').includes(`=> ${pattern};`));
+});

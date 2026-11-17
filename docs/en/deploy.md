@@ -69,6 +69,7 @@ An environment variable is a named setting supplied to the application by Vercel
 | `CRON_SECRET` | A fresh random secret, preferably at least 32 characters, generated with your password manager | Yes |
 | `OPENAI_API_KEY` | OpenAI key | For GPT Image 2.5 and/or GPT-6.1 Sol |
 | `OPENROUTER_API_KEY` | OpenRouter key | For Opus 5.5, the initial creative default |
+| `ANTHROPIC_API_KEY` | Anthropic key | Runs Opus 5.5 directly; used before OpenRouter when both are set |
 | `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |
 | `FAL_KEY` | fal.ai key | For Nano Banana, H3 Max and supported video preprocessing |
 | `EVOLINK_API_KEY` | EvoLink key | For Seedance |
@@ -118,7 +119,7 @@ The script deliberately refuses its placeholder and unverified/nonexistent accou
 
 ## 8. Check the complete workspace
 
-1. Open **AI settings**. Select a text provider whose key you configured. The default is Opus 5.5 / Medium and requires OpenRouter.
+1. Open **AI settings**. Select a text provider whose key you configured. The default is Opus 5.5 / Medium and requires Anthropic or OpenRouter.
 2. Select a configured image model. For example, choose GPT Image 2.5 with your OpenAI key.
 3. Submit one test image with your own prompt. This is a real provider request and uses your provider's balance.
 4. Verify that the result finishes, stays in the gallery after refresh and can be downloaded.

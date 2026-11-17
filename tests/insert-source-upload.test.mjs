@@ -30,20 +30,20 @@ const templateCode = transformSync(`module.exports = env => {
 };`, { loader: 'ts', format: 'cjs' }).code;
 const templateMod = { exports: {} }; new Function('module', templateCode)(templateMod);
 
-function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = true) {
-  let state = { mode: 'video', videoModel: h3 ? 'minimax-h3' : 'seedance-2.5', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
-  const errors = [], requests = [], gates = new Map(), slots = [], updates = []; let cursor = 0, version = 0, effects = [];
+function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = true, draftMode = 'video') {
+  let state = { mode: draftMode, videoModel: h3 ? 'minimax-h3' : 'seedance-2.5', h3MaxMode: mode, prompt: 'Keep my source scene', referenceImages: [], referenceAudios: [], referenceVideos: videos.map(id => ({ id })) }, uploadState = null;
+  const errors = [], requests = [], gates = new Map(), slots = [], updates = [], audioReads = [], videoInput = { value: 'picked' }; let cursor = 0, version = 0, effects = [];
   const api = (commit = true) => { cursor = 0; effects = []; const handlers = mod.exports({ config: state, onChange: update => { if (deferred) updates.push(update); else state = typeof update === 'function' ? update(state) : update; }, setAttachmentError: value => errors.push(typeof value === 'function' ? value(errors.at(-1)) : value),
     isH3VideoConfig: h3, h3State: { mode: state.h3MaxMode }, currentReferenceVideos: state.referenceVideos, maxReferenceVideos: state.h3MaxMode === 'image_to_video' ? 0 : 4,
     useLayoutEffect: effect => effects.push(effect), useRef: value => { const index = cursor++; return slots[index] ||= { current: value }; }, useState: initial => [uploadState ?? initial, update => { uploadState = update(uploadState ?? initial); }], promptLoadVersion: version,
-    draggedRefId: null, draggedGalleryItem: null, setIsDragging() {}, setIsDraggingSavedRef() {}, setDraggedGalleryItem() {}, handleAddFromGallery() {}, processImageFiles: files => new Promise(resolve => gates.set(files[0].name, { resolve })), processAudioFiles() { throw new Error('Unexpected audio read'); }, maxReferenceAudios: 3,
+    draggedRefId: null, draggedGalleryItem: null, setIsDragging() {}, setIsDraggingSavedRef() {}, setDraggedGalleryItem() {}, handleAddFromGallery() {}, processImageFiles: files => new Promise(resolve => gates.set(files[0].name, { resolve })), processAudioFiles(files) { if (draftMode === 'video') throw new Error('Unexpected audio read'); audioReads.push(...files.map(file => file.name)); }, maxReferenceAudios: 3,
     setUndoStack() {}, getPersonDefinitions: () => [], refInputRef: { current: null }, setEnhanceError() {},
     uploadReferenceVideo: file => {
       requests.push(file.name); return new Promise((resolve, reject) => gates.set(file.name, { resolve: () => resolve({ id: file.name }), reject: () => reject(new Error(file.name + ' upload failed')) }));
-    }, videoInputRef: { current: null }, attachLimitsRef: { get current() { return { videos: 4, config: state }; } }, flushSync: run => { run(); while (updates.length) { const update = updates.shift(); state = typeof update === 'function' ? update(state) : update; } },
+    }, videoInputRef: { current: videoInput }, attachLimitsRef: { get current() { return { videos: 4, config: state }; } }, flushSync: run => { run(); while (updates.length) { const update = updates.shift(); state = typeof update === 'function' ? update(state) : update; } api(); /* React renders and commits before flushSync returns. */ },
   }); if (commit) effects.forEach(effect => effect()); return handlers; };
   return { pick: names => api().handleVideoFileUpload({ target: { files: names.map(name => ({ name, size: 1 })) } }),
-    drop: names => api().handleDrop({ preventDefault() {}, dataTransfer: { getData: () => '', files: names.map(name => ({ name, size: 1, type: name.endsWith('.png') ? 'image/png' : 'video/mp4' })) } }),
+    drop: names => api().handleDrop({ preventDefault() {}, dataTransfer: { getData: () => '', files: names.map(name => ({ name, size: 1, type: name.endsWith('.png') ? 'image/png' : name.endsWith('.mp3') ? 'audio/mpeg' : 'video/mp4' })) } }),
     discardRender: () => { const previous = state; state = { ...state, videoModel: 'uncommitted-model' }; api(false); state = previous; },
     clear: () => api().handleClearAll(), replaceDraft: () => { state = { ...state, prompt: 'New draft', referenceVideos: [] }; version++; api(); },
     loadTemplate: () => { templateMod.exports({ getH3MaxUIState, getReferenceImageLimit, config: state, resolveImageModel: value => value, SUNBURST_MODEL: 'test-image',
@@ -52,7 +52,7 @@ function scenario(videos = [], mode = 'insert_video', deferred = false, h3 = tru
       setConfig: value => { state = value; }, setPromptLoadVersion: update => { version = update(version); },
       toast: { info() {}, error: (...args) => assert.fail(args.join(' ')) },
     })({ name: 'Another scene', config: { ...state, prompt: 'Template scene', referenceVideos: [] } }); api(); },
-    change: update => { state = update(state); api(); }, gates, requests, errors, state: () => state, uploading: () => api().uploadingReferenceVideos };
+    change: update => { state = update(state); api(); }, gates, requests, errors, audioReads, videoInput, state: () => state, uploading: () => api().uploadingReferenceVideos };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('a failed Insert source never promotes a supplemental clip into its role', async () => {
@@ -237,3 +237,36 @@ test('an obsolete mixed drop cannot report a disallowed-video error from its old
   assert.equal(f.errors.at(-1), 'new.mp4 upload failed');
   assert.deepEqual(f.requests, ['new.mp4']);
 });
+
+test('a video and audio dropped together in image mode keep the audio after the switch to video', async () => {
+  const f = scenario([], 'reference_to_video', false, false, 'image');
+  const pending = f.drop(['clip.mp4', 'voice.mp3']); await tick();
+  f.gates.get('clip.mp4').resolve(); await pending;
+  assert.equal(f.state().mode, 'video');
+  assert.deepEqual(f.state().referenceVideos.map(video => video.id), ['clip.mp4']);
+  assert.deepEqual(f.audioReads, ['voice.mp3'], 'the drop\'s own mode switch must not discard its audio phase');
+  assert.equal(f.uploading(), 0);
+});
+test('an image-mode drop replaced while uploading still skips its audio phase', async () => {
+  const f = scenario([], 'reference_to_video', false, false, 'image');
+  const pending = f.drop(['clip.mp4', 'voice.mp3']); await tick();
+  f.replaceDraft(); f.gates.get('clip.mp4').resolve(); await pending;
+  assert.equal(f.state().mode, 'image');
+  assert.deepEqual(f.state().referenceVideos, []);
+  assert.deepEqual(f.audioReads, []);
+});
+test('an over-capacity image-mode drop still reports its limit after the switch to video', async () => {
+  const f = scenario([], 'reference_to_video', false, false, 'image');
+  const pending = f.drop(['c1.mp4', 'c2.mp4', 'c3.mp4', 'c4.mp4', 'extra.mp4']); await tick();
+  for (const name of ['c1.mp4', 'c2.mp4', 'c3.mp4', 'c4.mp4']) f.gates.get(name).resolve(); await pending;
+  assert.match(f.errors.at(-1), /Limit reached: 4 videos max/);
+  assert.equal(f.state().referenceVideos.length, 4);
+});
+for (const action of ['clear', 'replaceDraft']) {
+  test(`the video input is cleared when ${action} makes its selection obsolete`, async () => {
+    const f = scenario(); const old = f.pick(['same.mp4']); await tick();
+    assert.equal(f.videoInput.value, '', 'cleared as soon as the files are read');
+    f.videoInput.value = 'untouched'; f[action](); f.gates.get('same.mp4').resolve(); await old;
+    assert.equal(f.videoInput.value, 'untouched', 'an obsolete completion must not clear a newer selection');
+  });
+}

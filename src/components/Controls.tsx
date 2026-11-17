@@ -418,7 +418,8 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const insertSourceUploadRef = useRef<{ draft: object } | null>(null);
-  const insertDraftKey = JSON.stringify([promptLoadVersion, config.mode, config.videoModel, config.videoOperation, config.h3MaxMode]);
+  const insertDraftKeyFor = (draftConfig: GenerationConfig) => JSON.stringify([promptLoadVersion, draftConfig.mode, draftConfig.videoModel, draftConfig.videoOperation, draftConfig.h3MaxMode]);
+  const insertDraftKey = insertDraftKeyFor(config);
   const insertUploadDraftRef = useRef({ key: insertDraftKey, token: {} });
   const videoUploadDraft = insertUploadDraftRef.current.key === insertDraftKey ? insertUploadDraftRef.current.token : {};
   // Discarded renders must not invalidate work belonging to the committed draft.
@@ -818,11 +819,15 @@ export const Controls: React.FC<ControlsProps> = ({
           }
           const kept = newRefs.slice(0, Math.max(0, attachLimitsRef.current.videos - (previous.referenceVideos?.length || 0)));
           dropped = newRefs.length - kept.length;
-          return {
+          const next = {
             ...previous,
             referenceVideos: [...(previous.referenceVideos || []), ...kept],
             ...(switchToVideo ? { mode: 'video' as const } : {}),
           };
+          // This drop's own switch to video mode is not a replacement draft: keep its
+          // token so the remaining phases of the same drop (audio, warnings) still run.
+          if (switchToVideo) insertUploadDraftRef.current = { key: insertDraftKeyFor(next), token: draft };
+          return next;
         }));
       }
       if (failures.length > 0) {
@@ -853,11 +858,12 @@ export const Controls: React.FC<ControlsProps> = ({
     // A model switch can leave more inputs than the new limit; never slice with a negative end.
     const room = Math.max(0, MAX_VIDEOS - current);
     const picked = Array.from(e.target.files) as File[];
+    // Clear now, so the same file can be picked again even if this selection becomes obsolete.
+    if (videoInputRef.current) videoInputRef.current.value = '';
     await processVideoFiles(picked.slice(0, room));
     if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
     // After processing (which clears earlier errors), keeping any upload error it reported.
     if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
-    if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
   const processAudioFiles = async (files: File[], switchToVideo = false) => {

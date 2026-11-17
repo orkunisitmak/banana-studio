@@ -7,6 +7,7 @@ import { isAuthSessionMissingError } from '@supabase/supabase-js';
 import { supabase, getCurrentUserId, SUPABASE_URL } from './authService';
 import { retryTransientRead } from '../lib/shared/transientRead';
 import { signMediaUrl } from '../lib/references/mediaAccess';
+import { sniffMediaType } from '../lib/gallery/mediaDownload';
 import { Upload } from 'tus-js-client';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { normalizeH3MaxMode, H3_MAX_ENDPOINTS } from '../lib/video/h3Max';
@@ -130,7 +131,7 @@ export const uploadBlobToPublicUrl = async (
   mimeType?: string,
   prefix = 'asset',
   fallbackExtension = 'bin',
-  options?: { expectedUserId?: string; onUploadPath?: (path: string) => void },
+  options?: { expectedUserId?: string; onUploadPath?: (path: string) => void; throwOnError?: boolean },
 ): Promise<string | null> => {
   if (!supabase) return null;
   try {
@@ -152,12 +153,14 @@ export const uploadBlobToPublicUrl = async (
 
     if (error) {
       console.warn('Upload blob failed:', error.message);
+      if (options?.throwOnError) throw new Error(`Upload rejected for ${contentType}: ${error.message}`);
       return null;
     }
 
     return await createMediaAccessUrl(path, true) || null;
   } catch (e: any) {
     console.warn('uploadBlobToPublicUrl error:', e.message);
+    if (options?.throwOnError) throw new Error(`Media upload failed: ${e instanceof Error ? e.message : 'Unknown storage error'}`);
     return null;
   }
 };
@@ -250,9 +253,19 @@ export const uploadBase64ToPublicUrl = async (base64Data: string, mimeType: stri
     const byteChars = atob(raw);
     const byteArray = new Uint8Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
-    const blob = new Blob([byteArray], { type: mimeType });
+    let blob = new Blob([byteArray], { type: mimeType });
+    let uploadMime = mimeType;
+    const normalizedMime = (mimeType || '').split(';', 1)[0].trim().toLowerCase();
+    if (!normalizedMime || normalizedMime === 'application/octet-stream') {
+      // Saved legacy references have no filename to infer from. Inspect their
+      // bytes instead of relabeling every generic image as JPEG.
+      const detected = await sniffMediaType(blob);
+      if (!detected?.startsWith('image/')) throw new Error('Reference image type could not be recognized. Attach the image again.');
+      uploadMime = detected;
+      blob = blob.slice(0, blob.size, detected);
+    }
 
-    return uploadBlobToPublicUrl(blob, mimeType, prefix, 'jpg');
+    return uploadBlobToPublicUrl(blob, uploadMime, prefix, 'jpg');
   } catch (e: any) {
     console.warn('uploadBase64ToPublicUrl error:', e.message);
     return null;
@@ -2411,6 +2424,7 @@ export const saveTemplate = async (template: Template): Promise<Template> => {
       const url = await uploadBlobToPublicUrl(blob, reference.mimeType || blob.type, 'template_audio', 'bin', {
         expectedUserId: operationUserId || undefined,
         onUploadPath: path => uploadPaths.push(path),
+        throwOnError: true,
       });
       if (await bindMediaSession() !== operationUserId) throw new Error('The template account changed.');
       if (!url) throw new Error('Template audio could not be uploaded. Your draft is unchanged; try again.');

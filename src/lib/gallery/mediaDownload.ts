@@ -1,8 +1,8 @@
 /** The server answered with an error status or a non-media page. */
 export class DownloadHttpError extends Error {}
 
-/** Recognize supported media when a server labels its bytes as a text page. */
-const sniffMediaType = async (blob: Blob): Promise<string | undefined> => {
+/** Recognize supported media signatures without decoding or changing bytes. */
+export const sniffMediaType = async (blob: Blob): Promise<string | undefined> => {
   const bytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
   const ascii = (start: number, length: number) => String.fromCharCode(...bytes.slice(start, start + length));
   if (bytes.length >= 8 && ascii(0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';

@@ -67,6 +67,15 @@ test('spending denial blocks only a reached limit and tolerates a missing migrat
   assert.equal(unknown.body.unknownCostRequests, 1);
   assert.match(unknown.body.error, /^Monthly spending limit paused: 1 generation this month has no recorded cost/);
   assert.equal(parseErrorMessage({ status: 402, code: 'SPENDING_LIMIT', error: unknown.body.error }).title, 'Spending Limit Reached');
+  // Over the limit and with an unknown cost: raising the limit alone would not help.
+  const both = spendingDenial({ data: { blocked: true, spentUsd: 12, limitUsd: 10, unknownCostRequests: 1 }, error: null });
+  assert.equal(both.body.reason, 'unknown_cost');
+  assert.match(both.body.error, /^Monthly spending limit reached \(\$12\.00 of \$10\.00\), and 1 generation this month has no recorded cost\. Raising the limit does not resume/);
+  assert.doesNotMatch(both.body.error, /after the limit is raised/);
+  assert.equal(parseErrorMessage({ status: 402, code: 'SPENDING_LIMIT', error: both.body.error }).title, 'Spending Limit Reached');
+  const reached = spendingDenial({ data: { blocked: true, spentUsd: 12, limitUsd: 10, unknownCostRequests: 0 }, error: null });
+  assert.equal(reached.body.reason, 'limit');
+  assert.match(reached.body.error, /after the limit is raised/);
 });
 
 test('local budget counts this UTC month, ignores negative estimates and validates changes', async t => {

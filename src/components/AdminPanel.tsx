@@ -506,7 +506,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
           <div className="p-4 sm:p-6">
             <div className="max-w-2xl">
               <TextModelSettings />
-              <SpendingLimitSettings admin />
+              <SpendingLimitSettings admin refreshKey={refreshVersion} />
 
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-1">

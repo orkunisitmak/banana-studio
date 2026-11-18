@@ -23,15 +23,18 @@ export function spendingDenial(result: StatusResult): { status: number; body: Re
   if (!result.data?.blocked) return null;
   const spentUsd = Number(result.data.spentUsd) || 0, limitUsd = Number(result.data.limitUsd) || 0;
   const unknownCostRequests = Math.max(0, Math.floor(Number(result.data.unknownCostRequests) || 0));
-  // Below the limit, only generations without a recorded cost can block.
-  // Raising the limit would not help then, so the message says what does.
-  const unknown = unknownCostRequests > 0 && spentUsd < limitUsd;
+  // A generation without a recorded cost blocks at any limit, so raising the
+  // limit never lifts it. Whenever one exists, the message says what does.
+  const unknown = unknownCostRequests > 0;
   const generations = unknownCostRequests === 1 ? '1 generation this month has' : `${unknownCostRequests} generations this month have`;
+  const reached = spentUsd >= limitUsd;
   return { status: 402, body: {
     code: SPENDING_LIMIT_CODE,
-    error: unknown
-      ? `Monthly spending limit paused: ${generations} no recorded cost, so spend against the ${usd(limitUsd)} limit cannot be checked. New generations resume next month or once this account no longer has a limit.`
-      : `Monthly spending limit reached (${usd(spentUsd)} of ${usd(limitUsd)}). New generations resume next month or after the limit is raised.`,
+    error: unknown && reached
+      ? `Monthly spending limit reached (${usd(spentUsd)} of ${usd(limitUsd)}), and ${generations} no recorded cost. Raising the limit does not resume generations; they resume next month or once this account no longer has a limit.`
+      : unknown
+        ? `Monthly spending limit paused: ${generations} no recorded cost, so spend against the ${usd(limitUsd)} limit cannot be checked. New generations resume next month or once this account no longer has a limit.`
+        : `Monthly spending limit reached (${usd(spentUsd)} of ${usd(limitUsd)}). New generations resume next month or after the limit is raised.`,
     reason: unknown ? 'unknown_cost' : 'limit',
     spentUsd, limitUsd, unknownCostRequests,
   } };

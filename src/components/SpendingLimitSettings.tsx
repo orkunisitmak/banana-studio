@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Wallet } from 'lucide-react';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { SPENDING_CHANGED_EVENT } from '../lib/admin/spendingEvents';
@@ -108,25 +108,34 @@ function AccountRow({ account, onSaved }: { account: AccountSpending; onSaved: (
  * Monthly spending. Desktop: the person's own budget. Hosted members see
  * their status; the admin variant also edits the default and each account.
  */
-export function SpendingLimitSettings({ admin = false }: { admin?: boolean }) {
+export function SpendingLimitSettings({ admin = false, refreshKey = 0 }: { admin?: boolean; refreshKey?: number }) {
   const local = isLocalWorkspace();
   const [status, setStatus] = useState<SpendingStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountSpending[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  // Only the latest load may update the view: an older, slower response must
+  // never put back a limit that was changed after it started.
+  const latest = useRef(0);
   const reload = useCallback(async () => {
+    const request = ++latest.current;
     try {
       const [own, list] = await Promise.all([loadSpendingStatus(), admin && !local ? loadWorkspaceSpending() : Promise.resolve([])]);
+      if (request !== latest.current) return;
       setStatus(own); setAccounts(list); setError('');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Spending could not be loaded.'); }
+    } catch (cause) {
+      if (request !== latest.current) return;
+      setError(cause instanceof Error ? cause.message : 'Spending could not be loaded.');
+    }
   }, [admin, local]);
   useEffect(() => {
-    void reload();
     const refresh = () => void reload();
     window.addEventListener(SPENDING_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(SPENDING_CHANGED_EVENT, refresh);
+    return () => { window.removeEventListener(SPENDING_CHANGED_EVENT, refresh); latest.current++; };
   }, [reload]);
+  // refreshKey lets a parent's refresh button (the admin dashboard) reload too.
+  useEffect(() => { void reload(); }, [reload, refreshKey]);
   const saveDefault = async (limit: number | null) => {
     setBusy(true); setError(''); setMessage('');
     try {

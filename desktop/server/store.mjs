@@ -151,9 +151,16 @@ export class LocalWorkspace {
   spendingStatus(now=new Date()) {
     const periodStart=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1);
     const time=value=>typeof value==='number'?value:Date.parse(value);
-    const spent=this.all('usage_logs').filter(row=>time(row.created_at)>=periodStart).reduce((sum,row)=>sum+Math.max(0,Number(row.estimated_cost)||0),0);
+    // Same rule as the hosted workspace: a missing or unusable cost (null,
+    // NaN, Infinity, text) is unknown, never free, and blocks under a budget.
+    let spent=0,unknownCostRequests=0;
+    for(const row of this.all('usage_logs')){
+      if(!(time(row.created_at)>=periodStart))continue;
+      const cost=row.estimated_cost==null||row.estimated_cost===''?NaN:Number(row.estimated_cost);
+      if(Number.isFinite(cost))spent+=Math.max(0,cost);else unknownCostRequests++;
+    }
     const limit=this.setting('spendingLimit')?.monthlyLimitUsd??null;
-    return {userId:this.user.id,limitUsd:limit,spentUsd:spent,source:limit==null?'none':'workspace',workspaceLimitUsd:limit,periodStart:new Date(periodStart).toISOString(),blocked:limit!=null&&spent>=limit};
+    return {userId:this.user.id,limitUsd:limit,spentUsd:spent,unknownCostRequests,source:limit==null?'none':'workspace',workspaceLimitUsd:limit,periodStart:new Date(periodStart).toISOString(),blocked:limit!=null&&(spent>=limit||unknownCostRequests>0)};
   }
   job(id,value) {if(value!==undefined)this.db.prepare('INSERT OR REPLACE INTO jobs VALUES (?,?)').run(id,JSON.stringify(value));const row=this.db.prepare('SELECT payload FROM jobs WHERE id=?').get(id);return row?JSON.parse(row.payload):null;}
   pendingJobs() {return this.db.prepare('SELECT payload FROM jobs').all().map(r=>JSON.parse(r.payload)).filter(j=>!['completed','failed'].includes(j.state));}

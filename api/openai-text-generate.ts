@@ -4,7 +4,6 @@ import { OPENAI_TEXT_MODEL, calculateOpenAITextCost, DEFAULT_OPENAI_REASONING, i
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { startOpenAIRequest, openAIErrorMessage } from './_lib/openaiGuard.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
-import { requireSpendingAllowance } from './_lib/spendingLimit.js';
 
 export const config = { maxDuration: 300 };
 const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
@@ -18,7 +17,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = createTaskDeadline(15_000);
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
-  if (!await requireSpendingAllowance(req, res)) return;
   const key = process.env.OPENAI_API_KEY;
   if (!key) return res.status(503).json({ error: 'OPENAI_API_KEY sunucuda tanımlı değil. GPT-6.1 Sol için OpenAI anahtarını ekle.' });
 

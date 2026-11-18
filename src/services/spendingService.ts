@@ -11,6 +11,8 @@ export interface SpendingStatus {
   source: SpendingSource;
   workspaceLimitUsd: number | null;
   periodStart: string;
+  /** This month's generations without a recorded cost. Under a limit they block new paid requests. */
+  unknownCostRequests: number;
   blocked: boolean;
 }
 
@@ -26,12 +28,15 @@ export const normalizeSpendingStatus = (value: unknown): SpendingStatus => {
   const row = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   const source = ['none', 'workspace', 'account', 'exempt', 'admin'].includes(row.source as string) ? row.source as SpendingSource : 'none';
   const limitUsd = amount(row.limitUsd), spentUsd = amount(row.spentUsd) ?? 0;
+  const unknownCostRequests = Math.floor(amount(row.unknownCostRequests) ?? 0);
   return {
     userId: typeof row.userId === 'string' ? row.userId : '',
     limitUsd, spentUsd, source,
     workspaceLimitUsd: amount(row.workspaceLimitUsd),
     periodStart: typeof row.periodStart === 'string' ? row.periodStart : '',
-    blocked: limitUsd != null && spentUsd >= limitUsd,
+    unknownCostRequests,
+    // Mirrors the server: an unknown cost is never treated as free under a limit.
+    blocked: limitUsd != null && (spentUsd >= limitUsd || unknownCostRequests > 0),
   };
 };
 
@@ -75,11 +80,15 @@ export const saveWorkspaceLimit = (limitUsd: number | null) =>
 export const saveAccountLimit = (userId: string, mode: AccountLimitMode, limitUsd: number | null) =>
   setLimit({ p_scope: 'account', p_user_id: userId, p_mode: mode, p_limit_usd: mode === 'limit' ? limitUsd : null });
 
-/** Parses a dollar amount typed by a person; empty means no limit. */
+/**
+ * Parses a dollar amount typed by a person; empty means no limit. Commas are
+ * accepted only as thousands separators (1,250.50). A decimal comma such as
+ * 12,50 is rejected rather than read as 1250.
+ */
 export const parseLimitInput = (text: string): number | null | undefined => {
-  const trimmed = text.trim().replace(/^\$/, '').replace(/,/g, '');
+  const trimmed = text.trim().replace(/^\$/, '');
   if (!trimmed) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return undefined;
-  const value = Number(trimmed);
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(trimmed)) return undefined;
+  const value = Number(trimmed.replace(/,/g, ''));
   return value <= 1_000_000 ? value : undefined;
 };

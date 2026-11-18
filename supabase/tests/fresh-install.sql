@@ -122,3 +122,28 @@ DO $$ DECLARE member uuid:='00000000-0000-4000-8000-000000000002'; s jsonb; BEGI
  IF (public.get_spending_status(member)->>'limitUsd') IS NOT NULL THEN RAISE EXCEPTION 'Workspace limit was not removed';END IF;
 END $$;
 RESET ROLE;
+-- A generation whose provider returned no cost is never treated as free:
+-- under an active limit it blocks new paid requests until the month ends or
+-- the account is exempted. Last month's unknown costs no longer count.
+INSERT INTO public.usage_logs(user_id,action,model,image_count,estimated_cost,created_at) VALUES
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic-unknown',1,NULL,date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'-interval '1 second');
+SET ROLE authenticated;
+DO $$ DECLARE member uuid:='00000000-0000-4000-8000-000000000002'; s jsonb; BEGIN
+ s:=public.set_spending_limit('account',member,'limit',10);
+ IF (s->>'unknownCostRequests')::int<>0 OR (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Last month''s unknown cost counted: %',s;END IF;
+END $$;
+RESET ROLE;
+INSERT INTO public.usage_logs(user_id,action,model,image_count,estimated_cost,created_at) VALUES
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic-unknown',1,NULL,now()),
+ ('00000000-0000-4000-8000-000000000002','generate','synthetic-nan',1,'NaN',now());
+SET ROLE authenticated;
+DO $$ DECLARE member uuid:='00000000-0000-4000-8000-000000000002'; s jsonb; BEGIN
+ s:=public.get_spending_status(member);
+ IF (s->>'unknownCostRequests')::int<>2 OR (s->>'spentUsd')::numeric<>4 OR NOT (s->>'blocked')::boolean
+  THEN RAISE EXCEPTION 'Unknown-cost generations did not block an active limit: %',s;END IF;
+ s:=public.set_spending_limit('account',member,'exempt',NULL);
+ IF (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Unknown cost blocked an exempt account: %',s;END IF;
+ s:=public.set_spending_limit('account',member,'inherit',NULL);
+ IF s->>'limitUsd' IS NOT NULL OR (s->>'blocked')::boolean THEN RAISE EXCEPTION 'Unknown cost blocked an account without a limit: %',s;END IF;
+END $$;
+RESET ROLE;

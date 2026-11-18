@@ -1,7 +1,9 @@
 -- Monthly spending limits. A workspace default applies to members; an admin
 -- can give one account its own limit or exempt it. Spend is the sum of this
 -- calendar month's (UTC) usage records, so a request that starts below the
--- limit can finish slightly above it.
+-- limit can finish slightly above it. A record without a cost estimate
+-- (estimated_cost IS NULL) is never counted as free: while an account with a
+-- limit has one this month, new paid requests stay blocked.
 CREATE TABLE public.spending_policy (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   default_monthly_limit_usd numeric CHECK (default_monthly_limit_usd IS NULL OR (default_monthly_limit_usd >= 0 AND default_monthly_limit_usd <= 1000000)),
@@ -34,6 +36,7 @@ DECLARE
   effective numeric;
   source text;
   spent numeric;
+  unknown_cost integer;
 BEGIN
   IF auth.uid() IS NULL OR NOT public.is_authorized() THEN
     RAISE EXCEPTION 'Application access required' USING ERRCODE = '42501';
@@ -54,13 +57,19 @@ BEGIN
     effective := workspace_limit;
     source := CASE WHEN workspace_limit IS NULL THEN 'none' ELSE 'workspace' END;
   END IF;
-  -- Usage records are inserted by members; a negative estimate never lowers spend.
-  SELECT COALESCE(sum(GREATEST(estimated_cost, 0)), 0) INTO spent
+  -- Usage records are inserted by members; a negative estimate never lowers
+  -- spend. Records whose provider returned no cost (NULL) or an unusable value
+  -- (NaN) are counted separately: their real cost is unknown, so an active
+  -- limit fails safe and blocks new paid requests while any exist this month.
+  SELECT COALESCE(sum(GREATEST(estimated_cost, 0)) FILTER (WHERE estimated_cost IS NOT NULL AND estimated_cost <> 'NaN'), 0),
+         count(*) FILTER (WHERE estimated_cost IS NULL OR estimated_cost = 'NaN')
+  INTO spent, unknown_cost
   FROM public.usage_logs WHERE user_id = target AND created_at >= period_start;
   RETURN jsonb_build_object(
     'userId', target, 'limitUsd', effective, 'spentUsd', spent, 'source', source,
     'workspaceLimitUsd', workspace_limit, 'periodStart', period_start,
-    'blocked', effective IS NOT NULL AND spent >= effective
+    'unknownCostRequests', unknown_cost,
+    'blocked', effective IS NOT NULL AND (spent >= effective OR unknown_cost > 0)
   );
 END;
 $$;

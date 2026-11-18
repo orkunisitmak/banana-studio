@@ -57,9 +57,11 @@ export const parseErrorMessage = (error: unknown): GenerationErrorMessage => {
   const lower = message.toLowerCase();
   const isStorageError = (error as { name?: string } | null)?.name === 'QuotaExceededError'
     || /\bstorage\b|\b(?:indexeddb|localstorage|sessionstorage|quotaexceedederror)\b|\bdisk (?:space|full)\b/.test(lower);
-  // Checked before rate limits: the workspace's own budget, not a provider quota.
-  if (/\bSPENDING_LIMIT\b|\bmonthly spending limit\b/i.test(message)) {
-    return { title: 'Spending Limit Reached', message: details.find(detail => /monthly spending limit/i.test(detail)) || message };
+  // Checked before rate limits: the workspace's own budget, not a provider
+  // quota. Match only the server's own code and message, never free provider text.
+  const spendingMessage = details.find(detail => /\bMonthly spending limit (?:reached \(\$\d|paused: \d+ generations? this month)/.test(detail));
+  if (details.includes('SPENDING_LIMIT') || spendingMessage) {
+    return { title: 'Spending Limit Reached', message: spendingMessage || message };
   }
   if (statuses.has(429) || (!isStorageError && /\brate[ _-]?limit|\bquota\b/.test(lower))) {
     return describe('Rate Limit Reached', 'Too many requests or insufficient quota. Please check the provider details before retrying.');

@@ -17,10 +17,17 @@ const SOURCE_LABELS: Record<SpendingStatus['source'], string> = {
 
 export function SpendingMeter({ status, compact = false }: { status: SpendingStatus; compact?: boolean }) {
   const share = spendingShare(status);
-  const tone = share == null ? 'bg-violet-500' : share >= 1 ? 'bg-red-500' : share >= 0.8 ? 'bg-amber-400' : 'bg-emerald-500';
+  const blocked = status.blocked || (share != null && share >= 1);
+  const tone = share == null ? 'bg-violet-500' : blocked ? 'bg-red-500' : share >= 0.8 ? 'bg-amber-400' : 'bg-emerald-500';
   const label = status.limitUsd == null ? `${formatUsd(status.spentUsd)} this month` : `${formatUsd(status.spentUsd)} of ${formatUsd(status.limitUsd)} this month`;
+  const unknown = status.unknownCostRequests;
+  // Under a limit, a generation without a recorded cost pauses new paid requests.
+  const unknownNote = unknown > 0 && (compact
+    ? `+ ${unknown} unknown cost`
+    : `${unknown === 1 ? '1 generation this month has' : `${unknown} generations this month have`} no recorded cost.${status.limitUsd != null ? ' New paid generations are paused until next month or until this account no longer has a limit.' : ''}`);
   return <div className={compact ? 'min-w-0' : 'min-w-0 space-y-1.5'}>
-    <p className={`text-xs ${share != null && share >= 1 ? 'text-red-300' : 'text-gray-300'}`}>{label}</p>
+    <p className={`text-xs ${blocked ? 'text-red-300' : 'text-gray-300'}`}>{label}</p>
+    {unknownNote && <p className={`text-[11px] ${status.limitUsd != null ? 'text-amber-300' : 'text-gray-500'}`}>{unknownNote}</p>}
     {share != null && <div role="meter" aria-label="Monthly spending" aria-valuemin={0} aria-valuemax={status.limitUsd ?? 0} aria-valuenow={status.spentUsd}
       className={`${compact ? 'mt-1 h-1 w-24' : 'h-1.5 w-full'} overflow-hidden rounded-full bg-white/10`}>
       <div className={`h-full ${tone}`} style={{ width: `${Math.round(share * 100)}%` }} />
@@ -55,7 +62,7 @@ function LimitForm({ initial, busy, onSave, allowEmpty, label }: { initial: numb
     <label className="min-w-0 flex-1">
       <span className="sr-only">{label}</span>
       <input inputMode="decimal" value={text} onChange={event => setText(event.target.value)} placeholder={allowEmpty ? 'No limit' : 'Amount in USD'} aria-invalid={invalid}
-        className="w-full rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-violet-500 focus:outline-none" />
+        className="w-full rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-base text-white placeholder:text-gray-600 sm:text-sm focus:border-violet-500 focus:outline-none" />
     </label>
     <button type="submit" disabled={busy || invalid} className="flex shrink-0 items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-40">
       {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Save
@@ -84,7 +91,7 @@ function AccountRow({ account, onSaved }: { account: AccountSpending; onSaved: (
     </div>
     <div className="flex min-w-0 flex-wrap items-start gap-2">
       <select value={mode} onChange={event => setMode(event.target.value as AccountLimitMode)} aria-label={`Spending limit for ${name}`}
-        className="rounded-lg border border-gray-800 bg-gray-950 px-2 py-2 text-xs text-gray-200">
+        className="rounded-lg border border-gray-800 bg-gray-950 px-2 py-2 text-base text-gray-200 sm:text-xs">
         <option value="inherit">{account.role === 'admin' ? 'Default (unlimited for admins)' : 'Workspace default'}</option>
         <option value="limit">Custom limit</option>
         <option value="exempt">No limit</option>

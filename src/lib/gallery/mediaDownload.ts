@@ -24,6 +24,9 @@ export const sniffMediaType = async (blob: Blob): Promise<string | undefined> =>
         imageBrands.add(brand);
       }
       // Prefer codec-specific image brands over the generic HEIF container.
+      // Keep image sequences distinct from still images and generic HEIF.
+      if (['hevc', 'hevx'].some(brand => imageBrands.has(brand))) return 'image/heic-sequence';
+      if (imageBrands.has('msf1')) return 'image/heif-sequence';
       // IANA image/heic: heic, heix, heim, heis; image/heif: mif1.
       if (['heic', 'heix', 'heim', 'heis'].some(brand => imageBrands.has(brand))) return 'image/heic';
       if (imageBrands.has('mif1')) return 'image/heif';

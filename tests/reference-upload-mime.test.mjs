@@ -81,7 +81,7 @@ function setup(t) {
 }
 
 test('empty and generic picker MIME types use recognized media extensions', () => {
-  const cases = { PNG: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif',
+  const cases = { PNG: 'image/png', gif: 'image/gif', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif',
     mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogg: 'audio/ogg', oga: 'audio/ogg', aac: 'audio/aac',
     m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aif: 'audio/aiff', aiff: 'audio/aiff' };
   for (const type of ['', 'application/octet-stream']) {
@@ -211,6 +211,37 @@ for (const brand of ['heic', 'heix', 'heim', 'heis', 'mif1']) {
     });
   }
 }
+
+for (const [brand, expected] of [['hevc', 'image/heic-sequence'], ['hevx', 'image/heic-sequence'], ['msf1', 'image/heif-sequence']]) {
+  for (const type of ['', 'application/octet-stream']) {
+    test(`generic ${brand} sequence preserves its MIME and bytes through reference upload`, async t => {
+      setup(t);
+      for (const bytes of [fileTypeBox(brand), fileTypeBox('mif1', ['mif1', brand])]) {
+        const input = picker();
+        await input.processImageFiles([new Blob([bytes], { type })]);
+        const ref = input.getConfig().referenceImages[0];
+        assert.ok(await uploadBase64ToPublicUrl(ref.data, ref.mimeType));
+        assert.equal(state.uploads.at(-1).contentType, expected);
+        assert.deepEqual(Buffer.from(await state.uploads.at(-1).blob.arrayBuffer()), bytes);
+      }
+    });
+  }
+}
+
+test('sequence inference keeps AVIF precedence, explicit MIME and custom allowlists', async t => {
+  setup(t);
+  const sequence = fileTypeBox('msf1', ['msf1', 'hevc']);
+  assert.ok(await uploadBase64ToPublicUrl(sequence.toString('base64'), 'application/octet-stream'));
+  assert.equal(state.uploads.at(-1).contentType, 'image/heic-sequence');
+  assert.ok(await uploadBase64ToPublicUrl(fileTypeBox('hevc', ['msf1', 'avis']).toString('base64'), 'application/octet-stream'));
+  assert.equal(state.uploads.at(-1).contentType, 'image/avif');
+  assert.ok(await uploadBase64ToPublicUrl(sequence.toString('base64'), 'image/heif'));
+  assert.equal(state.uploads.at(-1).contentType, 'image/heif');
+  state.uploads = [];
+  state.allowedMimeTypes = ['image/heic'];
+  assert.equal(await uploadBase64ToPublicUrl(sequence.toString('base64'), 'application/octet-stream'), null);
+  assert.equal(state.uploads.length, 0);
+});
 
 test('HEIF inference preserves AVIF precedence and rejects invalid image brands', async t => {
   setup(t);
@@ -432,7 +463,7 @@ const dropHandler = await transform(`export const dropFiles = async (files, getM
 const { dropFiles } = await import('data:text/javascript;base64,' + Buffer.from(dropHandler.code).toString('base64'));
 
 for (const type of ['', 'application/octet-stream']) {
-  for (const [name, category] of [['photo.JPG', 'images'], ['photo.png', 'images'], ['clip.MP4', 'videos'], ['clip.mov', 'videos'], ['clip.webm', 'videos']]) {
+  for (const [name, category] of [['photo.JPG', 'images'], ['photo.png', 'images'], ['photo.GIF', 'images'], ['clip.MP4', 'videos'], ['clip.mov', 'videos'], ['clip.webm', 'videos']]) {
     test(`desktop drop routes ${name} with ${type || 'empty'} MIME to its existing picker`, async () => {
       const file = new File(['synthetic'], name, { type });
       const result = await dropFiles([file], getMimeType);
@@ -463,3 +494,20 @@ test('inferred video drops retain pending-upload limits and H3 action restrictio
   assert.deepEqual(blocked.videos, []);
   assert.deepEqual(blocked.errors, ['Choose an H3 Max action that accepts videos before adding a video.']);
 });
+
+for (const type of ['', 'application/octet-stream']) {
+  test(`generic GIF with ${type || 'empty'} MIME survives drop, picker and upload`, async t => {
+    setup(t);
+    const bytes = Buffer.from('GIF89a', 'ascii');
+    const file = new File([bytes], 'photo.GIF', { type });
+    const result = await dropFiles([file], getMimeType);
+    assert.deepEqual(result.images, [file]);
+    const input = picker();
+    await input.processImageFiles(result.images);
+    const ref = input.getConfig().referenceImages[0];
+    assert.equal(ref.mimeType, 'image/gif');
+    assert.ok(await uploadBase64ToPublicUrl(ref.data, ref.mimeType));
+    assert.equal(state.uploads[0].contentType, 'image/gif');
+    assert.deepEqual(Buffer.from(await state.uploads[0].blob.arrayBuffer()), bytes);
+  });
+}

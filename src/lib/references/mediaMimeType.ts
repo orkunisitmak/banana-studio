@@ -10,6 +10,7 @@ export const getMediaMimeType = (file: Pick<Blob, 'type'>, name?: string): strin
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
         case 'png': return 'image/png';
+        case 'gif': return 'image/gif';
         case 'jpg':
         case 'jpeg': return 'image/jpeg';
         case 'webp': return 'image/webp';

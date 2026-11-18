@@ -68,7 +68,7 @@ Use **Edit this result** to continue from a result or return to the source for a
 
 In **Edit image**, choose **Expand canvas** to turn an image into another ratio, for example a square cover into 16:9 or a 16:9 thumbnail into a 9:16 Short. Pick the new ratio and where the original should stay (left, centered, right or top/bottom). The preview shows the new canvas: the dashed frame is the original, the blurred areas are what the model paints. A prompt is optional; without one the model continues the scene.
 
-The original is kept pixel for pixel except a thin seam (8–32 px) where both sides are blended. Expanded canvases use sizes both GPT Image 2.5 and Nano Banana accept; the original is scaled when needed to stay between 0.66 and 8.3 megapixels and within 3840 px.
+Outside a thin seam (8–32 px) where both sides are blended, the original is not repainted. It is first scaled onto the new canvas, so its pixels can be resampled. The expanded canvas uses a size both GPT Image 2.5 and Nano Banana accept: between 0.66 and 8.3 megapixels, with each edge at most 3840 px. Expanded results open without the source/result comparison, because the two canvases have different sizes.
 
 ## Plan a YouTube thumbnail
 

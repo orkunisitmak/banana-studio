@@ -68,7 +68,7 @@ Yeni sonuçtan devam etmek için **Edit this result**, ilk kaynaktan tekrar dene
 
 **Edit image** içinde **Expand canvas** ile görseli başka bir orana çevir; örneğin kare kapağı 16:9'a ya da 16:9 thumbnail'ı 9:16 Short'a. Yeni oranı ve orijinalin nerede duracağını (sol, orta, sağ ya da üst/alt) seç. Önizleme yeni canvas'ı gösterir: kesikli çerçeve orijinaldir, bulanık alanları model boyar. Prompt isteğe bağlıdır; yazmazsan model sahneyi doğal biçimde sürdürür.
 
-Orijinal, iki tarafın birleştirildiği ince bir dikiş (8–32 px) dışında piksel piksel korunur. Genişletilmiş canvas'lar GPT Image 2.5 ve Nano Banana'nın kabul ettiği boyutları kullanır; orijinal gerektiğinde 0,66–8,3 megapiksel ve 3840 px sınırları içinde kalacak şekilde ölçeklenir.
+İki tarafın birleştirildiği ince dikiş (8–32 px) dışında orijinal yeniden boyanmaz. Orijinal önce yeni canvas'a ölçeklenerek yerleştirilir; bu yüzden pikselleri yeniden örneklenebilir. Genişletilmiş canvas, GPT Image 2.5 ve Nano Banana'nın kabul ettiği bir boyut kullanır: 0,66–8,3 megapiksel arası ve her kenar en fazla 3840 px. İki canvas'ın boyutu farklı olduğu için genişletilmiş sonuçlar kaynak/sonuç karşılaştırması olmadan açılır.
 
 ## YouTube kapağı planla
 

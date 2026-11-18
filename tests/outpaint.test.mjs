@@ -7,7 +7,8 @@ const out = await build({ stdin: { contents: `export * from './src/lib/images/ou
   export { compositeEditPixels } from './src/lib/images/imageEditPixels.ts';
   export { isValidEditRegion, copyEditRegion, describeEditRegion, describeEditRegionPercent, editRegionPixels } from './src/lib/images/imageEditRegion.ts';
   export { validateOpenAIImageSize } from './src/lib/images/openaiImage.ts';
-  export { canUseNanoEditCanvas } from './src/components/galleryImageEdit.ts';`,
+  export { canUseNanoEditCanvas } from './src/components/galleryImageEdit.ts';
+  export { getRecordedImageEditDetails, isCanvasExpansionEdit } from './src/components/recordedGenerationDetails.ts';`,
   resolveDir: fileURLToPath(new URL('..', import.meta.url)), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
 const m = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
 
@@ -51,8 +52,9 @@ test('the anchor places the original and only new areas plus a thin seam are edi
 
 test('expanded areas blend into the original, not toward the canvas border', () => {
   const width = 64, height = 16;
-  const source = new Uint8ClampedArray(width * height * 4).fill(0);
-  const output = new Uint8ClampedArray(width * height * 4).fill(200);
+  // Opaque pixels: only the color channel blends, alpha stays 255.
+  const opaque = value => Uint8ClampedArray.from({ length: width * height * 4 }, (_, i) => i % 4 === 3 ? 255 : value);
+  const source = opaque(0), output = opaque(200);
   const band = { id: 'expand-right', tool: 'rectangle', x: 32 / width, y: 0, width: 32 / width, height: 1 };
   const plain = m.compositeEditPixels(source, output, width, height, { ...band, layers: [band] });
   const expanded = m.compositeEditPixels(source, output, width, height, { ...band, layers: [band], expandsCanvas: true });
@@ -75,4 +77,17 @@ test('the expansion flag survives server copies and changes the model instructio
   assert.match(m.describeEditRegionPercent(layout.region), /^EXPAND CANVAS/);
   const { expandsCanvas, ...ordinary } = layout.region;
   assert.match(m.describeEditRegion(ordinary, layout.width, layout.height), /^EDIT AREAS/);
+});
+
+test('saved expansion results are not offered a source/result comparison', () => {
+  const layout = m.computeOutpaintLayout(1024, 1024, '16:9', 'center');
+  const reference = (editRegion) => ({ id: 'gallery-src', mimeType: 'image/png', data: 'https://example.test/src.png', isEditSource: true, editRegion });
+  const media = (editRegion, protection) => ({ id: 'out', url: 'https://example.test/out.png', prompt: 'p', mediaType: 'image', createdAt: 1,
+    referenceImages: [reference(editRegion)], ...(protection ? { imageEditProtection: { sourceReferenceId: 'gallery-src', region: protection, preservedOutsideRegion: true } } : {}) });
+  const ordinary = m.copyEditRegion({ ...layout.region, expandsCanvas: undefined });
+  delete ordinary.expandsCanvas;
+  assert.equal(m.isCanvasExpansionEdit(m.getRecordedImageEditDetails(media(layout.region))), true, 'client-side reference');
+  assert.equal(m.isCanvasExpansionEdit(m.getRecordedImageEditDetails(media(ordinary, m.copyEditRegion(layout.region)))), true, 'server protection record');
+  assert.equal(m.isCanvasExpansionEdit(m.getRecordedImageEditDetails(media(ordinary))), false, 'ordinary edit keeps the comparison');
+  assert.equal(m.isCanvasExpansionEdit(undefined), false);
 });

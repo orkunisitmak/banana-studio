@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
 
@@ -66,6 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured' });
 
   let acceptedTaskId: string | undefined;
+  let guard: PaidRequest = null;
   try {
     let body: GenerateRequest;
     try {
@@ -196,6 +198,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
     if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
+    guard = await startPaidRequest(req, res, user, 'image', 'EvoLink');
+    if (!guard) return;
 
     const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',
@@ -205,6 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify(requestBody),
     });
+    await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
 
     let data: any;
     try {
@@ -236,6 +241,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       usage: data.usage || null,
     });
   } catch (error: any) {
+    await guard?.finish('failed');
     console.error('EvoLink generate error:', error.message);
     return res.status(500).json({ error: error.message || 'Video generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }

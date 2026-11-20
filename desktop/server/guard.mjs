@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { getWorkspace, LOCAL_AUTH } from './context.mjs';
 export { openAIErrorMessage } from '../../api/_lib/openaiError.ts';
 export const getOpenAISessionId = req => req[LOCAL_AUTH] ? getWorkspace().identity.sessionId : null;
+export const startPaidRequest=(req,res,user,kind)=>startOpenAIRequest(req,res,user,kind);
 export async function startOpenAIRequest(req,res,user,kind,generationId) {
   if(!req[LOCAL_AUTH]){res.status(401).json({error:'Native session required.'});return null;}
   const id=randomUUID(),store=getWorkspace();

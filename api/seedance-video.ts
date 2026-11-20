@@ -3,6 +3,7 @@ import { applyCors, requireUser, createUserScopedClient } from './_lib/auth.js';
 import { chooseProvider, providerKey } from './_lib/providerConfiguration.js';
 import { seedanceProviderError, falSeedanceInput, openRouterSeedanceInput } from '../src/lib/video/seedanceProviders.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
@@ -15,6 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!['GET','POST'].includes(req.method || '')) return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireUser(req,res); if (!user) return;
   let acceptedTaskId = false;
+  let guard: PaidRequest = null;
   try {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -32,11 +34,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const registry = await prepareTaskRegistry(res); if (!registry) return;
       if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
+      guard = await startPaidRequest(req, res, user, 'image', provider === 'fal' ? 'fal.ai' : 'OpenRouter');
+      if (!guard) return;
       const fal = falSeedanceInput(body);
       const response = await fetch(provider === 'fal' ? `https://queue.fal.run/${fal.endpoint}` : 'https://openrouter.ai/api/v1/videos', {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(55_000), headers: { Authorization: `${provider === 'fal' ? 'Key' : 'Bearer'} ${providerKey(provider)}`, 'Content-Type':'application/json' },
         body: JSON.stringify(provider === 'fal' ? fal.input : openRouterSeedanceInput(body)),
       });
+      await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
       const data = await response.json().catch(() => null);
       if (!response.ok) return res.status(response.status).json({ error: `${provider === 'fal' ? 'fal.ai' : 'OpenRouter'} rejected the video request (${response.status}). Check the prompt, media and account credit.` });
       const id = provider === 'fal' ? data?.request_id : data?.id;
@@ -95,6 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (saved.error) throw new Error('The generated video could not be saved.');
     return res.status(200).json({ status:'SUCCEEDED', output:[await signedMediaUrl(bucket,path)], actualCostUsd });
   } catch (error) {
+    await guard?.finish('failed');
     // The provider already accepted the job: keep the registry message, which carries the task id and warns against retrying.
     if (acceptedTaskId) return res.status(502).json({ error: (error as Error).message, retryable:false });
     return res.status(502).json({ error: req.method === 'POST' ? 'The video request could not be confirmed. Check provider task history before submitting again; it was not retried.' : 'The video result is temporarily unavailable. The original task is retained.', retryable:req.method === 'GET' });

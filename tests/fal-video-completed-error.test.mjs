@@ -9,6 +9,7 @@ const stubs = {
   'providerTasks.js': 'export const requireProviderTask=async()=>true;export const prepareTaskRegistry=async()=>null;export const registerProviderTask=async()=>{};',
   'falBillingCosts.js': 'export const fetchFalRequestCosts=async ids=>new Map(ids.map(id=>[id,0.42]));',
   'h3Usage.js': 'export const recordH3Usage=async()=>{};',
+  'openaiGuard.js': 'export const startPaidRequest=async()=>({finish:async()=>{}});',
 };
 const load = async entry => {
   const out = await build({
@@ -16,6 +17,7 @@ const load = async entry => {
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
       b.onResolve({ filter: /_lib\/(auth|providerTasks|falBillingCosts|h3Usage)\.js$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }));
+      b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'openaiGuard.js', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }));
       b.onResolve({ filter: /^[^./]/ }, args => ({ path: args.path, external: true }));
     } }],

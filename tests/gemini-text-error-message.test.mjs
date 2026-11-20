@@ -10,9 +10,9 @@ const out = await build({
   absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
   plugins: [{ name: 'stub', setup(b) {
-    b.onResolve({ filter: /[\\/]_lib[\\/]auth(\.js)?$/ }, () => ({ path: 'auth', namespace: 'stub' }));
+    b.onResolve({ filter: /[\\/]_lib[\\/](auth|openaiGuard)(\.js)?$/ }, () => ({ path: 'auth', namespace: 'stub' }));
     b.onResolve({ filter: /^@google[\\/]genai$/ }, () => ({ path: pathToFileURL(req.resolve('@google/genai')).href, external: true }));
-    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const applyCors = () => {}; export const requireUser = async () => ({ id: "u1" });', loader: 'js' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const applyCors = () => {}; export const requireUser = async () => ({ id: "u1" }); export const startPaidRequest = async () => ({ id: "g1", finish: async () => {} });', loader: 'js' }));
   } }],
 });
 const { default: handler } = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));

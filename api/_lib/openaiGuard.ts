@@ -13,15 +13,26 @@ export const getOpenAISessionId = (req: VercelRequest): string | null => {
   } catch { return null; }
 };
 
-// The historical server-only ledger now also admits OpenRouter requests, so
+// The historical server-only ledger now also admits OpenRouter and Anthropic requests, so
 // provider switching cannot bypass the existing session/spend limits.
 export async function startOpenAIRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId?: string, provider: string = 'OpenAI') {
-  const prefix = provider === 'OpenRouter' ? 'openrouter-request' : 'openai-request';
-  const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : process.env.OPENAI_ENABLED;
+  const enabled = provider === 'OpenRouter' ? process.env.OPENROUTER_ENABLED : provider === 'Anthropic' ? process.env.ANTHROPIC_ENABLED : process.env.OPENAI_ENABLED;
   if (enabled === 'false' || (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')) {
     res.status(503).json({ error: `${provider} generation is temporarily disabled.` });
     return null;
   }
+  return admitRequest(req, res, user, kind, generationId, provider);
+}
+
+// Every other billable route shares the same ledger and limits. OPENAI_ENABLED,
+// OPENROUTER_ENABLED, ANTHROPIC_ENABLED and the preview block stay specific to the routes above.
+// Video counts as 'image': the ledger has only the image and text kinds.
+export const startPaidRequest = (req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', provider: string) =>
+  admitRequest(req, res, user, kind, undefined, provider);
+export type PaidRequest = Awaited<ReturnType<typeof startPaidRequest>>;
+
+async function admitRequest(req: VercelRequest, res: VercelResponse, user: AuthenticatedUser, kind: 'image' | 'text', generationId: string | undefined, provider: string) {
+  const prefix = provider === 'OpenRouter' ? 'openrouter-request' : provider === 'Anthropic' ? 'anthropic-request' : 'openai-request';
   const session = getOpenAISessionId(req);
   if (!session) {
     res.status(401).json({ error: 'Refresh your session before generating.' });

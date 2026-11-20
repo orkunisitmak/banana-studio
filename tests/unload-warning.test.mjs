@@ -22,7 +22,10 @@ test('only a video still waiting for its provider task blocks closing', () => {
   // A task ID that never reached the gallery row resumes nothing, until the video is saved.
   assert.equal(hasUnresumableVideoSubmission([video({ taskId: 'task-1', status: 'processing', taskIdUnsaved: true })]), true);
   assert.equal(hasUnresumableVideoSubmission([video({ taskId: 'task-1', videoStage: 'saving', taskIdUnsaved: true })]), true);
+  // A polling error clears the progress display but the task is still only in this tab.
+  assert.equal(hasUnresumableVideoSubmission([video({ taskId: 'task-1', isLoading: false, status: 'processing', videoStage: undefined, taskIdUnsaved: true })]), true);
   assert.equal(hasUnresumableVideoSubmission([video({ taskId: 'task-1', isLoading: false, status: 'completed', videoStage: undefined, taskIdUnsaved: true })]), false);
+  assert.equal(hasUnresumableVideoSubmission([video({ taskId: 'task-1', isLoading: false, status: 'failed', videoStage: undefined, taskIdUnsaved: true })]), false);
   assert.equal(hasUnresumableVideoSubmission([video({ isLoading: false, status: 'failed', videoStage: undefined })]), false);
   // Rows loaded from history were not submitted by this tab.
   assert.equal(hasUnresumableVideoSubmission([video({ videoStage: undefined })]), false);

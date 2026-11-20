@@ -68,6 +68,27 @@ export const failStalePendingVideo = async (
   return !error && Array.isArray(data) && data.length === 1;
 };
 
+/**
+ * A reload resumes a video only from the task ID saved on its gallery row.
+ * Report true only once that row really holds it: a rejected write, a
+ * network error or a row that matched nothing all leave it unsaved.
+ */
+export const saveVideoTaskId = async (
+  db: GenerationDatabase,
+  userId: string,
+  id: string,
+  taskId: string,
+): Promise<boolean> => {
+  try {
+    const { data, error } = await db.from('generations')
+      .update({ task_id: taskId })
+      .eq('id', id).eq('user_id', userId).eq('type', 'video').select('id');
+    return !error && Array.isArray(data) && data.length === 1;
+  } catch {
+    return false;
+  }
+};
+
 /** Fire-and-forget recovery must not delay gallery or image-job startup. */
 export const scheduleStaleVideoCheck = (
   check: () => Promise<boolean>,

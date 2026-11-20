@@ -97,5 +97,5 @@ test('a renewal that never answers falls back to the loaded URL instead of block
 
 test('the gallery batch download passes the signed URL renewer', () => {
   const gallery = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
-  assert.match(gallery, /collectBatchDownload\(Array\.from\(selectedIds\), images, undefined, url => refreshMediaAccessUrl\(url, false\)\)/);
+  assert.match(gallery, /collectBatchDownload\(ids, images, undefined, url => refreshMediaAccessUrl\(url, false\)\)/);
 });

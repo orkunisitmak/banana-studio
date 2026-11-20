@@ -21,13 +21,48 @@ export async function prepareTaskRegistry(res: VercelResponse): Promise<Registry
   }
 }
 
-export async function registerProviderTask(writer: RegistryWriter, provider: Provider, taskId: string, userId: string): Promise<void> {
-  const { error } = await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId });
-  if (error) {
-    // Do not overwrite an existing association or automatically resubmit a
-    // billable task. The ID lets an admin inspect the provider after a DB outage.
-    throw new Error(`Generation was submitted but its private task could not be recorded (Task: ${taskId}). Contact an administrator before retrying.`);
+// The provider already accepted the job, so a failed insert is retried a few times
+// before giving up; a short outage should not leave a task nobody can poll.
+const REGISTER_ATTEMPTS = 3;
+
+export async function registerProviderTask(writer: RegistryWriter, provider: Provider, taskId: string, userId: string, retryDelayMs = 300): Promise<void> {
+  for (let attempt = 0; attempt < REGISTER_ATTEMPTS; attempt++) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, retryDelayMs * attempt));
+    try {
+      const { error } = await writer.from('provider_tasks').insert({ provider, task_id: taskId, user_id: userId });
+      if (!error) return;
+      // A duplicate on a retry means an earlier attempt was saved but its reply was lost,
+      // but only when the saved row is this user's; another user's row cannot be polled.
+      if (attempt > 0 && error.code === '23505') {
+        const { data: saved } = await writer.from('provider_tasks').select('user_id').eq('provider', provider).eq('task_id', taskId).maybeSingle();
+        if (saved?.user_id === userId) return;
+      }
+    } catch {
+      // Treated like a returned error: try again.
+    }
   }
+  // Do not overwrite an existing association or automatically resubmit a
+  // billable task. The ID lets an admin inspect the provider after a DB outage.
+  throw new Error(`Generation was submitted but its private task could not be recorded (Task: ${taskId}). Contact an administrator before retrying.`);
+}
+
+export const isGenerationId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(value);
+
+/** A billable submission for a saved video goes out only while that row exists and is the caller's. */
+export async function requireSavedVideo(reader: RegistryWriter, res: VercelResponse, generationId: string, userId: string): Promise<boolean> {
+  const { data, error } = await reader.from('generations').select('id,type')
+    .eq('id', generationId).eq('user_id', userId).maybeSingle();
+  if (error) { res.status(503).json({ error: 'The saved video could not be checked. No provider request was sent.' }); return false; }
+  if (!data || data.type !== 'video') { res.status(404).json({ error: 'The saved video no longer exists. No provider request was sent.' }); return false; }
+  return true;
+}
+
+/** Save the accepted task on the caller's own gallery row, so a reload can
+ * resume it. The browser must not be the only durable copy of a paid task ID. */
+export async function saveGenerationTask(writer: RegistryWriter, generationId: string, userId: string, taskId: string): Promise<boolean> {
+  const { data, error } = await writer.from('generations').update({ task_id: taskId })
+    .eq('id', generationId).eq('user_id', userId).select('id').maybeSingle();
+  return !error && !!data;
 }
 
 /**

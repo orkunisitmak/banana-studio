@@ -90,9 +90,12 @@ const parseChannelInput = (
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  if (/^@[a-zA-Z0-9_.-]+$/.test(trimmed))
+  // Handles may use letters and digits of any script, plus _ - . and the middle dot.
+  if (/^@[\p{L}\p{M}\p{N}_.·-]+$/u.test(trimmed))
     return { type: 'handle', value: trimmed };
-  if (/^[a-zA-Z0-9_.-]+$/.test(trimmed) && !trimmed.includes('.'))
+  // Known YouTube hostnames are URLs, even without a scheme or path.
+  const youtubeHostname = /(?:^|\.)(?:youtube\.com|youtu\.be)$/i.test(trimmed);
+  if (!youtubeHostname && /^[\p{L}\p{M}\p{N}_.·-]+$/u.test(trimmed))
     return { type: 'handle', value: `@${trimmed}` };
 
   try {
@@ -100,15 +103,17 @@ const parseChannelInput = (
     if (!['http:', 'https:'].includes(url.protocol)
       || !(url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com'))) return null;
     const p = url.pathname;
+    // Browsers copy non-ASCII handles percent-encoded; the API expects the handle itself.
+    const decode = (segment: string) => { try { return decodeURIComponent(segment); } catch { return segment; } };
 
     const handle = p.match(/^\/@([^/]+)/);
-    if (handle) return { type: 'handle', value: `@${handle[1]}` };
+    if (handle) return { type: 'handle', value: `@${decode(handle[1])}` };
 
     const channel = p.match(/^\/channel\/(UC[a-zA-Z0-9_-]+)/);
     if (channel) return { type: 'channelId', value: channel[1] };
 
     const user = p.match(/^\/(c|user)\/([^/]+)/);
-    if (user) return { type: 'username', value: user[2] };
+    if (user) return { type: 'username', value: decode(user[2]) };
 
     const custom = p.match(/^\/([a-zA-Z0-9_-]+)\/?$/);
     if (custom && !['watch', 'feed', 'playlist', 'shorts', 'live'].includes(custom[1]))
@@ -121,13 +126,16 @@ const parseChannelInput = (
   return null;
 };
 
+// YouTube writes videos of a day or longer as P#DT#H#M#S (ISO 8601), and live streams as P0D.
 const parseDuration = (iso: string): number => {
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  const m = iso.match(/^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
   if (!m) return 0;
   return (
-    parseInt(m[1] || '0') * 3600 +
-    parseInt(m[2] || '0') * 60 +
-    parseInt(m[3] || '0')
+    parseInt(m[1] || '0') * 604800 +
+    parseInt(m[2] || '0') * 86400 +
+    parseInt(m[3] || '0') * 3600 +
+    parseInt(m[4] || '0') * 60 +
+    parseInt(m[5] || '0')
   );
 };
 
@@ -306,7 +314,7 @@ const fetchVideoDetails = async (ids: string[]): Promise<YouTubeVideo[]> => {
 
 /**
  * Top performing long-form videos from the last 365 days, sorted by views.
- * Uses ~9 API quota units (channels already resolved by caller).
+ * Reads uploads back to the one-year cutoff, 2 API quota units per 50 uploads (channels already resolved by caller).
  */
 export const getTopPerformingVideos = async (
   uploadsPlaylistId: string,
@@ -315,17 +323,19 @@ export const getTopPerformingVideos = async (
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 1);
 
-  let allIds: string[] = [];
+  const videos: YouTubeVideo[] = [];
   let token: string | undefined;
+  const MAX_PAGES = 40;
 
-  for (let page = 0; page < 4 && allIds.length < 200; page++) {
+  // The uploads playlist is newest first, so stop at the first page that reaches past the cutoff.
+  for (let page = 0; page < MAX_PAGES; page++) {
     const { videoIds, nextPageToken } = await fetchPlaylistPage(uploadsPlaylistId, 50, token);
-    allIds.push(...videoIds);
+    if (videoIds.length === 0) break;
+    const details = await fetchVideoDetails(videoIds);
+    videos.push(...details);
     token = nextPageToken;
-    if (!token) break;
+    if (!token || details.some((v) => new Date(v.publishedAt) < cutoff)) break;
   }
-
-  const videos = await fetchVideoDetails(allIds);
 
   return videos
     .filter((v) => v.durationSeconds > 240 && new Date(v.publishedAt) >= cutoff)
@@ -417,7 +427,9 @@ export const downloadThumbnail = async (url: string, options: { signal?: AbortSi
 // --- Formatters ---
 
 export const formatViewCount = (n: number): string => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  // Each unit starts where toFixed(1) would round the smaller one up to 1000.0.
+  if (n >= 999_950_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 };

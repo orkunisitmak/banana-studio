@@ -74,7 +74,7 @@ const parseAnalysis = (text: string | null, video: YouTubeVideoInfo): YouTubeVid
   if (typeof value.premise !== 'string' || !value.premise.trim()) {
     throw new Error('Video analysis did not identify the main episode premise. Please try again; no brainstorm has been started.');
   }
-  const evidence = (Array.isArray(value.evidence) ? value.evidence : []).filter((item: any) => {
+  const valid = (Array.isArray(value.evidence) ? value.evidence : []).filter((item: any) => {
     if (typeof item?.timestamp !== 'string' || typeof item?.fact !== 'string' || !item.fact.trim()) return false;
     if (item.relevance !== 'premise' && item.relevance !== 'context') return false;
     if (!/^(?:\d{1,3}:)?\d{1,3}:[0-5]\d$/.test(item.timestamp)) return false;
@@ -82,7 +82,10 @@ const parseAnalysis = (text: string | null, video: YouTubeVideoInfo): YouTubeVid
     if (components.length === 3 && components[1] > 59) return false;
     const seconds = components.reduce((total: number, part: number) => total * 60 + part, 0);
     return !video.durationSeconds || seconds <= video.durationSeconds;
-  }).slice(0, 6).map((item: any) => ({ timestamp: item.timestamp, fact: item.fact.trim().slice(0, 800), relevance: item.relevance as 'premise' | 'context' }));
+  });
+  // Keep at most six entries, but never cut the only premise entry from a longer list.
+  const premiseIndex = valid.findIndex((item: any) => item.relevance === 'premise');
+  const evidence = valid.filter((_: any, index: number) => index === premiseIndex || index < (premiseIndex >= 6 ? 5 : 6)).map((item: any) => ({ timestamp: item.timestamp, fact: item.fact.trim().slice(0, 800), relevance: item.relevance as 'premise' | 'context' }));
   if (!evidence.length) {
     throw new Error('Video analysis returned no verifiable timestamps. Please try again; no brainstorm has been started.');
   }

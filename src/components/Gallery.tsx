@@ -1,4 +1,7 @@
+import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
+import { videoProviderName, brokenVideoProviderLabel, brokenVideoExpiryText } from '../lib/video/videoProviderName';
+import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -9,9 +12,7 @@ import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } fro
 import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
-import { ImageCompareDialog } from './ImageCompareDialog';
 import { GallerySearchDialog } from './GallerySearchDialog';
-import { GalleryImageEditor } from './GalleryImageEditor';
 import { ImageEditComparison } from './ImageEditComparison';
 import { useSavedImageEditSource } from './useSavedImageEditSource';
 import { ImageEditDetails, PromptPreparationDetails } from './GenerationDetails';
@@ -21,15 +22,29 @@ import { DetailImage } from './GalleryDetailImage';
 import { buildGalleryFolderStats } from './galleryFolderStats';
 import type { GallerySearchEntry } from './gallerySearch';
 import { getComparisonSelection, isComparableImage } from './imageComparison';
-import { YouTubePreviewDialog } from './YouTubePreviewDialog';
+import { canGenerateVariation } from '../lib/gallery/recreateDraft';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { getCountLabel } from '../lib/gallery/countLabel';
+import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
+import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
+import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { useMountedRef } from './useMountedRef';
 import { FolderPreview } from './FolderPreview';
-import { FolderShareDialog } from './FolderShareDialog';
 import { buildFolderPreviewIndex } from './folderPreviews';
+import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
+import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
+import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
+import { galleryCardLabel, isCardActivationKey } from '../lib/gallery/cardKeyboard';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
+
+const GalleryImageEditor = React.lazy(() => import('./GalleryImageEditor').then(module => ({ default: module.GalleryImageEditor })));
+const ImageCompareDialog = React.lazy(() => import('./ImageCompareDialog').then(module => ({ default: module.ImageCompareDialog })));
+const YouTubePreviewDialog = React.lazy(() => import('./YouTubePreviewDialog').then(module => ({ default: module.YouTubePreviewDialog })));
+const FolderShareDialog = React.lazy(() => import('./FolderShareDialog').then(module => ({ default: module.FolderShareDialog })));
+const dialogLoading = <div role="status" className="fixed inset-0 z-[350] grid place-items-center bg-black/70 text-sm text-gray-200 backdrop-blur-sm"><span className="flex items-center gap-2"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading dialog…</span></div>;
 
 // --- Constants ---
 const ITEMS_PER_PAGE = 48;
@@ -524,7 +539,8 @@ const CustomVideoPlayer: React.FC<{
   useEffect(() => {
     const handlePlayerKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (target?.matches('input, textarea, select, button, [role="button"], [contenteditable="true"]')) return;
+      if (target?.closest('[role="dialog"]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const key = event.key.toLowerCase();
@@ -798,6 +814,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [newFolderName, setNewFolderName] = useState("");
   const [isSavingFolder, setIsSavingFolder] = useState(false);
   const [folderCreateError, setFolderCreateError] = useState<string | null>(null);
+  const [folderRenameError, setFolderRenameError] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
@@ -806,6 +823,11 @@ export const Gallery: React.FC<GalleryProps> = ({
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+  const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  const galleryAccountRef = useRef('');
+  const galleryMountedRef = useMountedRef();
+  galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
+  useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
   const [preparedPhotos, setPreparedPhotos] = useState<File[] | null>(null);
@@ -879,6 +901,9 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Popup Preview State
   const [previewRefImage, setPreviewRefImage] = useState<ReferenceImage | null>(null);
+  const previewOpenerRef = useRef<HTMLElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const openRefPreview = (ref: ReferenceImage, opener: HTMLElement) => { previewOpenerRef.current = opener; setPreviewRefImage(ref); };
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
@@ -1108,6 +1133,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => {
     setComparisonIds(null);
     setComparisonNotice(null);
+    setBatchDownloadError(null);
     setIsSelectionMode(false);
     setSelectedIds(new Set());
     setIsSearchOpen(false);
@@ -1340,6 +1366,19 @@ export const Gallery: React.FC<GalleryProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
 
+  useEffect(() => {
+    if (!previewRefImage) return;
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setPreviewRefImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      const opener = previewOpenerRef.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [previewRefImage]);
+
   // --- Actions ---
 
   const openCreateFolderModal = () => {
@@ -1387,7 +1426,14 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleRenameFolder = async () => {
     if (isReadOnly) return;
     if (!renamingFolderId || !newFolderName.trim()) return;
-    await renameFolder(renamingFolderId, newFolderName);
+    setFolderRenameError(null);
+    try {
+      await renameFolder(renamingFolderId, newFolderName);
+    } catch (error: any) {
+      // Keep the form open with the typed name; the old name is still saved.
+      setFolderRenameError(error?.message || 'The folder could not be renamed. Please try again.');
+      return;
+    }
     setFolders(prev => prev.map(f => f.id === renamingFolderId ? { ...f, name: newFolderName } : f));
     setRenamingFolderId(null);
     setNewFolderName("");
@@ -1647,31 +1693,42 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleBatchDownload = async () => {
     if (selectedIds.size === 0) return;
     setIsDownloadingBatch(true);
+    setBatchDownloadError(null);
     try {
+      const ids: string[] = Array.from(selectedIds);
+      // The manifest carries prompts and references, so a ZIP built for one
+      // account or gallery must never be saved after a switch to another. The
+      // key is pinned at the click, synchronously, from the state the gallery
+      // itself resets on a switch; no network lookup can race or fail here.
+      const startedFor = galleryAccountRef.current;
+      const { files, failed } = await collectBatchDownload(ids, images);
+      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
+      if (!files.length) return;
+      // Grid records omit reference_images; the manifest needs the full row.
+      // requireRemote: a record missing remotely must not be read from this browser's
+      // own cache, which may hold another account's row; the index record is the fallback.
+      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id, { requireRemote: true }));
       const zip = new JSZip();
-      const promises = Array.from(selectedIds).map(async (id) => {
-        const img = images.find(i => i.id === id);
-        if (!img) return;
-        const response = await fetch(img.url);
-        // An error body must never be saved as the media file.
-        if (!response.ok) throw new Error(`Download failed (${response.status}).`);
-        const blob = await response.blob();
-        const ext = img.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
-        zip.file(`banana-${id}.${ext}`, blob);
-      });
-
-      await Promise.all(promises);
+      for (const file of files) zip.file(file.name, file.blob);
+      zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
       const content = await zip.generateAsync({ type: "blob" });
+      // The account switch already reset the gallery and its selection bar, so
+      // there is nowhere to report this; the new account's gallery is the feedback.
+      // An account switch remounts the whole workspace, so this handler may belong to
+      // an unmounted Gallery whose account ref is never updated again.
+      if (!galleryMountedRef.current || galleryAccountRef.current !== startedFor) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
       link.download = `banana-batch-${Date.now()}.zip`;
       link.click();
       window.URL.revokeObjectURL(url);
+      if (failed) return;
       setIsSelectionMode(false);
       setSelectedIds(new Set());
     } catch (e) {
       console.error("Batch download failed", e);
+      setBatchDownloadError('The ZIP could not be created. Try again.');
     } finally {
       setIsDownloadingBatch(false);
     }
@@ -1684,7 +1741,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const handleBatchDelete = async () => {
     if (isReadOnly) return;
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} images?`)) return;
+    if (!confirm(describeBatchDelete(selectedIds, images))) return;
 
     const ids = Array.from(selectedIds);
     if (onDeleteMultiple) {
@@ -1702,12 +1759,17 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Download menu state - tracks which image has download options open
   const [downloadMenuId, setDownloadMenuId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<{ id: string; message: string } | null>(null);
+  const failDownload = (media: GeneratedMedia, error: unknown) => {
+    if (shouldOpenDownloadFallback(error)) window.open(media.url, '_blank');
+    else setDownloadError({ id: media.id, message: (error as Error).message });
+  };
 
   const handleDownloadPNG = async (media: GeneratedMedia) => {
+    setDownloadError(null);
     try {
-      const response = await fetch(media.url);
-      if (!response.ok) throw new Error(`Download failed (${response.status}).`);
-      const blob = await response.blob();
+      const downloadUrl = await refreshMediaAccessUrl(media.url, false).catch(() => media.url);
+      const blob = await fetchMediaBlob(downloadUrl);
       const blobUrl = URL.createObjectURL(blob);
 
       const ext = media.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
@@ -1722,14 +1784,17 @@ export const Gallery: React.FC<GalleryProps> = ({
       setDownloadMenuId(null);
     } catch (error) {
       console.error('Download PNG failed:', error);
-      window.open(media.url, '_blank');
+      failDownload(media, error);
     }
   };
 
   const handleDownloadJPEG = async (media: GeneratedMedia) => {
+    setDownloadError(null);
+    let sourceUrl: string | undefined;
     try {
-      const response = await fetch(media.url);
-      const blob = await response.blob();
+      const downloadUrl = media.mediaType === 'video' ? media.url : await refreshMediaAccessUrl(media.url, false).catch(() => media.url);
+      const blob = await fetchMediaBlob(downloadUrl);
+      sourceUrl = URL.createObjectURL(blob);
 
       // Convert to JPEG using canvas
       const img = new Image();
@@ -1738,7 +1803,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = reject;
-        img.src = URL.createObjectURL(blob);
+        img.src = sourceUrl!;
       });
 
       const canvas = document.createElement('canvas');
@@ -1754,28 +1819,25 @@ export const Gallery: React.FC<GalleryProps> = ({
       ctx.drawImage(img, 0, 0);
 
       // Convert to JPEG at full quality
-      canvas.toBlob((jpegBlob) => {
-        if (!jpegBlob) {
-          console.error('JPEG conversion failed');
-          return;
-        }
+      const jpegBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('JPEG conversion failed')), 'image/jpeg', 1.0);
+      }); // Quality 1.0 = 100%
 
-        const blobUrl = URL.createObjectURL(jpegBlob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `banana-${media.id}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+      const blobUrl = URL.createObjectURL(jpegBlob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `banana-${media.id}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-        setDownloadMenuId(null);
-      }, 'image/jpeg', 1.0); // Quality 1.0 = 100%
-
-      URL.revokeObjectURL(img.src);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+      setDownloadMenuId(null);
     } catch (error) {
       console.error('Download JPEG failed:', error);
-      window.open(media.url, '_blank');
+      failDownload(media, error);
+    } finally {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     }
   };
 
@@ -1885,7 +1947,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     placeholder="Folder Name"
                     value={newFolderName}
                     onChange={e => setNewFolderName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
+                    onKeyDown={submitOnEnter(handleCreateFolder)}
                   />
                   <button onClick={handleCreateFolder} className="bg-violet-600 text-white px-3 py-1 rounded">Save</button>
                 </div>
@@ -1940,7 +2002,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     >
 
       <HelpCenter open={isHelpCenterOpen} onClose={() => setIsHelpCenterOpen(false)} />
-      {sharingFolder && !isReadOnly && <FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} />}
+      {sharingFolder && !isReadOnly && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} /></React.Suspense></LazyDialogErrorBoundary>}
 
       {isCreatingFolder && !isReadOnly && (
         <div
@@ -2055,7 +2117,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             ) : (
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-semibold text-white sm:text-base">{showFavoritesOnly ? 'Favorites' : 'Gallery'}</h2>
-                <p className="hidden text-[11px] text-gray-500 lg:block">{visibleImages.length} items</p>
+                <p className="hidden text-[11px] text-gray-500 lg:block">{getCountLabel(visibleImages.length, 'item', 'items')}</p>
               </div>
             )}
           </div>
@@ -2217,6 +2279,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   setIsUserMenuOpen(false);
                 }}
                 aria-label="Notifications"
+                aria-describedby={toasts.length > 0 ? 'notification-count' : undefined}
                 aria-expanded={isNotificationPanelOpen}
                 className={`relative grid h-10 w-10 place-items-center rounded-xl border transition-colors ${isNotificationPanelOpen
                     ? 'border-violet-400/60 bg-violet-600 text-white'
@@ -2228,11 +2291,19 @@ export const Gallery: React.FC<GalleryProps> = ({
               >
                 <Bell className="w-4 h-4" />
                 {toasts.length > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#0d1117] bg-violet-500 px-1 text-[10px] font-bold text-white">
-                    {toasts.length > 9 ? '9+' : toasts.length}
-                  </span>
+                  <>
+                    <span aria-hidden="true" className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#0d1117] bg-violet-500 px-1 text-[10px] font-bold text-white">
+                      {toasts.length > 9 ? '9+' : toasts.length}
+                    </span>
+                    <span id="notification-count" className="sr-only">{toasts.length} {toasts.length === 1 ? 'update' : 'updates'}</span>
+                  </>
                 )}
               </button>
+
+              {/* Always mounted, open or closed: only newly added finished or failed updates are announced, and progress changes in the panel list are not. */}
+              <div data-notification-announcer role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" className="sr-only">
+                {toasts.filter(toast => toast.type !== 'loading').map(toast => <p key={toast.id}>{toast.title}{toast.message ? `. ${toast.message}` : ''}</p>)}
+              </div>
 
               {/* Notification Panel Dropdown */}
               {isNotificationPanelOpen && (
@@ -2310,7 +2381,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                               {toast.type !== 'loading' && onDismissToast && (
                                 <button
                                   onClick={() => onDismissToast(toast.id)}
-                                  className="shrink-0 p-1 text-gray-600 hover:text-white rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                  aria-label={`Dismiss notification: ${toast.title}`}
+                                  className="shrink-0 p-1 text-gray-600 hover:text-white rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
@@ -2327,7 +2399,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <div className="px-4 py-2 border-t border-gray-800 bg-violet-500/5">
                       <div className="flex items-center gap-2 text-xs text-violet-300">
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{toasts.filter(t => t.type === 'loading').length} generation(s) in progress</span>
+                        <span>{getGenerationsInProgressLabel(toasts.filter(t => t.type === 'loading').length)}</span>
                       </div>
                     </div>
                   )}
@@ -2400,6 +2472,13 @@ export const Gallery: React.FC<GalleryProps> = ({
 
         {adminGalleryBanner}
 
+        {downloadError && !selectedMedia && (
+          <div role="alert" className="flex items-center gap-2 border-b border-red-400/20 bg-[#25151d] px-4 py-2 text-xs text-red-200 sm:px-6">
+            <span>{downloadError.message}</span>
+            <button type="button" onClick={() => setDownloadError(null)} aria-label="Dismiss download error" className="ml-auto p-1"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
+
         {!isReadOnly && (activeDrag || isMoving || moveError) && (
           <div
             role={moveError ? 'alert' : 'status'}
@@ -2449,7 +2528,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <button
                   onClick={handleBatchDownload}
                   disabled={isDownloadingBatch || isMoving}
-                  aria-label="Download selected media as ZIP"
+                  aria-label="Download selected media as ZIP, including a manifest with prompts and references"
+                  title="Includes manifest.json with prompts, settings and reference names"
                   className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
                 >
                   {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -2560,13 +2640,14 @@ export const Gallery: React.FC<GalleryProps> = ({
               </button>
               </div>
             </div>
-            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{getCountLabel(selectedIds.size - comparableSelection.length, 'unavailable or non-image item', 'unavailable or non-image items')} excluded from comparison</p>}
+            {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p role="status" className="text-xs text-gray-400">
                     {isPreparingPhotos ? `Preparing photos ${photoProgress.completed}/${photoProgress.total || selectedIds.size}…`
-                      : preparedPhotos ? `${preparedPhotos.length} photos ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
+                      : preparedPhotos ? `${getCountLabel(preparedPhotos.length, 'photo', 'photos')} ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
                       : 'Save originals to Photos using your phone’s share sheet.'}
                   </p>
                   {isPreparingPhotos && (
@@ -2577,7 +2658,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>
                 {(photoShareError || photoShareMessage) && <p role={photoShareError ? 'alert' : 'status'} className={`mt-2 text-xs ${photoShareError ? 'text-red-300' : 'text-gray-400'}`}>{photoShareError || photoShareMessage}</p>}
                 <button type="button" onClick={handleBatchDownload} disabled={isDownloadingBatch || isPreparingPhotos || isSharingPhotos || isMoving}
-                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50">Download ZIP to Files instead</button>
+                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50" title="Includes manifest.json with prompts, settings and reference names">Download ZIP to Files instead</button>
               </div>
             )}
           </div>
@@ -2628,10 +2709,13 @@ export const Gallery: React.FC<GalleryProps> = ({
                       className="h-9 w-full rounded-lg border border-violet-400/30 bg-black/30 px-2.5 text-xs text-white outline-none focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/10"
                       value={newFolderName}
                       onChange={e => setNewFolderName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleRenameFolder()}
+                      onKeyDown={submitOnEnter(handleRenameFolder)}
+                      aria-invalid={!!folderRenameError}
+                      aria-describedby={folderRenameError ? 'rename-folder-error' : undefined}
                     />
+                    {folderRenameError && <p id="rename-folder-error" role="alert" title={folderRenameError} className="truncate text-[10px] text-red-300">{folderRenameError}</p>}
                     <div className="flex w-full gap-1.5">
-                      <button onClick={() => setRenamingFolderId(null)} className="h-8 flex-1 rounded-lg border border-white/[0.07] text-[10px] font-semibold text-gray-400 hover:bg-white/[0.04] hover:text-white">Cancel</button>
+                      <button onClick={() => { setRenamingFolderId(null); setFolderRenameError(null); }} className="h-8 flex-1 rounded-lg border border-white/[0.07] text-[10px] font-semibold text-gray-400 hover:bg-white/[0.04] hover:text-white">Cancel</button>
                       <button onClick={handleRenameFolder} disabled={!newFolderName.trim()} className="h-8 flex-1 rounded-lg bg-violet-600 text-[10px] font-semibold text-white hover:bg-violet-500 disabled:opacity-40">Save</button>
                     </div>
                   </div>
@@ -2661,6 +2745,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                           e.stopPropagation();
                           setRenamingFolderId(folder.id);
                           setNewFolderName(folder.name);
+                          setFolderRenameError(null);
                         }}
                         className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.08] bg-black/55 text-gray-400 backdrop-blur-sm transition-colors hover:border-white/15 hover:text-white"
                         title="Rename"
@@ -2688,7 +2773,7 @@ export const Gallery: React.FC<GalleryProps> = ({
           })}
 
           {/* Images */}
-          {visibleImages.map((media) => {
+          {visibleImages.map((media, mediaIndex) => {
             const isSelected = selectedIds.has(media.id);
             const aspectRatio = getMediaDisplayAspectRatio(media);
             const cardStyle = getGalleryCardStyle(aspectRatio, targetRowHeight);
@@ -2787,23 +2872,34 @@ export const Gallery: React.FC<GalleryProps> = ({
               );
             }
 
+            const activateCard = (shiftKey: boolean) => {
+              if (shiftKey && !isSelectionMode) {
+                setIsSelectionMode(true);
+                setSelectedIds(new Set([media.id]));
+                setLastSelectedId(media.id);
+                setSelectedMediaId(null);
+              } else if (isSelectionMode) {
+                toggleSelection(media.id, shiftKey);
+              } else {
+                setSelectedMediaId(media.id);
+              }
+            };
+
             return (
               <div
                 key={media.id}
                 data-gallery-media-id={media.id}
                 draggable={!isReadOnly && !isMoving}
                 onDragStart={(e) => handleDragStart(e, 'image', media.id, media)}
-                onClick={(e) => {
-                  if (e.shiftKey && !isSelectionMode) {
-                    setIsSelectionMode(true);
-                    setSelectedIds(new Set([media.id]));
-                    setLastSelectedId(media.id);
-                    setSelectedMediaId(null);
-                  } else if (isSelectionMode) {
-                    toggleSelection(media.id, e.shiftKey);
-                  } else {
-                    setSelectedMediaId(media.id);
-                  }
+                role="button"
+                tabIndex={0}
+                aria-label={galleryCardLabel(media.mediaType, media.prompt, isSelectionMode, isSelected, mediaIndex + 1, visibleImages.length)}
+                aria-pressed={isSelectionMode ? isSelected : undefined}
+                onClick={(e) => activateCard(e.shiftKey)}
+                onKeyDown={(e) => {
+                  if (!isCardActivationKey(e.key, e.target === e.currentTarget, e.repeat)) return;
+                  e.preventDefault();
+                  activateCard(e.shiftKey);
                 }}
                 style={cardStyle}
                 className={`group relative bg-gray-800 rounded-2xl overflow-hidden border transition-all shadow-lg ${isSelected
@@ -2824,6 +2920,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                       e.stopPropagation();
                       if (onToggleFavorite) onToggleFavorite(media);
                     }}
+                    aria-label="Favorite"
+                    aria-pressed={Boolean(media.isFavorite)}
                     className={`absolute top-2 right-2 z-20 p-2 rounded-full transition-all ${media.isFavorite ? 'bg-pink-600 text-white' : 'bg-black/40 text-white/50 hover:bg-black/60 hover:text-white'}`}
                   >
                     <Heart className={`w-4 h-4 ${media.isFavorite ? 'fill-current' : ''}`} />
@@ -2902,12 +3000,17 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <span className="text-[9px] text-gray-500 max-w-[80%] text-center leading-tight">
                       {media.error || 'Source URL may have expired'}
                     </span>
+                    {brokenVideoProviderLabel(media) && (
+                      <span className="text-[9px] text-gray-500 max-w-[80%] text-center leading-tight">
+                        {brokenVideoProviderLabel(media)}
+                      </span>
+                    )}
                     {!isReadOnly && <div className="flex items-center gap-2">
                       {media.mediaType === 'video' && media.taskId && onRecoverVideo && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRecoverBrokenVideo(media); }}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/90 hover:bg-violet-500 rounded-lg text-white text-xs font-medium transition-colors shadow-lg"
-                          title="Retry recovery from EvoLink"
+                          title={`Retry recovery from ${videoProviderName(media.taskId, media.videoModel === 'minimax-h3')}`}
                         >
                           <RefreshCw className="w-3.5 h-3.5" /> Retry
                         </button>
@@ -2986,22 +3089,22 @@ export const Gallery: React.FC<GalleryProps> = ({
 
       {/* Reference Image Preview Popup */}
       {previewRefImage && (
-        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200" onClick={() => setPreviewRefImage(null)}>
-          <button className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
+        <div role="dialog" aria-modal="true" aria-label="Reference photo preview" tabIndex={-1} className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200 outline-none" onClick={() => setPreviewRefImage(null)} onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); previewCloseRef.current?.focus(); } }}>
+          <button type="button" ref={previewCloseRef} autoFocus aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
           <img src={previewRefImage.data} alt="Reference" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>
       )}
 
-      {comparisonIds && <ImageCompareDialog images={comparisonImages} onClose={closeComparison}
-        onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} />}
+      {comparisonIds && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><ImageCompareDialog images={comparisonImages} onClose={closeComparison}
+        onToggleFavorite={onToggleFavorite} isReadOnly={isReadOnly} loadDetails={loadComparisonDetails} refreshSource={refreshComparisonSource} /></React.Suspense></LazyDialogErrorBoundary>}
 
-      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && <YouTubePreviewDialog
+      {isYouTubePreviewOpen && selectedMedia && isComparableImage(selectedMedia) && <LazyDialogErrorBoundary><React.Suspense fallback={dialogLoading}><YouTubePreviewDialog
         media={selectedMedia}
         currentIndex={previewIndex} totalImages={previewImages.length} favoritesOnly={showFavoritesOnly}
         onNavigate={direction => handleNavigate(direction, true)}
         initialTitle={folders.find(folder => folder.id === selectedMedia.folderId)?.name || selectedMedia.referenceImages?.find(ref => ref.youtubeSource?.title)?.youtubeSource?.title || 'Your next video'}
         channelName={galleryOwner?.display_name || userProfile?.display_name}
-        onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} />}
+        onClose={() => setIsYouTubePreviewOpen(false)} refreshSource={refreshComparisonSource} /></React.Suspense></LazyDialogErrorBoundary>}
 
       {/* Detail Modal */}
       {searchDialog}
@@ -3065,7 +3168,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <AlertCircle className="w-12 h-12 text-red-400" />
                   <span className="text-sm font-semibold">Video unavailable</span>
                   <span className="text-xs text-gray-500">
-                    {selectedMedia.error || 'The source URL is no longer accessible. EvoLink media URLs expire after a period of time and the file was not cached locally.'}
+                    {selectedMedia.error || brokenVideoExpiryText(selectedMedia)}
                   </span>
                   {!isReadOnly && <div className="flex items-center gap-2">
                     {selectedMedia.taskId && onRecoverVideo && (
@@ -3100,14 +3203,18 @@ export const Gallery: React.FC<GalleryProps> = ({
               </div>}
             </> : null}
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
-              <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+              <LazyDialogErrorBoundary inline>
+                <React.Suspense fallback={<div role="status" className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading edit controls…</div>}>
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                </React.Suspense>
+              </LazyDialogErrorBoundary>
             </div>}
           </div>
 
           <div id="gallery-details-pane" data-gallery-details-pane hidden={!isDetailsVisible} className={`w-full md:w-[400px] bg-[#161b22] border-l border-gray-800 ${isDetailsVisible ? 'flex' : 'hidden'} flex-col min-h-[50vh] md:h-full shrink-0 shadow-2xl`}>
             <div className="flex items-center justify-between p-6 border-b border-gray-800">
               <h3 className="text-sm font-semibold text-white">{isEditingSelectedMedia ? 'Source details' : 'Details'}</h3>
-              <button onClick={() => setSelectedMediaId(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+              <button onClick={() => setSelectedMediaId(null)} aria-label="Close details" title="Close details" className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Prompt */}
@@ -3197,7 +3304,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Duration</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
+                      {selectedMedia.h3MaxMode && H3_MAX_CAPABILITIES[selectedMedia.h3MaxMode]?.duration === null
+                        ? selectedMedia.videoOutputDuration ? `${Number(selectedMedia.videoOutputDuration.toFixed(1))}s` : '—'
+                        : selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
                     </span>
                   </div>
                   <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
@@ -3227,7 +3336,12 @@ export const Gallery: React.FC<GalleryProps> = ({
                           ? 'Edit'
                           : selectedMedia.videoOperation === 'extend'
                             ? 'Extend'
-                            : 'Generate'}
+                            : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
+                              : selectedMedia.h3MaxMode === 'recast' ? 'Recast'
+                                : selectedMedia.h3MaxMode === 'relight' ? 'Relight'
+                                  : selectedMedia.h3MaxMode === 'extend_video' ? 'Extend'
+                                    : selectedMedia.h3MaxMode === 'insert_video' ? 'Insert'
+                                      : 'Generate'}
                     </span>
                   </div>
                   {selectedMedia.generationCost && (
@@ -3352,8 +3466,16 @@ export const Gallery: React.FC<GalleryProps> = ({
                       return (
                         <div
                           key={idx}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isEditSource ? 'Preview edit source reference' : `Preview reference photo ${idx + 1}`}
                           className="aspect-square rounded-lg border border-gray-700 overflow-hidden bg-black/50 relative isolate group cursor-pointer"
-                          onClick={() => setPreviewRefImage(ref)}
+                          onClick={e => openRefPreview(ref, e.currentTarget)}
+                          onKeyDown={e => {
+                            if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                            e.preventDefault();
+                            openRefPreview(ref, e.currentTarget);
+                          }}
                         >
                           <img src={ref.data} alt={isEditSource ? 'Edit source reference' : 'Reference image'} className="w-full h-full object-cover" />
 
@@ -3441,9 +3563,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                 className="w-full py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium">
                 <Play className="w-4 h-4 text-red-400" /> YouTube Preview
               </button>}
-              {!isReadOnly && <div className="grid grid-cols-2 gap-3">
+              {!isReadOnly && <div className={`grid gap-3 ${onGenerateVariation && canGenerateVariation(selectedMedia) ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <button onClick={() => { onRecreate(selectedMedia); setSelectedMediaId(null); }} className="py-4 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw className="w-5 h-5" /> Re-create</button>
-                {onGenerateVariation && (
+                {onGenerateVariation && canGenerateVariation(selectedMedia) && (
                   <button
                     onClick={() => { onGenerateVariation(selectedMedia); }}
                     className="py-4 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"
@@ -3468,6 +3590,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <button onClick={(e) => handleDownloadClick(e, selectedMedia.id)} className="py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium"><Download className="w-4 h-4" /> Download</button>
                 )}
               </div>
+              {downloadError?.id === selectedMedia.id && <p role="alert" className="text-xs text-red-300">{downloadError.message}</p>}
 
               {!isReadOnly && <div className="grid grid-cols-2 gap-3">
                 <button
@@ -3476,6 +3599,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   }}
                   className={`py-2 rounded-xl flex items-center justify-center transition-colors border ${selectedMedia.isFavorite ? 'bg-pink-900/30 border-pink-500 text-pink-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
                   title="Favorite"
+                  aria-pressed={Boolean(selectedMedia.isFavorite)}
                 >
                   <Heart className={`w-4 h-4 ${selectedMedia.isFavorite ? 'fill-current' : ''}`} />
                 </button>

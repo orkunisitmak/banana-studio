@@ -35,6 +35,9 @@ const signedMediaUrls = new Map<string, { url: string; expiresAt: number }>();
 const savedPersonCovers = new Map<string, { updatedAt: number; cover: string }>();
 let mediaSessionUserId: string | null = null;
 const cacheConnections = new Set<IDBDatabase>();
+// One shared connection per account database. Opening a new connection for every
+// read left each one open until sign-out, so batch reads piled up connections.
+const sharedConnections = new WeakMap<IDBFactory, Map<string, Promise<IDBDatabase>>>();
 const localMediaObjectUrls = new Set<string>();
 const createLocalMediaObjectUrl = (blob: Blob): string => {
   const url = URL.createObjectURL(blob);
@@ -126,17 +129,21 @@ export const uploadBlobToPublicUrl = async (
   blob: Blob,
   mimeType?: string,
   prefix = 'asset',
-  fallbackExtension = 'bin'
+  fallbackExtension = 'bin',
+  options?: { expectedUserId?: string; onUploadPath?: (path: string) => void },
 ): Promise<string | null> => {
   if (!supabase) return null;
   try {
     const contentType = mimeType || blob.type || 'application/octet-stream';
     const ext = getStorageExtension(contentType, fallbackExtension);
     const userId = await bindMediaSession();
-    if (!userId) return null;
+    if (!userId || (options?.expectedUserId && userId !== options.expectedUserId)) return null;
     const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, '_');
     const path = `${userId}/${safePrefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${ext}`;
 
+    // Record the attempted path before I/O: an upload or signing error can
+    // still leave bytes in storage that the caller needs to roll back.
+    options?.onUploadPath?.(path);
     const { error } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(path, blob, {
       contentType,
       cacheControl: '0',
@@ -311,6 +318,7 @@ export const clearLocalMediaCache = async (previousUserId?: string): Promise<voi
   mediaSessionUserId = null;
   for (const db of cacheConnections) db.close();
   cacheConnections.clear();
+  if (typeof indexedDB !== 'undefined') sharedConnections.get(indexedDB)?.clear();
   try {
     localStorage.removeItem(PENDING_DELETIONS_KEY);
     if (previousUserId) localStorage.removeItem(`${PENDING_DELETIONS_KEY}:${previousUserId}`);
@@ -590,13 +598,26 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
   if (supabase && !userId) throw new Error('Not authenticated');
   if (expectedUserId !== undefined && userId !== expectedUserId) throw new Error('Media session changed');
   const scopedName = `${DB_NAME}:${userId || 'offline'}`;
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(scopedName, DB_VERSION);
+  const factory = indexedDB;
+  let shared = sharedConnections.get(factory);
+  if (!shared) sharedConnections.set(factory, shared = new Map());
+  const existing = shared.get(scopedName);
+  if (existing) return existing;
+  const connections = shared;
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
+    const request = factory.open(scopedName, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
-      cacheConnections.add(request.result);
-      request.result.onversionchange = () => { request.result.close(); cacheConnections.delete(request.result); };
-      resolve(request.result);
+      const db = request.result;
+      cacheConnections.add(db);
+      const forget = () => {
+        db.close();
+        cacheConnections.delete(db);
+        if (connections.get(scopedName) === opening) connections.delete(scopedName);
+      };
+      db.onversionchange = forget;
+      db.onclose = forget;
+      resolve(db);
     };
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -614,6 +635,10 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
       }
     };
   });
+  shared.set(scopedName, opening);
+  // Forget any failed open, including one that threw synchronously, so a later call can retry.
+  opening.catch(() => { if (connections.get(scopedName) === opening) connections.delete(scopedName); });
+  return opening;
 };
 
 const mapRowToMedia = (row: any): GeneratedMedia => {
@@ -704,7 +729,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     videoModel,
     videoOperation: isVideo ? resolveVideoOperation(meta.videoOperation) : undefined,
     videoAspectRatio: meta.videoAspectRatio || (isVideo ? row.aspect_ratio : undefined),
-    videoQuality: meta.videoQuality || (isVideo ? '720p' : undefined),
+    videoQuality: meta.videoQuality || (isVideo ? row.resolution || '720p' : undefined),
     videoDuration: meta.videoDuration,
     audioEnabled: meta.audioEnabled,
     videoPromptExpansionMode: meta.videoPromptExpansionMode,
@@ -908,8 +933,9 @@ const selectPagedGenerationRows = async (
     rows.push(...data);
     await onProgress?.([...rows]);
 
-    if (data.length < pageSize) break;
-    from += pageSize;
+    // Data API max_rows may be lower than our requested page size.
+    // Only an empty page proves exhaustion; advance by rows actually received.
+    from += data.length;
   }
 
   return { data: rows, error: null };
@@ -1183,8 +1209,26 @@ const mergeVideoMetadata = (existing: Record<string, any>, incoming: Record<stri
 const completedVideoTransfers = new Map<string, { source: string; storagePath: string; thumbnailPath: string | null; pendingThumbnail?: Blob }>();
 // Overlapping transfers of one generation can leave either source in the stored file, so none of them records it.
 const activeVideoTransfers = new Map<string, Set<{ overlapped: boolean }>>();
+// Acquire this before session lookup: the generation ID is globally unique and userId is asynchronous.
+const videoSaveQueues = new Map<string, Promise<void>>();
+const acquireVideoSave = async (mediaId: string): Promise<() => void> => {
+  const previous = videoSaveQueues.get(mediaId) || Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>(resolve => { releaseCurrent = resolve; });
+  const tail = previous.then(() => current);
+  videoSaveQueues.set(mediaId, tail);
+  await previous;
 
-export const saveVideo = async (
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseCurrent();
+    if (videoSaveQueues.get(mediaId) === tail) videoSaveQueues.delete(mediaId);
+  };
+};
+
+const saveVideoWithoutQueue = async (
   media: GeneratedMedia,
   expectedUserId?: string,
 ): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
@@ -1381,17 +1425,21 @@ export const saveVideo = async (
     let existingMeta: any = {};
     let existingReferenceImages: any[] | null = null;
     try {
-      const { data: existingRow } = await supabase
+      const { data: existingRow, error } = await supabase
         .from('generations')
         .select('metadata, reference_images')
         .eq('id', media.id)
         .maybeSingle();
+      if (error) throw error;
       existingMeta = existingRow?.metadata || {};
       if (Array.isArray(existingRow?.reference_images)) {
         existingReferenceImages = existingRow.reference_images;
       }
-    } catch {
-      // Non-fatal: if the row doesn't exist or the read fails we just upsert fresh.
+    } catch (readError: any) {
+      // A missing row upserts fresh above. A failed read must not replace the
+      // saved metadata (including a reconciled cost) or reference images.
+      console.warn('saveVideo: existing details could not be read:', readError?.message || readError);
+      return undefined;
     }
 
     const safeReferenceVideos = sanitizePublicMediaRefs(media.referenceVideos);
@@ -1497,6 +1545,26 @@ export const saveVideo = async (
   } catch (e: any) {
     console.error("saveVideo exception:", e.message || e);
     return undefined;
+  }
+};
+
+export const saveVideo = async (
+  media: GeneratedMedia,
+  expectedUserId?: string,
+): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
+  if (!supabase) return undefined;
+  const release = await acquireVideoSave(media.id);
+  try {
+    // A module-local queue cannot protect the same generation in another tab.
+    // Web Locks are origin-wide; hold the lock through both the file upload and DB upsert.
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      return await navigator.locks.request(`banana-video-save:${media.id}`,
+        () => saveVideoWithoutQueue(media, expectedUserId));
+    }
+    // Non-browser and older clients retain the original same-tab serialization.
+    return await saveVideoWithoutQueue(media, expectedUserId);
+  } finally {
+    release();
   }
 };
 
@@ -1688,16 +1756,22 @@ export const updateImageStatus = async (
     }
     if (updates?.storagePath) updateObj.storage_path = updates.storagePath;
     if (updates?.metadata) {
+      // Without the saved metadata, writing it would drop the saved details. Still
+      // save the status and URL; leave the saved metadata untouched.
       const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
-      if (error) throw new Error(`Could not preserve the saved image details: ${error.message}`);
-      const merged = { ...(existing?.metadata || {}), ...updates.metadata };
-      if (status === 'completed') {
-        delete merged.error;
-        delete merged.pollingWarning;
+      if (error) {
+        console.warn('updateImageStatus: saved image details could not be read; keeping them unchanged:', error.message);
+      } else {
+        const merged = { ...(existing?.metadata || {}), ...updates.metadata };
+        if (status === 'completed') {
+          delete merged.error;
+          delete merged.pollingWarning;
+        }
+        updateObj.metadata = merged;
       }
-      updateObj.metadata = merged;
     }
-    await supabase.from('generations').update(updateObj).eq('id', id);
+    const { error: writeError } = await supabase.from('generations').update(updateObj).eq('id', id);
+    if (writeError) console.warn('updateImageStatus: status could not be saved:', writeError.message);
   } catch (e: any) {
     console.warn('updateImageStatus error:', e.message);
   }
@@ -1718,13 +1792,19 @@ export const updateVideoStatus = async (
       if (storagePath) updateObj.storage_path = storagePath;
     }
     if (updates?.metadata) {
-      const { data: existing } = await supabase.from('generations').select('metadata').eq('id', id).single();
-      const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
-      if (status === 'completed') {
-        delete merged.error;
-        delete merged.pollingWarning;
+      // Without the saved metadata, writing it would drop the task endpoints and
+      // cost. Still save the status and URL; leave the saved metadata untouched.
+      const { data: existing, error } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      if (error) {
+        console.warn('updateVideoStatus: saved video details could not be read; keeping them unchanged:', error.message);
+      } else {
+        const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
+        if (status === 'completed') {
+          delete merged.error;
+          delete merged.pollingWarning;
+        }
+        updateObj.metadata = merged;
       }
-      updateObj.metadata = merged;
     }
     await supabase.from('generations').update(updateObj).eq('id', id);
   } catch (e: any) {
@@ -1732,10 +1812,19 @@ export const updateVideoStatus = async (
   }
 };
 
+/** The delete never ran and was not queued, so nothing will retry it. */
+export class DeleteNotQueuedError extends Error {}
+
 export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
+  let dbDeletionError: unknown;
   if (supabase) {
-    const userId = await bindMediaSession();
-    if (!userId) throw new Error('Not authenticated');
+    let userId: string | null;
+    try {
+      userId = await bindMediaSession();
+    } catch (e) {
+      throw new DeleteNotQueuedError(`Session unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!userId) throw new DeleteNotQueuedError('Not authenticated');
     // Delete storage files (best-effort - files may already be gone)
     try {
       const storagePath = media.storagePath || `${userId}/${getOriginalStoragePath(media.id)}`;
@@ -1756,21 +1845,31 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
       if (dbError) {
         console.error(`DB delete failed for ${media.id}, queuing for retry:`, dbError.message);
         addPendingDeletion(media.id);
+        dbDeletionError = new Error(`DB delete failed for ${media.id}: ${dbError.message}`);
       } else {
         removePendingDeletion(media.id);
       }
     } catch (e) {
       console.error(`DB delete error for ${media.id}, queuing for retry:`, e);
       addPendingDeletion(media.id);
+      dbDeletionError = e;
     }
   }
 
   await deleteImagesFromIndexedDb([media.id]);
+  if (dbDeletionError) throw dbDeletionError;
 };
 
-export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
-  if (medias.length === 0) return;
-  await Promise.allSettled(medias.map((media) => deleteImage(media)));
+// notQueued: the delete never ran, so nothing will retry it. queued: the database
+// delete failed and the id is queued for retry on the next load.
+export const deleteImages = async (medias: GeneratedMedia[]): Promise<{ notQueued: GeneratedMedia[]; queued: GeneratedMedia[] }> => {
+  const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  const rejected = (index: number) => results[index].status === 'rejected';
+  const notQueued = (index: number) => (results[index] as PromiseRejectedResult).reason instanceof DeleteNotQueuedError;
+  return {
+    notQueued: medias.filter((_, index) => rejected(index) && notQueued(index)),
+    queued: medias.filter((_, index) => rejected(index) && !notQueued(index)),
+  };
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {
@@ -1904,16 +2003,20 @@ export const clearImages = async (): Promise<void> => {
   if (supabase) {
     const userId = await bindMediaSession();
     if (!userId) throw new Error('Not authenticated');
-    const { data: rows, error: selectError } = await supabase.from('generations')
-      .select('id, storage_path, thumbnail_path, url, type').eq('user_id', userId);
+    const { data: rows, error: selectError } = await selectPagedGenerationRows(
+      userId, 'id, created_at, storage_path, thumbnail_path, url, type',
+    );
     if (selectError) {
       throw new Error(`DB list before clear failed: ${selectError.message}`);
     }
 
-    if (rows && rows.length > 0) {
-      const ids = rows.map((r: any) => r.id);
-      const filenames = rows.map((row: any) => row.storage_path || extractStoragePathFromUrl(row.url) || `${userId}/${row.id}.${row.type === 'video' ? 'mp4' : ORIGINAL_EXTENSION}`);
-      const thumbFilenames = rows.map((row: any) => row.thumbnail_path || `${userId}/${getThumbnailStoragePath(row.id)}`);
+    // Read the complete snapshot before deleting. Bound each storage request
+    // to 1,000 paths and avoid a single oversized ID filter for large galleries.
+    for (let offset = 0; rows && offset < rows.length; offset += 500) {
+      const batch = rows.slice(offset, offset + 500);
+      const ids = batch.map((r: any) => r.id);
+      const filenames = batch.map((row: any) => row.storage_path || extractStoragePathFromUrl(row.url) || `${userId}/${row.id}.${row.type === 'video' ? 'mp4' : ORIGINAL_EXTENSION}`);
+      const thumbFilenames = batch.map((row: any) => row.thumbnail_path || `${userId}/${getThumbnailStoragePath(row.id)}`);
       const { error: storageError } = await supabase.storage.from(MEDIA_BUCKET_NAME).remove([...filenames, ...thumbFilenames]);
       if (storageError) {
         console.warn("Storage clear failed (some files may already be gone):", storageError);
@@ -2023,7 +2126,8 @@ export const getFolders = async (userId?: string | null): Promise<Folder[]> => {
 
 export const renameFolder = async (folderId: string, newName: string): Promise<void> => {
   if (supabase) {
-    await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    const { error } = await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+    if (error) throw new Error(`Folder could not be renamed: ${error.message}`);
   }
   try {
     const db = await openDB();
@@ -2220,18 +2324,39 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
   };
 };
 
+const MOVE_BATCH_SIZE = 100;
+
+/** Some batches were committed before a later one failed. */
+export class MoveImagesError extends Error {
+  constructor(message: string, readonly movedIds: string[]) { super(message); }
+}
+
 export const moveImagesToFolder = async (imageIds: string[], folderId: string | null): Promise<void> => {
   const uniqueIds = Array.from(new Set(imageIds));
   if (uniqueIds.length === 0) return;
 
+  let cachedIds = uniqueIds;
+  let cloudError: MoveImagesError | null = null;
   if (supabase) {
     const userId = await getCurrentUserId();
     if (!userId) throw new Error('Not authenticated');
-    const { error } = await supabase.from('generations')
-      .update({ folder_id: folderId })
-      .eq('user_id', userId)
-      .in('id', uniqueIds);
-    if (error) throw new Error(`Media could not be moved: ${error.message}`);
+    // A large range selection would exceed the request URL limit as a single
+    // `in` filter, so move it in batches like the other bulk ID writes.
+    const movedIds: string[] = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += MOVE_BATCH_SIZE) {
+      const ids = uniqueIds.slice(offset, offset + MOVE_BATCH_SIZE);
+      const { error } = await supabase.from('generations')
+        .update({ folder_id: folderId })
+        .eq('user_id', userId)
+        .in('id', ids);
+      if (error) {
+        if (!movedIds.length) throw new Error(`Media could not be moved: ${error.message}`);
+        cloudError = new MoveImagesError(`Media could not be moved: ${error.message}`, movedIds);
+        break;
+      }
+      movedIds.push(...ids);
+    }
+    cachedIds = movedIds;
   }
 
   // Persist the cache only after the authoritative cloud write succeeds. A
@@ -2242,7 +2367,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
 
-      uniqueIds.forEach(id => {
+      cachedIds.forEach(id => {
         const req = store.get(id);
         req.onsuccess = () => {
           const img = req.result as GeneratedMedia;
@@ -2263,6 +2388,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
     if (!supabase) throw error;
     console.warn('Media moved in cloud, but local cache could not be updated:', error);
   }
+  if (cloudError) throw cloudError;
 };
 
 export const moveFolderToFolder = async (folderId: string, targetParentId: string | null): Promise<void> => {
@@ -2304,29 +2430,69 @@ export const moveFolderToFolder = async (folderId: string, targetParentId: strin
 
 // --- Template Methods ---
 
-export const saveTemplate = async (template: Template): Promise<void> => {
+export const saveTemplate = async (template: Template): Promise<Template> => {
   template = { ...template, config: { ...template.config, referenceImages: template.config.referenceImages?.map(withoutLegacyMask) } };
   const operationUserId = await bindMediaSession();
   if (supabase && !operationUserId) throw new Error('Sign in to save a reference.');
-  if (supabase) {
-    try {
-      const userId = operationUserId;
-      if (!userId) throw new Error('Not authenticated');
-      await supabase.from('templates').upsert({
+  const uploadPaths: string[] = [];
+  let templateWriteStarted = false;
+  try {
+    // Prepare sequentially so rollback never races a still-running upload.
+    const referenceAudios: ReferenceAudio[] = [];
+    for (const reference of template.config.referenceAudios || []) {
+      if (!reference.url.startsWith('blob:')) { referenceAudios.push(reference); continue; }
+      const response = await fetch(reference.url);
+      if (!response.ok) throw new Error('Template audio could not be read. Attach the clip again.');
+      const blob = await response.blob();
+      if (!blob.size) throw new Error('Template audio is empty. Attach the clip again.');
+      if (await bindMediaSession() !== operationUserId) throw new Error('The template account changed.');
+      const url = await uploadBlobToPublicUrl(blob, reference.mimeType || blob.type, 'template_audio', 'bin', {
+        expectedUserId: operationUserId || undefined,
+        onUploadPath: path => uploadPaths.push(path),
+      });
+      if (await bindMediaSession() !== operationUserId) throw new Error('The template account changed.');
+      if (!url) throw new Error('Template audio could not be uploaded. Your draft is unchanged; try again.');
+      referenceAudios.push({ ...reference, url: persistMediaReference(url)! });
+    }
+    if (template.config.referenceAudios) template = { ...template, config: { ...template.config, referenceAudios } };
+
+    if (supabase) {
+      templateWriteStarted = true;
+      const { error } = await supabase.from('templates').upsert({
         id: template.id,
-        user_id: userId,
+        user_id: operationUserId,
         name: template.name,
         config: template.config,
         created_at: template.createdAt
       });
-    } catch (e) { }
-  }
+      if (error) {
+        // A lost acknowledgement may hide a committed template. Only an
+        // known transaction-rejection classes prove its inputs are safe to
+        // remove. Connection errors (08) and transport codes stay ambiguous.
+        if (/^(?:22|23|28|40|42|44)[0-9A-Z]{3}$/.test(error.code || '')) templateWriteStarted = false;
+        throw new Error(`Template could not be saved: ${error.message}`);
+      }
+    }
 
-  try {
-    const db = await openDB(operationUserId);
-    const tx = db.transaction(TEMPLATE_STORE_NAME, 'readwrite');
-    tx.objectStore(TEMPLATE_STORE_NAME).put(template);
-  } catch (error) { }
+    try {
+      const db = await openDB(operationUserId);
+      const tx = db.transaction(TEMPLATE_STORE_NAME, 'readwrite');
+      tx.objectStore(TEMPLATE_STORE_NAME).put(template);
+    } catch (error) { }
+    return template;
+  } catch (error) {
+    if (!templateWriteStarted && uploadPaths.length) {
+      try {
+        if (await bindMediaSession() !== operationUserId) {
+          console.warn('Uncommitted template audio retained because the account changed.');
+        } else {
+          const { error: cleanupError } = await supabase.storage.from(MEDIA_BUCKET_NAME).remove(uploadPaths);
+          if (cleanupError) console.warn('Uncommitted template audio could not be removed.');
+        }
+      } catch { console.warn('Uncommitted template audio could not be removed.'); }
+    }
+    throw error;
+  }
 };
 
 export const getTemplates = async (): Promise<Template[]> => {
@@ -2353,7 +2519,10 @@ export const getTemplates = async (): Promise<Template[]> => {
 };
 
 export const deleteTemplate = async (id: string): Promise<void> => {
-  if (supabase) await supabase.from('templates').delete().eq('id', id);
+  if (supabase) {
+    const { error } = await supabase.from('templates').delete().eq('id', id);
+    if (error) throw new Error(`Template could not be deleted: ${error.message}`);
+  }
   try {
     const db = await openDB();
     db.transaction(TEMPLATE_STORE_NAME, 'readwrite').objectStore(TEMPLATE_STORE_NAME).delete(id);
@@ -2362,7 +2531,7 @@ export const deleteTemplate = async (id: string): Promise<void> => {
 
 // --- Reference Gallery Methods ---
 
-export const saveReferenceImage = async (image: SavedReferenceImage): Promise<void> => {
+export const saveReferenceImage = async (image: SavedReferenceImage, existingReferences: readonly SavedReferenceImage[] = []): Promise<SavedReferenceImage> => {
   if (image.canEdit === false) throw new Error('Only the owner can edit this saved reference.');
   const operationUserId = await bindMediaSession();
   if (supabase && !operationUserId) throw new Error('Sign in to save a reference.');
@@ -2371,14 +2540,23 @@ export const saveReferenceImage = async (image: SavedReferenceImage): Promise<vo
       const userId = operationUserId;
       if (!userId) throw new Error('Not authenticated');
 
-      // Shared inputs are independent snapshots, never another user's private URL.
-      let data = image.data;
-      if (image.isShared && !data.startsWith('data:image/')) data = await snapshotSavedReference(data);
+      // Saved inputs outlive their source gallery items and temporary URLs,
+      // whether private or shared. Keep the caller's creative draft untouched.
+      if (!image.data.startsWith('data:image/')) image = { ...image, data: await snapshotSavedReference(image.data) };
       await requirePeopleSession(userId);
+      // Creation callers compare the prepared bytes with their visible library.
+      const existing = existingReferences.find(reference => reference.canEdit === true && reference.data === image.data);
+      if (existing) {
+        const { data: saved, error } = await supabase.from('reference_images').select('id,data')
+          .eq('id', existing.id).eq('user_id', userId).maybeSingle();
+        if (error) throw new Error('The saved reference could not be checked.', { cause: error });
+        await requirePeopleSession(userId);
+        if (saved?.data === image.data) return existing;
+      }
       const { error } = await supabase.from('reference_images').upsert({
         id: image.id,
         user_id: userId,
-        data: persistMediaReference(data),
+        data: persistMediaReference(image.data),
         is_shared: image.isShared === true,
         mime_type: image.mimeType,
         name: image.name || null,
@@ -2393,7 +2571,7 @@ export const saveReferenceImage = async (image: SavedReferenceImage): Promise<vo
   }
 
   // Shared library access must be rechecked against RLS, never cached offline.
-  if (supabase) return;
+  if (supabase) return { ...image, canEdit: true };
   if (image.isShared) throw new Error('Sign in to share a saved reference.');
   try {
     const db = await openDB(operationUserId);
@@ -2402,6 +2580,7 @@ export const saveReferenceImage = async (image: SavedReferenceImage): Promise<vo
   } catch (error) {
     console.error('Failed to save reference image to IDB:', error);
   }
+  return image;
 };
 
 export const getReferenceGallery = async (): Promise<SavedReferenceImage[]> => {
@@ -2410,18 +2589,11 @@ export const getReferenceGallery = async (): Promise<SavedReferenceImage[]> => {
     try {
       userId = await getCurrentUserId();
       if (!userId) return [];
-      let query = supabase
-        .from('reference_images')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (userId) {
-        query = query.or(`user_id.eq.${userId},is_shared.eq.true`);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      await requirePeopleSession(userId);
+      const data = await readSavedLibraryPages<any>(offset => supabase
+        .from('reference_images').select('*')
+        .or(`user_id.eq.${userId},is_shared.eq.true`)
+        .order('created_at', { ascending: false }).order('id', { ascending: true })
+        .range(offset, offset + 249), userId, 'Saved references could not be loaded.');
 
       if (data && data.length > 0) {
         await signMediaPaths(data.map(row => extractStoragePathFromUrl(row.data)));
@@ -2528,14 +2700,35 @@ const withPeopleDeadline = async <T>(milliseconds: number, message: string, sign
   } finally { task.dispose(); }
 };
 
+/** A short page may be a server row cap. Read to exhaustion and recheck the
+ * initiating account before exposing any library rows or caching photos. */
+const readSavedLibraryPages = async <T>(
+  readPage: (offset: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  userId: string,
+  message: string,
+  signal?: AbortSignal,
+): Promise<T[]> => {
+  const rows: T[] = [];
+  while (true) {
+    signal?.throwIfAborted();
+    await requirePeopleSession(userId);
+    const { data, error } = await readPage(rows.length);
+    signal?.throwIfAborted();
+    if (error) throw new Error(message, { cause: error });
+    await requirePeopleSession(userId);
+    if (!data?.length) return rows;
+    rows.push(...data);
+  }
+};
+
 /** Card details only: one person's photos can total many megabytes. */
 export const getSavedPeople = (signal?: AbortSignal): Promise<SavedPersonSummary[]> =>
   withPeopleDeadline(20_000, 'Saved people are taking too long to load. Check your connection and retry.', signal, async deadline => {
     const userId = await requirePeopleSession();
-    const { data, error } = await supabase.from('saved_people').select('id,user_id,name,is_me,is_shared,created_at,updated_at').or(`user_id.eq.${userId},is_shared.eq.true`)
-      .is('deleted_at', null).order('created_at', { ascending: false }).abortSignal(deadline);
-    if (error) throw new Error('Saved people could not be loaded. Please retry.');
-    await requirePeopleSession(userId);
+    const data = await readSavedLibraryPages<any>(offset => supabase.from('saved_people').select('id,user_id,name,is_me,is_shared,created_at,updated_at')
+      .or(`user_id.eq.${userId},is_shared.eq.true`).is('deleted_at', null)
+      .order('created_at', { ascending: false }).order('id', { ascending: true })
+      .range(offset, offset + 249).abortSignal(deadline), userId, 'Saved people could not be loaded. Please retry.', deadline);
     return (data || []).map((row: any) => ({ id: row.id, name: row.name, isMe: row.is_me, isShared: row.is_shared === true, canEdit: row.user_id === userId, createdAt: row.created_at, updatedAt: row.updated_at }));
   });
 
@@ -2551,10 +2744,9 @@ export const getSavedPeopleCovers = (people: SavedPersonSummary[], signal?: Abor
       else missing.push(person.id);
     }
     if (!missing.length) return covers;
-    const { data, error } = await supabase.from('saved_people').select('id,updated_at,cover:photos->0').or(`user_id.eq.${userId},is_shared.eq.true`)
-      .is('deleted_at', null).in('id', missing).abortSignal(deadline);
-    if (error) throw new Error('Saved people photos could not be loaded.');
-    await requirePeopleSession(userId);
+    const data = await readSavedLibraryPages<any>(offset => supabase.from('saved_people').select('id,updated_at,cover:photos->0')
+      .or(`user_id.eq.${userId},is_shared.eq.true`).is('deleted_at', null).in('id', missing)
+      .order('id', { ascending: true }).range(offset, offset + 249).abortSignal(deadline), userId, 'Saved people photos could not be loaded.', deadline);
     for (const row of (data || []) as any[]) {
       if (typeof row.cover?.data !== 'string') continue;
       savedPersonCovers.set(`${userId}:${row.id}`, { updatedAt: row.updated_at, cover: row.cover.data });

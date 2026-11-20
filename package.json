@@ -1,7 +1,7 @@
 {
   "name": "banana-studio",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,7 @@
     "test:macos": "swift test --package-path desktop/macos"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
     "@fal-ai/client": "1.10.1",
     "@google/genai": "1.37.0",
     "@supabase/supabase-js": "2.39.3",

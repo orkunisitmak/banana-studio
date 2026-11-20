@@ -33,8 +33,10 @@ export const sanitizeYoutubeParams = (raw: unknown): Record<string, string> => {
     if (!ALLOWED_PARAMS.has(k) || typeof v !== 'string') continue;
 
     if (k === 'maxResults') {
-      const parsed = parseInt(v, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
+      const match = /^\d+$/.exec(v);
+      if (!match || match[0] !== v) continue;
+      const parsed = Number(v);
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
         safe.maxResults = String(Math.min(parsed, 50));
       }
       continue;

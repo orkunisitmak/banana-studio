@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { describeEvoLinkFailure } from './_lib/evolink-errors.js';
 import { applyCors, requireUser } from './_lib/auth.js';
-import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
+import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
@@ -19,6 +20,7 @@ interface GenerateRequest {
   generateAudio: boolean;
   referenceEditMode?: boolean;
   editSourcePreparationVersion?: number;
+  generationId?: string;
 }
 
 export const hasInvalidMediaUrls = (urls: unknown): boolean => urls != null && (
@@ -64,6 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.EVOLINK_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured' });
 
+  let acceptedTaskId: string | undefined;
+  let guard: PaidRequest = null;
   try {
     let body: GenerateRequest;
     try {
@@ -89,6 +93,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({
         error: 'Reference media must be arrays of public HTTPS URLs. Local blob/data or plain HTTP URLs cannot be used by Seedance.',
       });
+    }
+    if (body.generationId !== undefined && !isGenerationId(body.generationId)) {
+      return res.status(400).json({ error: 'A valid generation ID is required.' });
     }
     const maxImages = mode === 'image_to_video' ? 2 : videoModel === 'seedance-2.5' ? 30 : 9;
     const maxVideos = videoModel === 'seedance-2.5' ? 10 : 3;
@@ -190,6 +197,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
+    guard = await startPaidRequest(req, res, user, 'image', 'EvoLink');
+    if (!guard) return;
 
     const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
       method: 'POST',
@@ -199,6 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify(requestBody),
     });
+    await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
 
     let data: any;
     try {
@@ -216,7 +227,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
     }
 
+    acceptedTaskId = data.id;
     await registerProviderTask(registry, 'evolink', data.id, user.id);
+    if (body.generationId && !await saveGenerationTask(registry, body.generationId, user.id, data.id)) {
+      return res.status(503).json({ error: `Generation was submitted, but its saved video could not be updated (Task: ${data.id}). Do not submit again; check task history or contact an administrator.`, taskId: data.id });
+    }
 
     return res.status(200).json({
       taskId: data.id,
@@ -226,7 +241,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       usage: data.usage || null,
     });
   } catch (error: any) {
+    await guard?.finish('failed');
     console.error('EvoLink generate error:', error.message);
-    return res.status(500).json({ error: error.message || 'Video generation failed' });
+    return res.status(500).json({ error: error.message || 'Video generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }
 }

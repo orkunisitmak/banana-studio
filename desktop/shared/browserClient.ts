@@ -25,7 +25,7 @@ export const createLocalWorkspaceClient = (config: { userId: string; sessionId: 
       remove: (paths: string[]) => action('remove', paths),
       // Like Supabase Storage: a missing object is a 404, not a URL that fails later.
       createSignedUrl: async (path: string) => { const r = await action('stat', [path]); if (r.error) return { data: null, error: r.error }; return r.data?.[0]?.exists ? { data: { signedUrl: mediaUrl(path) }, error: null } : { data: null, error: { statusCode: 404, message: 'Object not found' } }; },
-      createSignedUrls: async (paths: string[]) => { const r = await action('stat', paths); return { data: paths.map((path, i) => ({ path, signedUrl: r.data?.[i]?.exists ? mediaUrl(path) : '', error: r.data?.[i]?.exists ? null : 'Not found' })), error: null }; },
+      createSignedUrls: async (paths: string[]) => { const r = await action('stat', paths); if (r.error) return { data: null, error: r.error }; return { data: paths.map((path, i) => ({ path, signedUrl: r.data?.[i]?.exists ? mediaUrl(path) : '', error: r.data?.[i]?.exists ? null : 'Not found' })), error: null }; },
       getPublicUrl: (path: string) => ({ data: { publicUrl: mediaUrl(path) } }),
     };
   };

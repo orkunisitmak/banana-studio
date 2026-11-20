@@ -136,10 +136,13 @@ export function ImageCompareDialog({ images, onClose, onToggleFavorite, isReadOn
       return;
     }
     const target = event.target as HTMLElement | null;
-    if (event.altKey || event.ctrlKey || event.metaKey || target?.closest('input, textarea, select, [role="slider"], [contenteditable]:not([contenteditable="false"])')) return;
+    // "[" and "]" need AltGr (Ctrl+Alt) or Option on Turkish layouts, so Alt-typed brackets still count.
+    const typedBracket = (event.key === '[' || event.key === ']') && event.altKey;
+    if (event.metaKey || (!typedBracket && (event.altKey || event.ctrlKey)) || target?.closest('input, textarea, select, [role="slider"], [contenteditable]:not([contenteditable="false"])')) return;
     if (event.key === '?') { handled(); if (!event.repeat) toggleShortcuts(); return; }
     if (shortcutsOpen) return;
-    const key = event.key.toLowerCase();
+    // The I key types dotless "ı" on a Turkish layout, so match the physical key.
+    const key = event.code === 'KeyI' ? 'i' : event.key.toLowerCase();
     if (event.repeat && ['l', 'g', 'i'].includes(key)) { handled(); return; }
     if (key === '1' || key === '2') setView(key === '1' ? 'gallery' : 'slider');
     else if (key === 'g') { setView('gallery'); setLayout(value => value === 'grid' ? 'strip' : 'grid'); }

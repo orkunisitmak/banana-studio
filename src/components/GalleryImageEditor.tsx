@@ -266,7 +266,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
             if (files.length) { event.preventDefault(); void addReferences(files); }
           }}
           onKeyDown={event => {
-            if (!mention || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey) return;
+            if (!mention || event.nativeEvent.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey) return;
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(undefined); return; }
             if (!mentionOptions.length) return;
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

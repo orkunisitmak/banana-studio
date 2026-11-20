@@ -21,8 +21,10 @@ export const createRecreateConfig = (media: GeneratedMedia, imageModel: Generati
     promptPreparation: media.promptPreparation,
     youtubeSource: media.youtubeSource,
     count: 1,
-    aspectRatio: media.aspectRatio,
-    resolution: media.resolution,
+    // A saved video stores its quality and ratio in these columns; the image
+    // controls keep their defaults so switching to Image shows valid options.
+    aspectRatio: mode === 'video' ? '1:1' : media.aspectRatio,
+    resolution: mode === 'video' ? '1K' : media.resolution,
     imageModel,
     openaiImageOptions: media.openaiImageOptions,
     imagePromptCategory: media.imagePromptCategory,
@@ -69,3 +71,6 @@ export const mergeRecreateHydration = (
   }
   return next;
 };
+
+/** Variation rewrites the prompt and starts an image generation; there is no video variation path. */
+export const canGenerateVariation = (media: GeneratedMedia): boolean => media.mediaType !== 'video';

@@ -108,7 +108,7 @@ test('audio clips cut by a lower limit release their URLs and are reported after
   t.limits.audios = 1; t.errors.length = 0; g.release(); await pending; t.render();
   assert.deepEqual(t.get().referenceAudios.map(a => a.url), ['blob:a.mp3']);
   assert.deepEqual(t.revoked, ['blob:b.mp3']);
-  assert.ok(t.errors.includes('Limit reached: 1 audio clips max.'));
+  assert.ok(t.errors.includes('Limit reached: 1 audio clip max.'));
 });
 test('a failed read leaves the draft unchanged and a retry adds the image exactly once', async () => {
   let fail = true; const t = setup(base, null, 14, () => fail);

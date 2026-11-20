@@ -98,11 +98,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }), provider.signal);
     providerRequestId = response.headers.get('x-request-id');
     providerStatus = response.status;
+    // Check the status first: a gateway error page is not JSON, and parsing
+    // it would replace the status-specific message with a generic one.
+    if (!response.ok) {
+      provider.dispose();
+      return fail(response.status, openAIErrorMessage(response.status, undefined, true));
+    }
     const data = await waitForTask(response.json(), provider.signal);
     provider.dispose();
-    if (!response.ok) {
-      return fail(response.status, openAIErrorMessage(response.status));
-    }
 
     // A truncated/refused response can still be billed. Record returned usage
     // before checking output; the client skips logging a second copy.
@@ -155,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     return fail(timeout ? 504 : 502, timeout
       ? 'GPT-6.1 Sol yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.'
-      : openAIErrorMessage());
+      : openAIErrorMessage(undefined, undefined, true));
   } finally {
     provider.dispose(); clearInterval(heartbeat); res.off?.('close', close);
     await guard.finish(outcome, providerRequestId, providerStatus);

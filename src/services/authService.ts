@@ -29,6 +29,8 @@ export const signInWithGoogle = async () => {
     provider: 'google',
     options: {
       redirectTo: redirectUrl,
+      // Without this Google reuses the signed-in account, so a wrong account could not be swapped.
+      queryParams: { prompt: 'select_account' },
     }
   });
   if (error) throw error;
@@ -491,8 +493,9 @@ export const getAuthorizedEmails = async (): Promise<AuthorizedEmail[]> => {
     .order('created_at', { ascending: true });
 
   if (error) {
+    // An empty list would read as "nobody is authorized"; let the panel show its error.
     console.warn('Failed to fetch authorized emails:', error);
-    return [];
+    throw new Error('Could not load authorized users. Try again.');
   }
   return (data || []) as AuthorizedEmail[];
 };

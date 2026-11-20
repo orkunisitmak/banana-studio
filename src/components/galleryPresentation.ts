@@ -1,10 +1,11 @@
 import type { GeneratedMedia } from '../types';
+import { isImagePresetLabel } from '../lib/images/openaiImage';
 
 /** Prefer the rendered file's shape; selected/provider sizes can differ. */
 export const getGalleryAspectRatio = (media: GeneratedMedia, detectedRatio?: number): number => {
   if (detectedRatio && Number.isFinite(detectedRatio) && detectedRatio > 0) return detectedRatio;
   const size = media.mediaType !== 'video'
-    ? media.imageOutputSize || (media.isLoading ? media.imageRequestedSize : undefined)
+    ? media.imageOutputSize || (media.isLoading && !isImagePresetLabel(media.imageRequestedSize) ? media.imageRequestedSize : undefined)
     : undefined;
   const ratio = size || (media.mediaType === 'video' && media.videoAspectRatio !== 'adaptive'
     ? media.videoAspectRatio || media.aspectRatio : media.aspectRatio);

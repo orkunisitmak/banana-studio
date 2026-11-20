@@ -3,6 +3,7 @@ import { WorkspaceBar } from './components/WorkspaceBar';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { Controls } from './components/Controls';
+import { getReferenceImageLimit } from './lib/images/imageReferences';
 import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AuthBoundary } from './components/AuthBoundary';
@@ -14,6 +15,7 @@ import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageMode
 import * as workspaceStorage from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
 import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
+import { brainstormImageCount } from './lib/brainstorm/brainstormLabels';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
 import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
@@ -33,6 +35,7 @@ import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './l
 import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
+import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
 
@@ -79,6 +82,15 @@ const normalizeStoredMedia = (media: GeneratedMedia): GeneratedMedia => {
   };
 };
 
+/** The workspace session check failed. `completed` is set when it failed after the wrapped call had already finished, with that call's value in `result`. */
+class SessionChangedError extends Error {
+  completed?: { result: unknown };
+  constructor(message: string, completed?: { result: unknown }) {
+    super(message);
+    this.completed = completed;
+  }
+}
+
 export default function App() {
   return <AuthBoundary>{({ userId, profile }, onSignOut) => (
     <AuthorizedWorkspace key={userId} userId={userId} userProfile={profile} onSignOut={onSignOut} />
@@ -97,15 +109,21 @@ const AuthorizedWorkspace: React.FC<{
     workspaceActive.current = true;
     return () => { workspaceActive.current = false; };
   }, []);
-  const assertWorkspaceSession = async () => {
-    const session = await getSession();
-    if (!workspaceActive.current || session?.user.id !== userId) throw new Error('Session changed. Sign in again to continue.');
+  const assertWorkspaceSession = async (completed?: { result: unknown }) => {
+    const changed = () => new SessionChangedError('Session changed. Sign in again to continue.', completed);
+    let session: Awaited<ReturnType<typeof getSession>>;
+    try {
+      session = await getSession();
+    } catch {
+      throw changed();
+    }
+    if (!workspaceActive.current || session?.user.id !== userId) throw changed();
   };
   const withWorkspaceSession = <Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) =>
     async (...args: Args): Promise<Result> => {
       await assertWorkspaceSession();
       const result = await operation(...args);
-      await assertWorkspaceSession();
+      await assertWorkspaceSession({ result });
       return result;
     };
   const saveImage = withWorkspaceSession((media: GeneratedMedia) => workspaceStorage.saveImage(media, userId));
@@ -262,6 +280,13 @@ const AuthorizedWorkspace: React.FC<{
     if (!isAuthenticated) return;
     let cancelled = false;
     const historyLoadStartedAt = Date.now();
+    // IDs from earlier pages, passed as an immutable snapshot to each merge.
+    let deliveredHistoryIds: ReadonlySet<string> = new Set();
+    const mergeHistoryPage = (page: GeneratedMedia[]) => {
+      const delivered = deliveredHistoryIds;
+      deliveredHistoryIds = new Set([...delivered, ...page.map(item => item.id)]);
+      setGeneratedMedia(current => mergeLoadedGalleryHistory(current, page, historyLoadStartedAt, delivered));
+    };
     setIsInitialGalleryLoading(true);
     setIsGalleryIndexLoading(true);
     setGalleryHistoryError(null);
@@ -273,7 +298,7 @@ const AuthorizedWorkspace: React.FC<{
             if (cancelled) return;
             // First callback contains exactly the newest 48 rows. Render it
             // immediately while storageService continues hydrating older pages.
-            setGeneratedMedia(current => mergeLoadedGalleryHistory(current, partialHistory.map(normalizeStoredMedia), historyLoadStartedAt));
+            mergeHistoryPage(partialHistory.map(normalizeStoredMedia));
             setIsInitialGalleryLoading(false);
           }, (error) => {
             if (!cancelled) setGalleryHistoryError(error.message);
@@ -300,7 +325,7 @@ const AuthorizedWorkspace: React.FC<{
         // Migrate legacy data
         const migratedHistory = history.map(normalizeStoredMedia);
 
-        setGeneratedMedia(current => mergeLoadedGalleryHistory(current, migratedHistory, historyLoadStartedAt));
+        mergeHistoryPage(migratedHistory);
         if (savedTemplates) setTemplates(normalizedTemplates);
         
         // Resume pending/processing videos and recover rows that were marked
@@ -1247,7 +1272,7 @@ const AuthorizedWorkspace: React.FC<{
       },
       onPrepared: () => {
         finishPreparing();
-        toast.updateToast(toastId, { title: `Generating ${batch.placeholders.length} images…`, message: 'Your ideas are ready. Creating images.' });
+        toast.updateToast(toastId, { title: `Generating ${brainstormImageCount(batch.placeholders.length)}…`, message: 'Your ideas are ready. Creating images.' });
       },
       onSettled: (completed, failed) => {
         const nextSettled = completed + failed;
@@ -1261,10 +1286,10 @@ const AuthorizedWorkspace: React.FC<{
     setIsBrainstormPreparing(true);
     setGeneratedMedia(previous => [...batch.placeholders, ...previous]);
     setActiveRequests(previous => previous + batch.placeholders.length);
-    const toastId = toast.loading(`Preparing ${batch.placeholders.length} images…`, 'You can follow your batch in the gallery.');
+    const toastId = toast.loading(`Preparing ${brainstormImageCount(batch.placeholders.length)}…`, 'You can follow your batch in the gallery.');
     void batch.run().then(({ completed, failed }) => {
       toast.dismissToast(toastId);
-      if (!failed) toast.success('Brainstorm complete', `${completed} images created.`);
+      if (!failed) toast.success('Brainstorm complete', `${brainstormImageCount(completed)} created.`);
       else if (completed) toast.warning('Batch partial', `${completed} created, ${failed} failed. Review the failed cards in the gallery.`);
       else toast.error('Brainstorm stopped', 'No images completed. Review the message on the gallery cards.');
     }).finally(finishPreparing);
@@ -1283,6 +1308,14 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
+  // Put items whose delete never ran back where they were in the list (new items made meanwhile sort first).
+  const restoreDeletedMedia = (items: GeneratedMedia[]) => {
+    items.forEach(item => deletedMediaIdsRef.current.delete(item.id));
+    const position = new Map<string, number>(generatedMedia.map((m, index) => [m.id, index]));
+    setGeneratedMedia(prev => [...prev, ...items.filter(item => !prev.some(p => p.id === item.id))]
+      .sort((a, b) => (position.get(a.id) ?? -1) - (position.get(b.id) ?? -1)));
+  };
+
   const handleDelete = async (media: GeneratedMedia) => {
     deletedMediaIdsRef.current.add(media.id);
     setGeneratedMedia(prev => prev.filter(m => m.id !== media.id));
@@ -1290,7 +1323,14 @@ const AuthorizedWorkspace: React.FC<{
       await deleteImage(media);
     } catch (e) {
       console.error("Delete failed", e);
-      toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      // The delete finished and only the session check after it failed: it is gone, so keep it gone.
+      if (e instanceof SessionChangedError && e.completed) return;
+      if (e instanceof workspaceStorage.DeleteNotQueuedError || e instanceof SessionChangedError) {
+        restoreDeletedMedia([media]);
+        toast.error('Delete Failed', 'The image could not be deleted and is back in your library. Try again.');
+      } else {
+        toast.error('Delete Failed', 'Could not fully delete the image. It will be retried automatically.');
+      }
     }
   };
 
@@ -1298,13 +1338,25 @@ const AuthorizedWorkspace: React.FC<{
     const toDelete = generatedMedia.filter(m => mediaIds.includes(m.id));
     mediaIds.forEach(id => deletedMediaIdsRef.current.add(id));
     setGeneratedMedia(prev => prev.filter(m => !mediaIds.includes(m.id)));
+    let notQueued: GeneratedMedia[] = [], queued: GeneratedMedia[] = [];
     try {
-      await deleteImages(toDelete);
-      toast.success('Images Deleted', `${toDelete.length} image${toDelete.length > 1 ? 's' : ''} removed.`);
+      ({ notQueued, queued } = await deleteImages(toDelete));
     } catch (e) {
       console.error("Batch delete failed", e);
-      toast.error('Delete Failed', 'Some images could not be fully deleted. They will be retried automatically.');
+      // A session check after the deletes keeps their results; one before them means nothing ran.
+      if (e instanceof SessionChangedError && e.completed) ({ notQueued, queued } = e.completed.result as Awaited<ReturnType<typeof workspaceStorage.deleteImages>>);
+      else notQueued = toDelete;
     }
+    if (notQueued.length === 0 && queued.length === 0) {
+      toast.success('Deleted', `${describeMediaCount(toDelete.map(m => m.id), toDelete)} removed.`);
+      return;
+    }
+    if (notQueued.length > 0) restoreDeletedMedia(notQueued);
+    const messages = [
+      notQueued.length > 0 && `${describeMediaCount(notQueued.map(m => m.id), notQueued)} could not be deleted and ${notQueued.length === 1 ? 'is' : 'are'} back in your library. Try again.`,
+      queued.length > 0 && `${describeMediaCount(queued.map(m => m.id), queued)} could not be fully deleted. ${queued.length === 1 ? 'It' : 'They'} will be retried automatically.`,
+    ].filter(Boolean);
+    toast.error('Delete Failed', messages.join(' '));
   };
 
   const handleToggleFavorite = async (media: GeneratedMedia) => {
@@ -1339,9 +1391,10 @@ const AuthorizedWorkspace: React.FC<{
     } catch (e) {
       console.error("Move failed", e);
       toast.error('Move Failed', 'Could not move the selected items to the folder.');
-      // Rollback
+      // Roll back only the items the server did not move.
+      const moved = e instanceof workspaceStorage.MoveImagesError ? new Set(e.movedIds) : null;
       setGeneratedMedia(prev => prev.map(img => {
-        return originalFolders.has(img.id) && img.folderId === folderId
+        return originalFolders.has(img.id) && img.folderId === folderId && !moved?.has(img.id)
           ? { ...img, folderId: originalFolders.get(img.id) }
           : img;
       }));
@@ -1400,14 +1453,6 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
-  const handleHistorySelect = (media: GeneratedMedia) => {
-    recreateLoadIdRef.current += 1;
-    recreateLoadingRef.current = null;
-    setIsRecreateLoading(false);
-    setConfig(createRecreateConfig(media, resolveImageModel(media.imageModel ?? config.imageModel)));
-    setPromptLoadVersion(version => version + 1);
-  };
-
   const handleRecreate = async (media: GeneratedMedia) => {
     const loadId = ++recreateLoadIdRef.current;
     recreateLoadingRef.current = null;
@@ -1423,6 +1468,7 @@ const AuthorizedWorkspace: React.FC<{
     // Re-create button skips that step. Re-fetch on demand so both buttons
     // load the prompt AND the original reference media consistently.
     let resolved = media;
+    let detailReadFailed = false;
     const refsMissing = !media.referenceImages || media.referenceImages.length === 0;
     const refsUnresolved = (media.referenceImages || []).some(ref => !ref?.data || !String(ref.data).trim());
     const savedReferenceIds = Array.isArray(media.imageGenerationReferenceIds)
@@ -1453,8 +1499,11 @@ const AuthorizedWorkspace: React.FC<{
             referenceVideos: full.referenceVideos || media.referenceVideos || [],
             referenceAudios: full.referenceAudios || media.referenceAudios || [],
           };
+        } else {
+          detailReadFailed = true;
         }
       } catch (e) {
+        detailReadFailed = true;
         console.warn('Recreate: failed to fetch full media row', e);
       } finally {
         if (recreateLoadingRef.current === loadId) {
@@ -1475,12 +1524,17 @@ const AuthorizedWorkspace: React.FC<{
     // wrong identity, so make the recovery action explicit instead.
     const resolvedImageRefs = resolved.referenceImages || [];
     const unresolvedImageRefs = resolvedImageRefs.some(ref => !ref?.data || !String(ref.data).trim());
-    const referencesUnavailable = unresolvedImageRefs
-      || ((savedReferenceIds.length > 0 || (resolved.imageGenerationReferenceIds?.length || 0) > 0 || refsUnresolved)
-        && resolvedImageRefs.length === 0);
 
     const recreatedMode = resolved.mediaType === 'video' ? 'video' : 'image';
     const recreatedConfig = createRecreateConfig(resolved, resolveImageModel(resolved.imageModel ?? initialDraft.imageModel));
+    // createRecreateConfig adds an empty slot for every saved reference id the
+    // detail row did not return, so a partly restored set shows up here too.
+    const missingReferenceSlots = recreatedConfig.referenceImages.some(ref => !ref?.data || !String(ref.data).trim());
+    const referencesUnavailable = detailReadFailed
+      || missingReferenceSlots
+      || unresolvedImageRefs
+      || ((savedReferenceIds.length > 0 || (resolved.imageGenerationReferenceIds?.length || 0) > 0 || refsUnresolved)
+        && resolvedImageRefs.length === 0);
     setConfig(current => mergeRecreateHydration(current, initialDraft, recreatedConfig));
     if (referencesUnavailable) {
       toast.error('References unavailable', 'The saved prompt and settings are loaded. Saved reference images could not be restored; attach them again before generating.');
@@ -1496,7 +1550,11 @@ const AuthorizedWorkspace: React.FC<{
     );
   };
 
+  // History rows are gallery-list rows without reference photos, so they load like Re-create.
+  const handleHistorySelect = handleRecreate;
+
   const handleGenerateVariation = async (media: GeneratedMedia) => {
+    if (media.mediaType === 'video') return;
     const imageModel = resolveImageModel(media.imageModel ?? config.imageModel);
 
     const toastId = toast.loading('Creating variation...', 'Generating a new prompt variation');
@@ -1570,7 +1628,7 @@ const AuthorizedWorkspace: React.FC<{
 
       const timestamp = Date.now();
       const placeholder: GeneratedMedia = {
-        id: `temp-${timestamp}`,
+        id: crypto.randomUUID(),
         url: '',
         prompt: variedPrompt,
         promptPreparation: variationConfig.promptPreparation,
@@ -1663,12 +1721,12 @@ const AuthorizedWorkspace: React.FC<{
             mode: 'video',
           };
         }));
-        if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} reference videos allowed for this operation.`);
+        if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} ${limit === 1 ? 'reference video' : 'reference videos'} allowed for this operation.`);
         else toast.success('Video Reference Added', 'Video added as reference. Switched to video mode.');
         return;
       }
 
-      const response = await fetch(media.url);
+      const response = await fetch(await workspaceStorage.refreshMediaAccessUrl(media.url, false).catch(() => media.url));
       // An expired link returns an error page; never add that as an image.
       if (!response.ok) throw new Error(`Reference download failed (${response.status})`);
       const blob = await response.blob();
@@ -1681,10 +1739,7 @@ const AuthorizedWorkspace: React.FC<{
           let limit: number | null = null;
 
           flushSync(() => setConfig(prev => {
-            const isH3Video = prev.mode === 'video' && prev.videoModel === 'minimax-h3';
-            const MAX_IMAGES = isH3Video ? (prev.h3MaxMode&&prev.h3MaxMode!=='auto'?H3_MAX_CAPABILITIES[getH3MaxMode(prev)].images.max+(getH3MaxMode(prev)==='reference_to_video'?new Set([prev.h3MaxOptions?.startImageId,prev.h3MaxOptions?.middleImageId,prev.h3MaxOptions?.endImageId].filter(id=>id&&prev.referenceImages.some(ref=>ref.id===id))).size:0):9)
-              : prev.mode === 'video' && prev.videoModel === 'seedance-2.0' ? 9
-              : prev.mode === 'image' && prev.imageModel === SUNBURST_MODEL ? 16 : 14;
+            const MAX_IMAGES = getReferenceImageLimit(prev);
             if ((prev.referenceImages?.length || 0) >= MAX_IMAGES) { limit = MAX_IMAGES; return prev; }
 
             return {
@@ -1699,7 +1754,7 @@ const AuthorizedWorkspace: React.FC<{
               ]
             };
           }));
-          if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} reference images allowed for this action.`);
+          if (limit !== null) toast.warning('Limit Reached', `Maximum of ${limit} ${limit === 1 ? 'reference image' : 'reference images'} allowed for this action.`);
           else toast.success('Reference Added', 'Image added as reference.');
         }
       };
@@ -1720,8 +1775,8 @@ const AuthorizedWorkspace: React.FC<{
     };
 
     try {
-      await saveTemplate(newTemplate);
-      setTemplates(prev => [newTemplate, ...prev]);
+      const saved = await saveTemplate(newTemplate);
+      setTemplates(prev => [saved, ...prev]);
       toast.success('Template Saved', `"${name}" has been saved.`);
     } catch (e) {
       console.error("Failed to save template", e);
@@ -1735,8 +1790,8 @@ const AuthorizedWorkspace: React.FC<{
       config: { ...config } // Update with current config
     };
     try {
-      await saveTemplate(updatedTemplate);
-      setTemplates(prev => prev.map(t => t.id === template.id ? updatedTemplate : t));
+      const saved = await saveTemplate(updatedTemplate);
+      setTemplates(prev => prev.map(t => t.id === template.id ? saved : t));
       toast.success('Template Updated', `"${template.name}" has been updated.`);
     } catch (e) {
       console.error("Failed to update template", e);
@@ -1760,7 +1815,8 @@ const AuthorizedWorkspace: React.FC<{
     try {
       const imageModel = resolveImageModel(template.config.imageModel ?? config.imageModel);
       const merged = mergePersonReferenceInputs(template.config.referenceImages || [], config.referenceImages || [], template.config.prompt, config.prompt, template.config.personGroups, config.personGroups);
-      const limit = imageModel === SUNBURST_MODEL ? 16 : 14;
+      const target = { ...template.config, imageModel, referenceImages: merged.references };
+      const limit = getReferenceImageLimit(target);
       if (merged.references.length > limit) throw new Error(`Bu şablonla toplam ${merged.references.length} referans oluyor. Önce referans sayısını ${limit} veya altına indir.`);
       recreateLoadIdRef.current += 1;
       recreateLoadingRef.current = null;

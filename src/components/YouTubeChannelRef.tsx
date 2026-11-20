@@ -1,3 +1,4 @@
+import { submitOnEnter } from './submitOnEnter';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Youtube, Loader2, X, Search, TrendingUp, Clock, Check, Eye, Download, AlertCircle, Sparkles } from 'lucide-react';
@@ -19,6 +20,8 @@ import { analyzeYouTubeVideo } from '../services/youtubeBriefService';
 import { getPersonGroups } from '../lib/references/personReferences';
 import type { PersonGroupDefinition, ReferenceImage } from '../types';
 import type { YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
+import { normalizeSearch } from './gallerySearch';
+import { getCountLabel } from '../lib/gallery/countLabel';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { TextTaskStage } from '../services/geminiClient';
 
@@ -93,6 +96,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     requestRef.current = null;
     setIsGeneratingBrief(false);
     setIsLoading(false);
+    setIsDownloading(false);
     setPreparedVideo(null);
     setSelectedPersonIds(people.map(group => group.id));
     if (isOpen) setError('Your prompt or people changed. Prepare Brainstorm again with the current selection.');
@@ -118,7 +122,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     isYouTubeConfigured().then((ok) => {
       if (configRequest.current === request) setConfigured(ok);
     });
-  }, [isOpen]);
+  }, [isOpen, configured]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -195,6 +199,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
     requestRef.current = null;
     setIsLoading(false);
     setIsGeneratingBrief(false);
+    setIsDownloading(false);
     setChannel(null);
     setVideos([]);
     setSelectedIds(new Set());
@@ -366,51 +371,59 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   );
 
   const handleConfirm = async () => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || requestRef.current) return;
+    const request = new AbortController();
+    requestRef.current = request;
 
     setIsDownloading(true);
     setDownloadProgress(0);
     setDownloadError(null);
 
-    // Preselected Top videos and retries can exceed the slots left in the draft.
-    const selected = videos.filter((v) => selectedIds.has(v.id)).slice(0, maxSelectable);
-    const results: ReferenceImage[] = [];
-    const failed: string[] = [];
-    let done = 0;
+    try {
+      // Preselected Top videos and retries can exceed the slots left in the draft.
+      const selected = videos.filter((v) => selectedIds.has(v.id)).slice(0, maxSelectable);
+      const results: ReferenceImage[] = [];
+      const failed: string[] = [];
+      let done = 0;
 
-    for (const video of selected) {
-      try {
-        const data = await downloadThumbnail(video.thumbnailUrl);
-        results.push({
-          id: Math.random().toString(36).substr(2, 9),
-          data,
-          mimeType: 'image/jpeg',
-          isThumbnailStyle: true,
-        });
-      } catch (err) {
-        console.warn(`Failed to download thumbnail for ${video.id}`, err);
-        failed.push(video.id);
+      for (const video of selected) {
+        try {
+          const data = await downloadThumbnail(video.thumbnailUrl, { signal: request.signal });
+          if (request.signal.aborted) return;
+          results.push({
+            id: Math.random().toString(36).substr(2, 9),
+            data,
+            mimeType: 'image/jpeg',
+            isThumbnailStyle: true,
+          });
+        } catch (err) {
+          if (request.signal.aborted) return;
+          console.warn(`Failed to download thumbnail for ${video.id}`, err);
+          failed.push(video.id);
+        }
+        done++;
+        setDownloadProgress(Math.round((done / selected.length) * 100));
       }
-      done++;
-      setDownloadProgress(Math.round((done / selected.length) * 100));
-    }
 
-    if (results.length > 0) {
-      onAddReferences(results);
-    }
+      if (results.length > 0) {
+        onAddReferences(results);
+      }
 
-    setIsDownloading(false);
-    if (failed.length > 0) {
-      // Keep the dialog open with only the failed videos selected, so they can be retried.
-      // Slots may have been used during the download: re-select only what still fits.
-      const retry = failed.slice(0, maxSelectableRef.current);
-      setSelectedIds(new Set(retry));
-      const summary = `${failed.length} of ${selected.length} thumbnail${selected.length !== 1 ? 's' : ''} could not be downloaded.`;
-      setDownloadError(retry.length ? `${summary} Try again.` : `${summary} No reference slots are free to retry.`);
-      return;
+      if (failed.length > 0) {
+        // Keep the dialog open with only the failed videos selected, so they can be retried.
+        // Slots may have been used during the download: re-select only what still fits.
+        const retry = failed.slice(0, maxSelectableRef.current);
+        setSelectedIds(new Set(retry));
+        const summary = `${failed.length} of ${selected.length} thumbnail${selected.length !== 1 ? 's' : ''} could not be downloaded.`;
+        setDownloadError(retry.length ? `${summary} Try again.` : `${summary} No reference slots are free to retry.`);
+        return;
+      }
+      setIsOpen(false);
+      reset();
+    } finally {
+      // Closing/reopening may already have started a different operation.
+      if (requestRef.current === request) { requestRef.current = null; setIsDownloading(false); }
     }
-    setIsOpen(false);
-    reset();
   };
 
   const maxSelectable = Math.max(0, Math.min(10, remainingSlots));
@@ -490,7 +503,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                         type="text"
                         value={inputUrl}
                         onChange={(e) => { reset(); setInputUrl(e.target.value); }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLookup()}
+                        onKeyDown={submitOnEnter(handleLookup)}
                         placeholder="@handle, channel URL, or video URL"
                         className="min-w-0 flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/30"
                       />
@@ -561,7 +574,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                             }}
                             className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs transition-colors ${selectedPersonIds.includes(group.id) ? 'border-violet-500/50 bg-violet-500/15 text-violet-200' : 'border-gray-700 text-gray-500'}`}>
                             {selectedPersonIds.includes(group.id) && <Check className="h-3 w-3 shrink-0" />}
-                            <span className="truncate">{group.label}</span><span className="text-[10px] opacity-60">{group.images.length} photos</span>
+                            <span className="truncate">{group.label}</span><span className="text-[10px] opacity-60">{getCountLabel(group.images.length, 'photo', 'photos')}</span>
                           </button>)}
                         </div> : <p className="mt-1 text-xs leading-relaxed text-gray-400">Add saved people or assign reference photos for consistent faces. You can also prepare ideas without selected people.</p>}
                       </div>
@@ -677,9 +690,9 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
 
                 {/* Video Grid */}
                 {!isLoading && videos.length > 0 && (() => {
-                  const query = browseSearch.toLowerCase().trim();
+                  const query = normalizeSearch(browseSearch);
                   const filteredVideos = query
-                    ? videos.filter((v) => v.title.toLowerCase().includes(query))
+                    ? videos.filter((v) => normalizeSearch(v.title).includes(query))
                     : videos;
 
                   return (
@@ -719,6 +732,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                               <button
                                 key={video.id}
                                 onClick={() => toggleVideoSelection(video.id)}
+                                aria-pressed={isSelected}
                                 disabled={isDisabled}
                                 className={`w-full flex items-center gap-2.5 p-1.5 rounded-lg transition-all text-left group ${
                                   isSelected

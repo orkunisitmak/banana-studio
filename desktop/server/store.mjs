@@ -35,6 +35,12 @@ const filter = (row, { column, operator, value }) => {
     default: throw new Error('Unsupported filter.');
   }
 };
+// Match the gallery's named-person facets, excluding non-identity reference roles.
+const searchPeople = references => [...new Set((Array.isArray(references) ? references : [])
+  .filter(ref => ref && !ref.isFirstFrame && !ref.isLastFrame && !ref.isDraftImage && !ref.isVideoContext
+    && ((Number.isInteger(ref.personId) && ref.personId > 0 && ref.personId <= 9999) || ref.isSubjectImage || ref.isSecondPerson))
+  .map(ref => typeof ref.personName === 'string' ? ref.personName.replace(/[\r\n\t]/g, ' ').trim().slice(0, 40) : '')
+  .filter(Boolean))];
 const project = (row, columns = '*') => {
   if (columns === '*') return row;
   if (typeof columns !== 'string' || columns.length > 4000) throw new Error('Invalid selection.');
@@ -78,7 +84,16 @@ export class LocalWorkspace {
   async upload(key,bytes,options={}) {
     const target=this.mediaPath(key);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
     if(fs.existsSync(target)&&!options.upsert)return fail('Media already exists.','23505');
-    const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});fs.renameSync(temp,target);
+    const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes,{mode:0o600,flag:'wx'});
+    // Windows cannot replace a file while another handle has it open (the gallery streaming it, an antivirus scan).
+    // Retry briefly, as those handles close, and never leave the temporary copy behind.
+    // Each check and rename runs without yielding, so an upload that created the file meanwhile is never overwritten.
+    const discard=()=>{try{fs.rmSync(temp,{force:true});}catch{/* The rename's own error matters more. */}};
+    for(let attempt=1;;attempt++) {
+      if(attempt>1&&!options.upsert&&fs.existsSync(target)){discard();return fail('Media already exists.','23505');}
+      try{fs.renameSync(temp,target);break;}
+      catch(error){if(attempt<10&&['EPERM','EACCES','EBUSY'].includes(error.code)){await new Promise(resolve=>setTimeout(resolve,attempt*50));continue;}discard();throw error;}
+    }
     return {data:{path:key},error:null};
   }
   storage() { return { upload:async(key,data,options)=>this.upload(key,Buffer.isBuffer(data)?data:Buffer.from(await data.arrayBuffer()),options),
@@ -121,7 +136,7 @@ export class LocalWorkspace {
       if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
       return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
     }
-    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:[...new Set((row.reference_images||[]).map(r=>r.personName).filter(Boolean))]}));
+    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');
     return this.workerRpc(name,args);
   }

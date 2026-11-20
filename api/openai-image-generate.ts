@@ -145,7 +145,12 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
       catch { throw new SavedImageError('A reference image could not be prepared. Attach it again. No image request was sent.'); }
     }
 
-    if (context.dispatch && !await context.dispatch(metadata)) {
+    let dispatched = true;
+    if (context.dispatch) {
+      try { dispatched = await context.dispatch(metadata); }
+      catch { throw new SavedImageError('The saved image job could not be marked as started. No provider request was sent. Try again.'); }
+    }
+    if (!dispatched) {
       await guard.finish('rejected');
       return res.status(409).json({ code:'IMAGE_CLAIM_LOST', error:'The saved worker claim is no longer active. No provider request was sent.' });
     }

@@ -17,7 +17,7 @@ const compiled = await build({entryPoints:['api/openai-image-generate.ts'],absWo
   }}]});
 const { executeOpenAIImage } = await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
-const generate = async referenceMissing => {
+const generate = async (referenceMissing, dispatch) => {
   const warn = console.warn; console.warn = () => {};
   process.env.OPENAI_API_KEY = 'synthetic'; globalThis.__referenceMissing = referenceMissing; globalThis.__providerCalls = 0;
   const outcomes = [];
@@ -26,7 +26,7 @@ const generate = async referenceMissing => {
   try {
     await executeOpenAIImage({ method: 'POST', headers: {}, body: { id: 'gen1', model: 'gpt-image-2.5-sunburst', provider: 'openai', prompt: 'a red apple',
       aspectRatio: '1:1', resolution: '1K', referenceImages: [{ id: 'r1', data: 'https://media.example/r1.png', mimeType: 'image/png' }] } },
-      res, { user: { id: 'u1' }, db, guard: { id: 'audit-1', async finish(outcome) { outcomes.push(outcome); } } });
+      res, { user: { id: 'u1' }, db, guard: { id: 'audit-1', async finish(outcome) { outcomes.push(outcome); } }, ...(dispatch ? { dispatch } : {}) });
   } finally { console.warn = warn; }
   return { ledger: outcomes[0], error: body?.error, providerCalls: globalThis.__providerCalls };
 };
@@ -42,4 +42,11 @@ test('a provider failure after dispatch is still recorded as failed', async () =
   const result = await generate(false);
   assert.equal(result.providerCalls, 1);
   assert.equal(result.ledger, 'failed');
+});
+
+test('a dispatch call that throws is not recorded as a provider request', async () => {
+  const result = await generate(false, async () => { throw new Error('dispatch_image_job timed out'); });
+  assert.equal(result.providerCalls, 0);
+  assert.equal(result.ledger, 'rejected');
+  assert.equal(result.error, 'The saved image job could not be marked as started. No provider request was sent. Try again.');
 });

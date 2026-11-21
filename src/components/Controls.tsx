@@ -38,6 +38,7 @@ import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
+import { useUnloadWarning } from '../lib/shared/unloadWarning';
 import { assignSeedanceFrames, getSeedanceFrameError } from '../lib/video/seedanceFrames';
 import { getYouTubeDraftKey, prepareYouTubeBrainstormDraft, type YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
 
@@ -431,6 +432,7 @@ export const Controls: React.FC<ControlsProps> = ({
     if (videoUploadDraft !== insertUploadDraftRef.current.token) return previous;
     return { draft: videoUploadDraft, count: update(previous?.draft === videoUploadDraft ? previous.count : 0) };
   });
+  useUnloadWarning(uploadingReferenceVideos > 0);
 
   useLayoutEffect(() => {
     const element = generationBarRef.current;

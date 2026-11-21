@@ -1701,7 +1701,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       // key is pinned at the click, synchronously, from the state the gallery
       // itself resets on a switch; no network lookup can race or fail here.
       const startedFor = galleryAccountRef.current;
-      const { files, failed } = await collectBatchDownload(ids, images);
+      const { files, failed } = await collectBatchDownload(ids, images, undefined, url => refreshMediaAccessUrl(url, false));
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
       // Grid records omit reference_images; the manifest needs the full row.

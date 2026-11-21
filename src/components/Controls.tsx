@@ -1,6 +1,7 @@
 import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
 import { submitOnEnter } from './submitOnEnter';
 import { getReferenceImageLimit } from '../lib/images/imageReferences';
+import { getMediaMimeType as getMimeType } from '../lib/references/mediaMimeType';
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
@@ -70,34 +71,6 @@ const isH3MetadataOnlyUpdate = (before: GenerationConfig, after: GenerationConfi
     return Object.keys({ ...oldReference, ...newReference }).filter(key => key !== 'width' && key !== 'height').every(key => oldReference[key] === newReference[key]);
   });
   return sameReferences(beforeImages, afterImages) && sameReferences(beforeVideos || [], afterVideos || []);
-};
-
-const getMimeType = (file: File | Blob, name?: string): string => {
-  if (file.type) return file.type;
-  if (name) {
-    const ext = name.split('.').pop()?.toLowerCase();
-    switch (ext) {
-        case 'png': return 'image/png';
-        case 'jpg': 
-        case 'jpeg': return 'image/jpeg';
-        case 'webp': return 'image/webp';
-        case 'heic': return 'image/heic';
-        case 'heif': return 'image/heif';
-        case 'mp4': return 'video/mp4';
-        case 'mov': return 'video/quicktime';
-        case 'webm': return 'video/webm';
-        case 'ogg':
-        case 'oga': return 'audio/ogg';
-        case 'aac': return 'audio/aac';
-        case 'm4a': return 'audio/mp4';
-        case 'mp3': return 'audio/mpeg';
-        case 'wav': return 'audio/wav';
-        case 'flac': return 'audio/flac';
-        case 'aif':
-        case 'aiff': return 'audio/aiff';
-    }
-  }
-  return 'application/octet-stream';
 };
 
 const readFileAsBase64 = (file: File | Blob): Promise<string> => {
@@ -856,8 +829,13 @@ export const Controls: React.FC<ControlsProps> = ({
   const processAudioFiles = async (files: File[], switchToVideo = false) => {
     const MAX_AUDIOS = maxReferenceAudios;
     const room = Math.max(0, MAX_AUDIOS - (config.referenceAudios?.length || 0));
-    if (files.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
-    const toAdd = files.slice(0, room);
+    const validFiles = files.filter(file => {
+      if (getMimeType(file, file.name).startsWith('audio/')) return true;
+      addAttachmentError(`${file.name || 'Audio'} must be an audio file.`);
+      return false;
+    });
+    if (validFiles.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
+    const toAdd = validFiles.slice(0, room);
     if (toAdd.length === 0) return;
     const newRefs = await Promise.all(toAdd.map(async file => {
       const url = URL.createObjectURL(file);
@@ -1495,8 +1473,8 @@ export const Controls: React.FC<ControlsProps> = ({
     // 1. Handle Desktop Files
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         const allFiles = Array.from(e.dataTransfer.files) as File[];
-        const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
-        const videoFiles = allFiles.filter(f => f.type.startsWith('video/') || (!f.type && /\.(mp4|mov|webm)$/i.test(f.name)));
+        const imageFiles = allFiles.filter(f => getMimeType(f, f.name).startsWith('image/'));
+        const videoFiles = allFiles.filter(f => getMimeType(f, f.name).startsWith('video/'));
         const audioFiles = allFiles.filter(f => f.type.startsWith('audio/')
           || (!f.type.startsWith('video/') && /\.(mp3|wav|m4a|aac|ogg|oga|flac|aif|aiff)$/i.test(f.name)));
 

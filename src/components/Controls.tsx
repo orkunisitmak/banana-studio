@@ -418,8 +418,20 @@ export const Controls: React.FC<ControlsProps> = ({
     field.scrollTop = 0;
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
-  const insertSourceUploadRef = useRef(false);
+  const insertSourceUploadRef = useRef<{ draft: object } | null>(null);
+  const insertDraftKeyFor = (draftConfig: GenerationConfig) => JSON.stringify([promptLoadVersion, draftConfig.mode, draftConfig.videoModel, draftConfig.videoOperation, draftConfig.h3MaxMode]);
+  const insertDraftKey = insertDraftKeyFor(config);
+  const insertUploadDraftRef = useRef({ key: insertDraftKey, token: {} });
+  const videoUploadDraft = insertUploadDraftRef.current.key === insertDraftKey ? insertUploadDraftRef.current.token : {};
+  // Discarded renders must not invalidate work belonging to the committed draft.
+  useLayoutEffect(() => { insertUploadDraftRef.current = { key: insertDraftKey, token: videoUploadDraft }; }, [insertDraftKey, videoUploadDraft]);
+  const [videoUploads, setVideoUploads] = useState<{ draft: object; count: number } | null>(null);
+  const uploadingReferenceVideos = videoUploads?.draft === videoUploadDraft ? videoUploads.count : 0;
+  const setUploadingReferenceVideos = (update: (count: number) => number) => setVideoUploads(previous => {
+    // Old completions must neither occupy nor release the current draft's slots.
+    if (videoUploadDraft !== insertUploadDraftRef.current.token) return previous;
+    return { draft: videoUploadDraft, count: update(previous?.draft === videoUploadDraft ? previous.count : 0) };
+  });
   useUnloadWarning(uploadingReferenceVideos > 0);
 
   useLayoutEffect(() => {
@@ -751,12 +763,13 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || videoUploadDraft !== insertUploadDraftRef.current.token) return;
     setAttachmentError(null);
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
+    const draft = videoUploadDraft;
     const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
     const needsSource = isInsert && !sourceId;
-    if (needsSource && insertSourceUploadRef.current) {
+    if (needsSource && insertSourceUploadRef.current?.draft === draft) {
       addAttachmentError('Wait for the Insert source video to finish uploading before adding more clips.');
       return;
     }
@@ -772,13 +785,15 @@ export const Controls: React.FC<ControlsProps> = ({
       files = files.filter(file => file.size <= 50 * 1024 * 1024);
       if (!files.length) return;
     }
-    if (needsSource) insertSourceUploadRef.current = true;
+    const sourceUpload = needsSource ? { draft: draft! } : null;
+    if (sourceUpload) insertSourceUploadRef.current = sourceUpload;
     setUploadingReferenceVideos(count => count + files.length);
     try {
       const results: PromiseSettledResult<ReferenceVideo>[] = [];
       if (needsSource) {
         // Supplemental clips must never become the source after its upload fails.
         const source = await Promise.allSettled([uploadReferenceVideo(files[0], isH3VideoConfig)]);
+        if (draft !== insertUploadDraftRef.current.token) return;
         if (source[0].status === 'rejected') {
           setAttachmentError(source[0].reason instanceof Error ? source[0].reason.message : 'Source video upload failed.');
           return;
@@ -786,6 +801,7 @@ export const Controls: React.FC<ControlsProps> = ({
         results.push(...source);
       }
       results.push(...await Promise.allSettled(files.slice(needsSource ? 1 : 0).map(file => uploadReferenceVideo(file, isH3VideoConfig))));
+      if (draft !== insertUploadDraftRef.current.token) return;
       const newRefs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failures = results.flatMap(result =>
         result.status === 'rejected'
@@ -799,17 +815,21 @@ export const Controls: React.FC<ControlsProps> = ({
         // even if another selection finished first. flushSync applies the update now,
         // so the warning reflects what it kept.
         flushSync(() => onChange(previous => {
-          if (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length)) {
+          if (draft !== insertUploadDraftRef.current.token || (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length))) {
             sourceChanged = true;
             return previous;
           }
           const kept = newRefs.slice(0, Math.max(0, attachLimitsRef.current.videos - (previous.referenceVideos?.length || 0)));
           dropped = newRefs.length - kept.length;
-          return {
+          const next = {
             ...previous,
             referenceVideos: [...(previous.referenceVideos || []), ...kept],
             ...(switchToVideo ? { mode: 'video' as const } : {}),
           };
+          // This drop's own switch to video mode is not a replacement draft: keep its
+          // token so the remaining phases of the same drop (audio, warnings) still run.
+          if (switchToVideo) insertUploadDraftRef.current = { key: insertDraftKeyFor(next), token: draft };
+          return next;
         }));
       }
       if (failures.length > 0) {
@@ -818,7 +838,7 @@ export const Controls: React.FC<ControlsProps> = ({
       if (sourceChanged) addAttachmentError('The Insert source video changed while uploading. Add the clips again for the current source.');
       if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} ${attachLimitsRef.current.videos === 1 ? 'video' : 'videos'} max.`);
     } finally {
-      if (needsSource) insertSourceUploadRef.current = false;
+      if (sourceUpload && insertSourceUploadRef.current === sourceUpload) insertSourceUploadRef.current = null;
       setUploadingReferenceVideos(count => Math.max(0, count - files.length));
     }
   };
@@ -840,10 +860,12 @@ export const Controls: React.FC<ControlsProps> = ({
     // A model switch can leave more inputs than the new limit; never slice with a negative end.
     const room = Math.max(0, MAX_VIDEOS - current);
     const picked = Array.from(e.target.files) as File[];
+    // Clear now, so the same file can be picked again even if this selection becomes obsolete.
+    if (videoInputRef.current) videoInputRef.current.value = '';
     await processVideoFiles(picked.slice(0, room));
+    if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
     // After processing (which clears earlier errors), keeping any upload error it reported.
     if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
-    if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
   const processAudioFiles = async (files: File[], switchToVideo = false) => {
@@ -975,6 +997,8 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleClearAll = () => {
+    insertUploadDraftRef.current = { ...insertUploadDraftRef.current, token: {} };
+    insertSourceUploadRef.current = null;
     if (config.prompt || config.referenceImages.length > 0 || config.personGroups?.length || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0) {
         setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions, clearedConfig: config }]);
         onChange({
@@ -1496,6 +1520,7 @@ export const Controls: React.FC<ControlsProps> = ({
             await processImageFiles(imageFiles);
         }
 
+        if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
         if (videoFiles.length > 0) {
             if (isH3VideoConfig && maxReferenceVideos === 0) {
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
@@ -1507,6 +1532,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 if (toAdd.length > 0) {
                     await processVideoFiles(toAdd, true);
                 }
+                if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
                 if (videoFiles.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
             }
         }

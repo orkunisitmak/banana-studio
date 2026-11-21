@@ -106,4 +106,14 @@ Görselleri doğal oranında aç. Tekerlek/pinch ile yakınlaştır, sürükleye
 
 Herkese açık klasör bağlantıları ve çok kullanıcılı yönetim web sürümüne aittir. Yerel Mac klasörleri için herkese açık bağlantı oluşturulmaz.
 
+## Aylık harcama limiti koy
+
+Bu ayın tahmini harcamasını **AI settings** içinde görürsün (takvim ayı, UTC). Masaüstü uygulamasında aylık bütçeyi buradan belirlersin; boş bırakırsan limit olmaz. Web sürümünde yöneticiler üyeler için varsayılanı **Workspace admin → Settings → Monthly spending** bölümünden ayarlar; bir hesaba ayrı limit verebilir ya da onu limitten muaf tutabilir. Yöneticiler, kendi hesaplarına limit koymadıkça varsayılandan etkilenmez.
+
+Limite ulaşıldığında yeni görsel, edit, video, Enhance ve Brainstorm istekleri *Spending Limit Reached* mesajıyla durur. Kabul edilmiş işler yine tamamlanır; bu yüzden son istek harcamayı limitin biraz üzerine çıkarabilir.
+
+Bazı üretimlerin maliyeti kaydedilmez; örneğin Nano Banana 2.1'in kuyruğu nihai token kullanımını döndürmez. Bu üretimler hiçbir zaman ücretsiz sayılmaz: limiti olan bir hesapta bu ay böyle bir kayıt varsa yeni ücretli istekler gelecek aya kadar ya da hesabın limiti kalkana kadar (yönetici hesabı muaf tutar ya da masaüstü uygulamasında bütçeyi boşaltırsın) durur. Limiti yükseltmek bu duraklamayı kaldırmaz.
+
+Limit, olağan kullanım için bir korumadır; kesin bir fatura tavanı değildir. Her ücretli istekten önce sunucuda denetlenir, ancak Banana Studio'nun kendi kullanım kayıtlarını toplar. OpenAI görsel, H3 ve metin isteklerinde bu kaydı sunucu yazar. fal.ai görsel, EvoLink, Seedance ve Gemini isteklerinde ise kaydı uygulama üretimden sonra yazar; değiştirilmiş bir istemci bu kaydı atlayabilir. Sağlayıcın ayrıca faturalandırır ve faturası bu tahminlerden farklı olabilir.
+
 Devam et: [Masaüstü](desktop.md) · [Anahtarlar](models.md) · [Web kurulumu](deploy.md) · [Geliştirme](development.md) · [Güvenlik](../../SECURITY.md)

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createServiceRoleClient, type AuthenticatedUser } from './auth.js';
+import { requireSpendingAllowance } from './spendingLimit.js';
 
 // JWT identity has already been verified by requireUser. The database checks
 // that its session still exists and belongs to that same user before spending.
@@ -38,6 +39,10 @@ async function admitRequest(req: VercelRequest, res: VercelResponse, user: Authe
     res.status(401).json({ error: 'Refresh your session before generating.' });
     return null;
   }
+  // Every paid request passes this admission, so the monthly spending limit
+  // is checked here once, before the ledger and before any provider call.
+  // Recovery of already accepted work does not admit and stays available.
+  if (!await requireSpendingAllowance(req, res)) return null;
   const db = createServiceRoleClient();
   if (!db) {
     res.status(503).json({ error: `${provider} request protection is unavailable. No provider request was sent.` });

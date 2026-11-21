@@ -106,4 +106,14 @@ Use multi-select to move or download work together, change the grid density and 
 
 Public folder links and multi-user administration belong to the hosted web workspace. Local Mac folders do not get public URLs.
 
+## Set a monthly spending limit
+
+Open **AI settings** to see this month's estimated spend (calendar month, UTC). On the desktop app you can set a monthly budget there; leave it empty for no limit. In a hosted workspace, admins set a default for members under **Workspace admin → Settings → Monthly spending**, and can give an account its own limit or exempt it. Admins are not limited by the default unless they set a limit for their own account.
+
+When the limit is reached, new generations, edits, videos, Enhance and Brainstorm requests stop with a *Spending Limit Reached* message. Jobs that were already accepted still finish, so the last request can take spend slightly past the limit.
+
+Some generations have no recorded cost, for example Nano Banana 2.1, whose queue returns no final token usage. These are never counted as free: while an account with a limit has one this month, new paid requests are paused until next month or until the account no longer has a limit (an admin exempts it, or on the desktop app you clear the budget). Raising the limit does not lift this pause.
+
+The limit is a guardrail for normal use, not a hard billing cap. It is checked on the server before every paid request, but it adds up Banana Studio's own usage records. For OpenAI image, H3 and text requests the server writes that record. For fal.ai images, EvoLink, Seedance and Gemini the app writes it after the generation, so a modified client could leave it out. Your provider bills separately, and its invoice can differ from these estimates.
+
 Next: [Desktop](desktop.md) · [Keys](models.md) · [Web deployment](deploy.md) · [Development](development.md) · [Security](../../SECURITY.md)

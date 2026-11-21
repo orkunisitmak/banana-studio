@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { getWorkspace, LOCAL_AUTH } from './context.mjs';
+import { requireSpendingAllowance } from '../../api/_lib/spendingLimit.ts';
 export { openAIErrorMessage } from '../../api/_lib/openaiError.ts';
 export const getOpenAISessionId = req => req[LOCAL_AUTH] ? getWorkspace().identity.sessionId : null;
 export const startPaidRequest=(req,res,user,kind)=>startOpenAIRequest(req,res,user,kind);
 export async function startOpenAIRequest(req,res,user,kind,generationId) {
   if(!req[LOCAL_AUTH]){res.status(401).json({error:'Native session required.'});return null;}
+  // Same admission point as the hosted guard: the monthly budget is checked before any provider call.
+  if(!await requireSpendingAllowance(req,res))return null;
   const id=randomUUID(),store=getWorkspace();
   const result=store.workerRpc('start_openai_request',{p_id:id,p_generation_id:generationId,p_kind:kind});
   if(!result.allowed){res.status(409).json({code:'GENERATION_EXISTS',error:'This generation already has a saved request. Recover it instead of generating again.'});return null;}

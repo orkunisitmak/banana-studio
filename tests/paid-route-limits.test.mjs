@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // Real routes and the real admission guard over a fake ledger. Only auth, the
 // task registry, usage records and the provider's HTTP endpoint are faked.
 const stubs = {
-  auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({});
+  auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({rpc:async name=>globalThis.__spending(name)});
 export const createServiceRoleClient=()=>process.env.SUPABASE_SERVICE_ROLE_KEY?{rpc:(name,args)=>({abortSignal:async()=>globalThis.__ledger(name,args)})}:null;`,
   providerTasks: `export const prepareTaskRegistry=async()=>globalThis.__registry;export const registerProviderTask=async()=>{};export const requireProviderTask=async()=>true;export const isGenerationId=v=>typeof v==="string"&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(v);export const requireSavedVideo=async()=>true;export const saveGenerationTask=async()=>true;`,
   h3Usage: 'export const recordH3Usage=async()=>{};',
@@ -48,8 +48,9 @@ const accepted = () => new Response(JSON.stringify({ request_id: 'r1', id: 't1',
 const refused = () => new Response(JSON.stringify({ error: { message: 'no' } }), { status: 400, headers: { 'content-type': 'application/json' } });
 
 // Sends one POST and reports the response, the provider calls and the ledger calls.
-const post = async (route, { allowed = true, reason = 'daily', provider = accepted, headers = { authorization: `Bearer ${token}` }, env = {}, registry = {} } = {}) => {
+const post = async (route, { allowed = true, reason = 'daily', provider = accepted, headers = { authorization: `Bearer ${token}` }, env = {}, registry = {}, spending = { blocked: false, spentUsd: 0, limitUsd: null } } = {}) => {
   const ledger = [];
+  globalThis.__spending = name => { ledger.push({ name }); return { data: spending, error: null }; };
   globalThis.__registry = registry;
   globalThis.__ledger = (name, args) => {
     ledger.push({ name, ...args });
@@ -81,6 +82,14 @@ for (const route of ROUTES) {
       assert.equal(started.length, 1);
       assert.equal(finished.length, 0);
     }
+  });
+
+  test(`${route.name}: a reached monthly spending limit stops the request before the ledger and the provider`, async () => {
+    const { res, calls, started } = await post(route, { spending: { blocked: true, spentUsd: 12, limitUsd: 10, unknownCostRequests: 0 } });
+    assert.equal(res.statusCode, 402);
+    assert.equal(res.body.code, 'SPENDING_LIMIT');
+    assert.equal(calls.length, 0);
+    assert.equal(started.length, 0);
   });
 
   test(`${route.name}: a request under the limit is admitted once, sent once and settled`, async () => {

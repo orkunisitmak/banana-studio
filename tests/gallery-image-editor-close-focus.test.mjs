@@ -10,7 +10,7 @@ const react = `const R=()=>globalThis.__renderer;export const useState=v=>R().us
 const stubs = {
   react,
   'jsx-runtime': 'export const jsx=(type,props)=>({type,props}),jsxs=jsx,Fragment="Fragment";',
-  'lucide-react': 'const i="i";export const AlertTriangle=i,ArrowRight=i,Check=i,Image=i,ImagePlus=i,Loader2=i,Pencil=i,RotateCcw=i,Sparkles=i,Wand2=i,X=i;',
+  'lucide-react': 'const i="i";export const AlertTriangle=i,ArrowRight=i,Check=i,Expand=i,Image=i,ImagePlus=i,Loader2=i,Pencil=i,RotateCcw=i,Sparkles=i,SquareDashedMousePointer=i,Wand2=i,X=i;',
   ProviderRoutingSettings: 'export const ProviderRouteControl=()=>null,useProviderRoute=()=>({error:null,provider:"openai"});',
   GalleryEditResults: 'export const GalleryEditResults=()=>null;',
   ImageEditCanvas: 'export const ImageEditCanvas=()=>null;',

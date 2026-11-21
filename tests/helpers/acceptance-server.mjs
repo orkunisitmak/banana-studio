@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {randomBytes} from 'node:crypto';
+import {LocalWorkspace} from '../../desktop/server/store.mjs';
+import {startLocalServer} from '../../desktop/server/http.mjs';
+const [root,directory]=process.argv.slice(2);
+if(!path.resolve(root).startsWith(path.resolve('.build')+path.sep)||!fs.existsSync(path.join(directory,'.synthetic-acceptance')))throw new Error('Synthetic acceptance paths required');
+const workspace=new LocalWorkspace(directory),bootstrap=randomBytes(32).toString('hex');
+const http=await startLocalServer({workspace,root,bootstrap,routes:{'gemini-status':async(_q,r)=>r.json({providers:{gemini:false,openai:false,openrouter:false,fal:false,evolink:false}}),'provider-usage':async(_q,r)=>r.status(503).json({error:'Synthetic fixture: no provider account'})}});
+const port=new URL(http.origin).port;
+process.send?.({ready:true,origin:http.origin,bootstrap});
+process.on('message',async message=>{try{if(message.action==='offline')await http.close();if(message.action==='online')await new Promise((resolve,reject)=>{http.server.once('error',reject);http.server.listen(Number(port),'127.0.0.1',resolve);});process.send?.({ack:message.action});}catch{process.send?.({error:'Synthetic server control failed'});}});
+let closing=false;process.on('SIGTERM',async()=>{if(closing)return;closing=true;try{await http.close();}catch{}workspace.close();process.exit(0);});

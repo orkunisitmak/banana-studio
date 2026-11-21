@@ -63,6 +63,10 @@ export const buildYoutubeRequestUrl = (endpoint: string, apiKey: string, params?
   return url;
 };
 
+// Google words some errors with HTML (quotaExceeded links to "quota"); the dialog shows the text as is.
+export const plainYoutubeMessage = (message: unknown): string =>
+  typeof message === 'string' ? message.replace(/<[^>]*>/g, '').trim() : '';
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -109,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!response.ok || data?.error) {
-      const message = data?.error?.message || `YouTube API error (${response.status})`;
+      const message = plainYoutubeMessage(data?.error?.message) || `YouTube API error (${response.status})`;
       return res.status(response.status || 502).json({ error: message });
     }
 

@@ -8,6 +8,9 @@ using System.Text.RegularExpressions;
 
 namespace BananaStudio;
 
+// The install folder could not be moved aside, so nothing was changed.
+internal sealed class InstallUnchangedException(Exception inner) : IOException("The application folder could not be replaced.", inner);
+
 // The rollback itself failed. The previous install is intact at Backup, outside the app folder.
 internal sealed class RollbackFailedException(string backup, Exception inner) : IOException("The previous version could not be restored.", inner)
 {
@@ -93,16 +96,33 @@ internal static partial class Updater
         using var response = await Http.GetAsync(FeedUrl, HttpCompletionOption.ResponseHeadersRead, cancel);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > MaxManifestBytes) throw new InvalidDataException("The update information is too large.");
-        var update = JsonSerializer.Deserialize<WindowsUpdate>(await response.Content.ReadAsStringAsync(cancel), JsonOptions);
+        await using var body = await response.Content.ReadAsStreamAsync(cancel);
+        var update = JsonSerializer.Deserialize<WindowsUpdate>(await ReadLimited(body, MaxManifestBytes, cancel), JsonOptions);
         var problem = Problem(update, publicKey);
         if (problem != null) throw new InvalidDataException(problem);
         return IsNewer(update!.Version, currentVersion) ? update : null;
+    }
+
+    // A response without Content-Length passes the header check, so the bytes read are limited too.
+    internal static async Task<byte[]> ReadLimited(Stream source, int limit, CancellationToken cancel)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancel)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+            if (buffer.Length > limit) throw new InvalidDataException("The update information is too large.");
+        }
+        return buffer.ToArray();
     }
 
     internal static async Task<string> Prepare(WindowsUpdate update, string publicKey, CancellationToken cancel)
     {
         var problem = Problem(update, publicKey);
         if (problem != null) throw new InvalidDataException(problem);
+        if (InstallOverlapsData(AppContext.BaseDirectory, WorkspaceProcess.DataDirectory))
+            throw new IOException("Banana Studio is installed inside its own data folder, so it cannot replace itself. Move the app folder somewhere else, such as your Documents folder, or download the update manually.");
         RequireWritableInstall(AppContext.BaseDirectory);
         var stage = Path.Combine(UpdatesDirectory, Guid.NewGuid().ToString("N"));
         stageInProgress = stage;
@@ -196,6 +216,13 @@ internal static partial class Updater
             }
             return ok ? 0 : 1;
         }
+        catch (InstallUnchangedException error)
+        {
+            MessageBox.Show("The update could not be installed because a file in the app folder is in use. Nothing was changed, and Banana Studio will now reopen.\n\n" + error.InnerException?.Message, "Banana Studio");
+            try { Process.Start(new ProcessStartInfo(Path.Combine(target, ExecutableName)) { UseShellExecute = false, WorkingDirectory = target })?.Dispose(); }
+            catch (Exception launch) when (launch is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+            return 1;
+        }
         catch (RollbackFailedException error)
         {
             MessageBox.Show($"The update could not start, and the previous version could not be put back in its folder. It is safe here:\n{error.Backup}\n\nBanana Studio will now open from there. Your gallery was not changed.\n\nTo tidy up later, quit Banana Studio, delete this folder if it is still there:\n{target}\nand rename the safe copy to that name.", "Banana Studio");
@@ -220,7 +247,8 @@ internal static partial class Updater
         move ??= MoveWithRetry;
         var parent = Path.GetDirectoryName(target) ?? throw new IOException("The application folder is not expected.");
         var backup = Path.Combine(parent, Path.GetFileName(target) + ".previous-" + Guid.NewGuid().ToString("N"));
-        move(target, backup);
+        try { move(target, backup); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { throw new InstallUnchangedException(error); }
         Action stop = () => { };
         try
         {
@@ -266,6 +294,15 @@ internal static partial class Updater
     {
         var parent = Path.GetDirectoryName(Path.GetFullPath(stage));
         return string.Equals(parent, Path.GetFullPath(UpdatesDirectory), StringComparison.OrdinalIgnoreCase) && Guid.TryParseExact(Path.GetFileName(stage), "N", out _);
+    }
+
+    // The swap moves the whole install folder, which cannot hold the gallery or the update stage.
+    internal static bool InstallOverlapsData(string install, string data)
+    {
+        static string Full(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)) + Path.DirectorySeparatorChar;
+        var a = Full(install);
+        var b = Full(data);
+        return a.StartsWith(b, StringComparison.OrdinalIgnoreCase) || b.StartsWith(a, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void RequireWritableInstall(string install)
@@ -347,6 +384,18 @@ internal static partial class Updater
         Require(Problem(Signed(url: "https://example.com/Banana-Studio-9.9.9-windows-x64.zip"), publicKey) != null, "signed wrong address");
         Require(Problem(Signed(size: 0), publicKey) != null, "signed zero size");
         using (var other = ECDsa.Create(ECCurve.NamedCurves.nistP256)) Require(Problem(valid, Convert.ToBase64String(other.ExportSubjectPublicKeyInfo())) != null, "other key");
+        static byte[] Read(int size, int limit)
+        {
+            using var stream = new MemoryStream(new byte[size]);
+            return ReadLimited(stream, limit, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        Require(Read(100, 100).Length == 100, "manifest at the limit");
+        var tooLarge = false;
+        try { Read(101, 100); } catch (InvalidDataException) { tooLarge = true; }
+        Require(tooLarge, "manifest over the limit without a length header");
+        var data = Path.Combine(Path.GetTempPath(), "Data", "Banana Studio");
+        Require(InstallOverlapsData(data, data) && InstallOverlapsData(Path.Combine(data, "app"), data) && InstallOverlapsData(Path.GetDirectoryName(data)!, data), "install overlapping the data folder");
+        Require(!InstallOverlapsData(Path.Combine(Path.GetTempPath(), "Apps", "Banana Studio"), data) && !InstallOverlapsData(data + " 2", data), "separate install folder");
         Require(IsNewer("0.2.0", "0.1.8") && IsNewer("0.1.10", "0.1.9"), "newer");
         Require(!IsNewer("0.1.8", "0.1.8") && !IsNewer("0.1.7", "0.1.8") && !IsNewer("x", "0.1.8") && !IsNewer("0.2.0-beta", "0.1.8"), "not newer");
 
@@ -423,6 +472,14 @@ internal static partial class Updater
             RollbackFails("moveBack", null, (source, destination) => { if (++moves == 2) throw new IOException("locked"); Directory.Move(source, destination); });
             Require(!Directory.Exists(Path.Combine(directory, "moveBack")), "moveBack left no partial install");
             RollbackFails("deleteNew", _ => throw new UnauthorizedAccessException("locked"), null);
+
+            // The install folder cannot be moved aside at all: nothing changes and no new copy is started.
+            var locked = Install("locked", "old");
+            var launched = false;
+            var unchanged = false;
+            try { Apply(locked, Install("lockedNew", "new"), () => { launched = true; return () => { }; }, () => true, TimeSpan.FromSeconds(5), null, (_, _) => throw new IOException("in use")); }
+            catch (InstallUnchangedException) { unchanged = true; }
+            Require(unchanged && !launched && Marker(locked) == "old" && !Backups("locked"), "first move fails, install unchanged");
             Require(Marker(Path.Combine(directory, "deleteNew")) == "new", "deleteNew kept the new copy in place");
         }
         finally { TryDeleteDirectory(directory); }

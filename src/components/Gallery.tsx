@@ -765,6 +765,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => { setIsYouTubePreviewOpen(false); }, [galleryOwner?.user_id, userProfile?.id]);
   const [searchRevealId, setSearchRevealId] = useState<string | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
 
   // Pagination State
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
@@ -819,6 +820,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const createFolderDialogRef = useRef<HTMLDivElement>(null);
+  const createFolderOpenerRef = useRef<HTMLElement | null>(null);
 
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -829,6 +831,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
+  const moveButtonRef = useRef<HTMLButtonElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
   const [preparedPhotos, setPreparedPhotos] = useState<File[] | null>(null);
   const [isPreparingPhotos, setIsPreparingPhotos] = useState(false);
@@ -970,9 +973,18 @@ export const Gallery: React.FC<GalleryProps> = ({
         setMoveMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (!moveMenuOpen || isCreatingFolder || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setMoveMenuOpen(false);
+      moveButtonRef.current?.focus();
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen]);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen, isCreatingFolder]);
 
   // --- Derived State ---
   const currentFolder = folders.find(f => f.id === currentFolderId);
@@ -1157,6 +1169,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     const handleModalKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isSavingFolder) {
         setIsCreatingFolder(false);
+        createFolderOpenerRef.current?.focus({ preventScroll: true });
         setNewFolderName("");
         setFolderCreateError(null);
         return;
@@ -1381,7 +1394,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // --- Actions ---
 
-  const openCreateFolderModal = () => {
+  const openCreateFolderModal = (event: React.MouseEvent<HTMLElement>) => {
     if (isReadOnly) return;
     setNewFolderName("");
     setFolderCreateError(null);
@@ -1389,12 +1402,15 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsNotificationPanelOpen(false);
     setIsGridMenuOpen(false);
     setIsUserMenuOpen(false);
+    // The button itself: Safari does not focus a clicked button, so document.activeElement could be elsewhere.
+    createFolderOpenerRef.current = event.currentTarget;
     setIsCreatingFolder(true);
   };
 
   const closeCreateFolderModal = () => {
     if (isSavingFolder) return;
     setIsCreatingFolder(false);
+    createFolderOpenerRef.current?.focus({ preventScroll: true });
     setNewFolderName("");
     setFolderCreateError(null);
   };
@@ -1416,6 +1432,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       setFolders(prev => [newFolder, ...prev]);
       setNewFolderName("");
       setIsCreatingFolder(false);
+      createFolderOpenerRef.current?.focus({ preventScroll: true });
     } catch (error: any) {
       setFolderCreateError(error?.message || 'The folder could not be created. Please try again.');
     } finally {
@@ -1904,7 +1921,10 @@ export const Gallery: React.FC<GalleryProps> = ({
   const searchDialog = isSearchOpen && <GallerySearchDialog images={images} folders={folders} ownerId={galleryOwner?.user_id} isLoading={isGalleryIndexLoading || isFoldersLoading} loadError={galleryLoadError || folderLoadError} onClose={closeSearch} onSelect={selectSearchResult} />;
   if (isEmpty && !currentFolderId && !showFavoritesOnly) {
     return (
-      <div className="relative flex-1 flex min-h-screen flex-col bg-[#0d1117] text-gray-600">
+      <div
+        className="relative flex-1 flex min-h-screen flex-col overflow-y-auto custom-scrollbar bg-[#0d1117] text-gray-600"
+        style={isReadOnly ? undefined : { paddingBottom: 'var(--generation-bar-safe-area, 16rem)' }}
+      >
         {searchDialog}
         {adminGalleryBanner}
         <button ref={searchButtonRef} onClick={openSearch} aria-label="Search gallery" aria-haspopup="dialog" aria-expanded={isSearchOpen} title="Search gallery (⌘K / Ctrl+K or /)" className="mr-4 mt-4 flex h-10 shrink-0 items-center gap-2 self-end rounded-xl border border-white/10 bg-[#161b22] px-3 text-sm text-gray-300 hover:text-white"><Search className="h-4 w-4" />Search</button>
@@ -2008,7 +2028,10 @@ export const Gallery: React.FC<GalleryProps> = ({
         <div
           className="fixed inset-0 z-[310] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeCreateFolderModal();
+            if (event.target !== event.currentTarget) return;
+            // Without this the browser moves focus to the body after the handler, undoing the focus return.
+            event.preventDefault();
+            closeCreateFolderModal();
           }}
         >
           <div
@@ -2543,6 +2566,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               {!isReadOnly && <>
               <div ref={moveMenuRef} className="relative">
                 <button
+                  ref={moveButtonRef}
                   onClick={() => setMoveMenuOpen(!moveMenuOpen)}
                   disabled={isMoving}
                   onDragOver={(e) => {
@@ -3126,7 +3150,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             onClick={() => setSelectedMediaId(null)}
           >
             <div data-gallery-viewer-toolbar className={`${isEditingSelectedMedia ? 'mb-3 flex w-full shrink-0 justify-end' : 'absolute right-4 top-4 z-50 flex'} items-center gap-2`}>
-              <button type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
+              <button ref={detailsToggleRef} type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
                 onClick={event => { event.stopPropagation(); setIsDetailsVisible(visible => !visible); }}
                 className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 text-xs font-medium text-gray-200 backdrop-blur-sm transition-colors hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/50">
                 {isDetailsVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}Details
@@ -3205,7 +3229,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
               <LazyDialogErrorBoundary inline>
                 <React.Suspense fallback={<div role="status" className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading edit controls…</div>}>
-                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => { if (!isDetailsVisible) detailsToggleRef.current?.focus({ preventScroll: true }); setEditingMediaId(null); }} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
                 </React.Suspense>
               </LazyDialogErrorBoundary>
             </div>}

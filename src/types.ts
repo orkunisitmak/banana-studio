@@ -93,7 +93,7 @@ export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; descriptio
   {
     label: 'Claude Opus 5.5',
     value: 'anthropic/claude-opus-5.5',
-    description: 'Default via OpenRouter. Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
+    description: 'Direct via Anthropic or through OpenRouter. Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
   },
   {
     label: 'Gemini 3.8 Flash',
@@ -159,7 +159,9 @@ export interface ReferenceImage {
   /** Approved base of a local image edit; other attachments are donors. */
   isEditSource?: boolean;
   /** Normalized selection envelope. Layers form a union; gaps stay original. */
-  editRegion?: { x: number; y: number; width: number; height: number; points?: { x: number; y: number }[]; layers?: ImageEditLayer[] };
+  editRegion?: { x: number; y: number; width: number; height: number; points?: { x: number; y: number }[]; layers?: ImageEditLayer[];
+    /** Outpaint: the areas are new canvas around the original, which may reach the canvas edges. */
+    expandsCanvas?: boolean };
   /** Original video thumbnail: episode context, not a layout to copy. */
   isVideoContext?: boolean;
   /** Example cover chosen for thumbnail design language, not episode facts or identity. */
@@ -615,6 +617,8 @@ export interface GeneratedMedia {
   taskId?: string;
   status?: 'pending' | 'processing' | 'completed' | 'failed';
   // UI state
+  /** The provider task ID is known to this tab only; a reload could not resume it. */
+  taskIdUnsaved?: boolean;
   isLoading?: boolean;
   videoProgress?: number;
   videoStage?: 'generating' | 'saving';

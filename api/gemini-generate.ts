@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startPaidRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 
 interface GeminiGenerateRequest {
@@ -30,6 +31,16 @@ const ALLOWED_CONFIG_KEYS = new Set([
 // behaviour without changing any of the brainstorm logic.
 export const config = {
   maxDuration: 300,
+};
+
+// @google/genai puts the whole JSON response body in ApiError.message; show only the provider's sentence.
+export const geminiErrorMessage = (raw: unknown): string => {
+  const text = String(raw || 'Gemini request failed');
+  try {
+    const inner = JSON.parse(text)?.error?.message;
+    if (typeof inner === 'string' && inner.trim()) return inner.trim();
+  } catch { /* not a JSON body */ }
+  return text;
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -76,6 +87,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     safeConfig[key] = value;
   }
 
+  const guard = await startPaidRequest(req, res, user, model === 'gemini-3.8-flash' ? 'text' : 'image', 'Gemini');
+  if (!guard) return;
+
   const startedAt = Date.now();
   const provider = createTaskDeadline(250_000, undefined, 'Gemini yanıt süresi aşıldı. İstek otomatik olarak tekrarlanmadı. Yeniden deneyebilirsin.');
   // Negotiate the same status/result protocol as the text proxy. Heartbeats
@@ -110,6 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model, contents,
       config: { ...safeConfig, abortSignal: provider.signal, httpOptions: { timeout: 250_000 } },
     } as any), provider.signal);
+    await guard.finish('completed');
 
     // Surfaced in `vercel logs` so we can see how long each Gemini call took
     // — handy when a brainstorm timeout strikes again.
@@ -133,11 +148,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     return res.status(200).json(result);
   } catch (error: any) {
+    await guard.finish('failed', null, typeof error?.status === 'number' ? error.status : undefined);
     if (disconnected) {
       console.info(`[gemini-generate] model=${model} kind=${kind} stage=cancelled ms=${Date.now() - startedAt}`);
       return;
     }
-    const message = String(error?.message || 'Gemini request failed').replaceAll(apiKey, '[redacted]');
+    const message = geminiErrorMessage(error?.message).replaceAll(apiKey, '[redacted]');
     const status = error?.name === 'TimeoutError' ? 504 : typeof error?.status === 'number' ? error.status : 500;
     console.error(
       `Gemini proxy error: model=${model} kind=${kind} ms=${Date.now() - startedAt} msg=${message}`,

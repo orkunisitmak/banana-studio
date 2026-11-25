@@ -25,9 +25,21 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
     if (counts[0] > 9) return 'Use up to 9 image references with this OpenRouter route.';
   }
 }
-const referencePrompt = (prompt = '') => prompt.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
+// This module is loaded by Node as .ts (tests) and compiled for api/, and no one import specifier resolves in both.
+// So it has no runtime imports: the pattern below is a copy of getQuotedPromptPattern in ../references/referenceTokens.ts.
+const quotedPromptPattern = (): RegExp => /"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{M}\p{N}_])'(?:[^'\n]|(?<=[\p{L}\p{M}\p{N}_])'(?=[\p{L}\p{M}\p{N}_]))*'(?![\p{L}\p{M}\p{N}_])/gu;
+const referenceAliases = (text: string) => text.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
+// Quoted visible copy is literal, even when it looks like a reference.
+const referencePrompt = (prompt = '') => {
+  let end = 0, result = '';
+  for (const match of prompt.matchAll(quotedPromptPattern())) {
+    result += referenceAliases(prompt.slice(end, match.index)) + match[0];
+    end = match.index! + match[0].length;
+  }
+  return result + referenceAliases(prompt.slice(end));
+};
 export function falSeedanceInput(body: SeedanceRequest) {
-  const prompt = (body.prompt || '').replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
+  const prompt = referencePrompt(body.prompt);
   const input: Record<string, unknown> = { prompt, resolution: body.quality, duration: body.duration === -1 ? 'auto' : String(body.duration),
     aspect_ratio: body.aspectRatio === 'adaptive' || body.mode === 'image_to_video' && body.videoModel === 'seedance-2.5' ? 'auto' : body.aspectRatio, generate_audio: body.generateAudio !== false };
   if (body.mode === 'image_to_video') { input.image_url = body.imageUrls?.[0]; if (body.imageUrls?.[1]) input.end_image_url = body.imageUrls[1]; }

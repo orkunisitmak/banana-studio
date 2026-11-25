@@ -87,6 +87,11 @@ export const getRecordedImageEditDetails = (
   };
 };
 
+/** Canvas expansions produce a larger canvas than their source, so a
+ * source/result overlay would misalign. */
+export const isCanvasExpansionEdit = (details: RecordedImageEditDetails | undefined): boolean =>
+  details?.region?.expandsCanvas === true || details?.sourceReference?.editRegion?.expandsCanvas === true;
+
 export const getRecordedGenerationTime = (media: GeneratedMedia): string | undefined => {
   let seconds = media.generationTime;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {

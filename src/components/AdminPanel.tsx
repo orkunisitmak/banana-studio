@@ -115,6 +115,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
   }, [isOpen, activeTab, usageRange, refreshVersion]);
 
   const handleAddEmail = async () => {
+    if (isAddingEmail) return;
     const email = newEmail.toLowerCase().trim();
     if (!email || !email.includes('@')) return;
     if (authorizedEmails.some(e => e.email === email)) {

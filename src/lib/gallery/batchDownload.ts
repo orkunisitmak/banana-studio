@@ -1,17 +1,27 @@
 import type { GeneratedMedia } from '../../types';
+import { createTaskDeadline, waitForTask } from '../shared/asyncTask';
 import { readMediaDownloadBlob } from './mediaDownload';
 
 export interface BatchDownloadFile { name: string; blob: Blob }
 
 /** Fetch every selected item on its own, so one failed download no longer
- * cancels the whole ZIP. Items missing from the loaded list count as failed. */
+ * cancels the whole ZIP. Items missing from the loaded list count as failed.
+ * Image URLs are signed for a limited time, so renew them first, as single
+ * downloads do; keep the loaded URL if renewal fails or takes too long, so a
+ * renewal that never answers cannot hold up the whole ZIP. */
 export const collectBatchDownload = async (
   ids: string[], media: Pick<GeneratedMedia, 'id' | 'url' | 'mediaType'>[], fetcher: typeof fetch = fetch,
+  refreshUrl: (url: string) => Promise<string> = async url => url, renewTimeoutMs = 10_000,
 ): Promise<{ files: BatchDownloadFile[]; failed: number }> => {
   const results = await Promise.allSettled(ids.map(async id => {
     const item = media.find(entry => entry.id === id);
     if (!item?.url) throw new Error('This item is not available.');
-    const response = await fetcher(item.url);
+    let url = item.url;
+    if (item.mediaType !== 'video') {
+      const renewal = createTaskDeadline(renewTimeoutMs);
+      try { url = await waitForTask(refreshUrl(item.url), renewal.signal); } catch { /* keep the loaded URL */ } finally { renewal.dispose(); }
+    }
+    const response = await fetcher(url);
     // An error page must never be saved as the media file, even with HTTP 200.
     const blob = await readMediaDownloadBlob(response);
     const ext = item.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';

@@ -71,6 +71,15 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                       <AlertCircle className="w-4 h-4 text-red-400" />
                       Failed
                     </span>
+                  ) : img.mediaType === 'video' && !img.thumbnailUrl ? (
+                    <video
+                      src={`${img.url}#t=0.1`}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      aria-label="Video thumbnail"
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <img 
                       src={img.thumbnailUrl || img.url} 
@@ -102,7 +111,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
               
               <button
                 onClick={() => onSelect(img)}
-                className="w-full py-1.5 flex items-center justify-center gap-2 bg-gray-700 hover:bg-violet-600 text-xs font-medium text-white rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                className="w-full py-1.5 flex items-center justify-center gap-2 bg-gray-700 hover:bg-violet-600 text-xs font-medium text-white rounded-lg transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
               >
                 <RotateCcw className="w-3 h-3" /> Use Settings
               </button>

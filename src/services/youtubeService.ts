@@ -314,7 +314,7 @@ const fetchVideoDetails = async (ids: string[]): Promise<YouTubeVideo[]> => {
 
 /**
  * Top performing long-form videos from the last 365 days, sorted by views.
- * Uses ~9 API quota units (channels already resolved by caller).
+ * Reads uploads back to the one-year cutoff, 2 API quota units per 50 uploads (channels already resolved by caller).
  */
 export const getTopPerformingVideos = async (
   uploadsPlaylistId: string,
@@ -323,17 +323,19 @@ export const getTopPerformingVideos = async (
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 1);
 
-  let allIds: string[] = [];
+  const videos: YouTubeVideo[] = [];
   let token: string | undefined;
+  const MAX_PAGES = 40;
 
-  for (let page = 0; page < 4 && allIds.length < 200; page++) {
+  // The uploads playlist is newest first, so stop at the first page that reaches past the cutoff.
+  for (let page = 0; page < MAX_PAGES; page++) {
     const { videoIds, nextPageToken } = await fetchPlaylistPage(uploadsPlaylistId, 50, token);
-    allIds.push(...videoIds);
+    if (videoIds.length === 0) break;
+    const details = await fetchVideoDetails(videoIds);
+    videos.push(...details);
     token = nextPageToken;
-    if (!token) break;
+    if (!token || details.some((v) => new Date(v.publishedAt) < cutoff)) break;
   }
-
-  const videos = await fetchVideoDetails(allIds);
 
   return videos
     .filter((v) => v.durationSeconds > 240 && new Date(v.publishedAt) >= cutoff)

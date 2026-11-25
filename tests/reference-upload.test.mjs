@@ -33,3 +33,9 @@ test('only stored media on the page origin skips the upload', async () => {
   await noPage.send('http://127.0.0.1:4321/storage/v1/object/authenticated/media/u1/a.png');
   assert.deepEqual([noPage.refreshed.length, noPage.uploaded.length], [0, 1]);
 });
+
+test('a failed reference upload does not name a provider that was never used', async () => {
+  delete globalThis.location;
+  const send = createReferenceUploader(async () => null);
+  await assert.rejects(() => send('aGVsbG8=', 'image/png', 'openai_ref', 'u1'), { message: 'Could not upload a reference image. No provider request was sent.' });
+});

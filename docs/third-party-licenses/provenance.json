@@ -26,5 +26,12 @@
     "file": "robot3-0.4.1-LICENSE.txt",
     "source": "https://github.com/matthewp/robot/blob/987fc5af90686aaffd52f49d6f8b493a7a057d19/LICENSE",
     "blob": "be7726b083bf6fa41cc05c4fa57b9d1b4ea3a0e1"
+  },
+  {
+    "name": "standardwebhooks",
+    "version": "1.1.1",
+    "file": "standardwebhooks-1.1.1-LICENSE.txt",
+    "source": "https://github.com/standard-webhooks/standard-webhooks/blob/ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554/libraries/LICENSE",
+    "blob": "55b14b3a3ce649a2f1b05428dcc9c6db95b37c04"
   }
 ]

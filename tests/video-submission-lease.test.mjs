@@ -12,7 +12,7 @@ const compiled = await build({
   absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node',
 });
-const { refreshPendingVideoSubmission, failStalePendingVideo } = await import(
+const { refreshPendingVideoSubmission, failStalePendingVideo, saveVideoTaskId } = await import(
   'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
 );
 
@@ -144,5 +144,22 @@ test('heartbeat compare-and-set filters use numeric JSON, not lexicographic text
       true,
       'expiration should compare the saved JSON number numerically',
     );
+  });
+});
+
+test('a task id counts as saved only once the gallery row holds it', async () => {
+  await withWorkspace(async ({ store, client, id }) => {
+    // Rejected writes, network errors and updates that matched no row are not saved.
+    const answering = result => ({ from: () => { const q = { update: () => q, eq: () => q, select: () => q, then: (ok, fail) => Promise.resolve().then(result).then(ok, fail) }; return q; } });
+    assert.equal(await saveVideoTaskId(answering(() => ({ data: null, error: { message: 'timeout' } })), store.user.id, id, 'task-1'), false);
+    assert.equal(await saveVideoTaskId(answering(() => { throw new TypeError('Failed to fetch'); }), store.user.id, id, 'task-1'), false);
+    assert.equal(await saveVideoTaskId(answering(() => ({ data: [], error: null })), store.user.id, id, 'task-1'), false);
+    assert.equal(await saveVideoTaskId(client, store.user.id, 'missing-video', 'task-1'), false);
+    assert.equal(store.get('generations', id).task_id, '');
+
+    assert.equal(await saveVideoTaskId(client, store.user.id, id, 'task-1'), true);
+    assert.equal(store.get('generations', id).task_id, 'task-1');
+    // Saving the same task again, as after the server already stored it, still succeeds.
+    assert.equal(await saveVideoTaskId(client, store.user.id, id, 'task-1'), true);
   });
 });

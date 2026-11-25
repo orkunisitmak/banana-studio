@@ -1209,8 +1209,26 @@ const mergeVideoMetadata = (existing: Record<string, any>, incoming: Record<stri
 const completedVideoTransfers = new Map<string, { source: string; storagePath: string; thumbnailPath: string | null; pendingThumbnail?: Blob }>();
 // Overlapping transfers of one generation can leave either source in the stored file, so none of them records it.
 const activeVideoTransfers = new Map<string, Set<{ overlapped: boolean }>>();
+// Acquire this before session lookup: the generation ID is globally unique and userId is asynchronous.
+const videoSaveQueues = new Map<string, Promise<void>>();
+const acquireVideoSave = async (mediaId: string): Promise<() => void> => {
+  const previous = videoSaveQueues.get(mediaId) || Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>(resolve => { releaseCurrent = resolve; });
+  const tail = previous.then(() => current);
+  videoSaveQueues.set(mediaId, tail);
+  await previous;
 
-export const saveVideo = async (
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseCurrent();
+    if (videoSaveQueues.get(mediaId) === tail) videoSaveQueues.delete(mediaId);
+  };
+};
+
+const saveVideoWithoutQueue = async (
   media: GeneratedMedia,
   expectedUserId?: string,
 ): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
@@ -1530,6 +1548,26 @@ export const saveVideo = async (
   }
 };
 
+export const saveVideo = async (
+  media: GeneratedMedia,
+  expectedUserId?: string,
+): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
+  if (!supabase) return undefined;
+  const release = await acquireVideoSave(media.id);
+  try {
+    // A module-local queue cannot protect the same generation in another tab.
+    // Web Locks are origin-wide; hold the lock through both the file upload and DB upsert.
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      return await navigator.locks.request(`banana-video-save:${media.id}`,
+        () => saveVideoWithoutQueue(media, expectedUserId));
+    }
+    // Non-browser and older clients retain the original same-tab serialization.
+    return await saveVideoWithoutQueue(media, expectedUserId);
+  } finally {
+    release();
+  }
+};
+
 export const createPendingVideo = async (
   id: string,
   taskId: string,
@@ -1774,10 +1812,19 @@ export const updateVideoStatus = async (
   }
 };
 
+/** The delete never ran and was not queued, so nothing will retry it. */
+export class DeleteNotQueuedError extends Error {}
+
 export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
+  let dbDeletionError: unknown;
   if (supabase) {
-    const userId = await bindMediaSession();
-    if (!userId) throw new Error('Not authenticated');
+    let userId: string | null;
+    try {
+      userId = await bindMediaSession();
+    } catch (e) {
+      throw new DeleteNotQueuedError(`Session unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!userId) throw new DeleteNotQueuedError('Not authenticated');
     // Delete storage files (best-effort - files may already be gone)
     try {
       const storagePath = media.storagePath || `${userId}/${getOriginalStoragePath(media.id)}`;
@@ -1798,21 +1845,31 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
       if (dbError) {
         console.error(`DB delete failed for ${media.id}, queuing for retry:`, dbError.message);
         addPendingDeletion(media.id);
+        dbDeletionError = new Error(`DB delete failed for ${media.id}: ${dbError.message}`);
       } else {
         removePendingDeletion(media.id);
       }
     } catch (e) {
       console.error(`DB delete error for ${media.id}, queuing for retry:`, e);
       addPendingDeletion(media.id);
+      dbDeletionError = e;
     }
   }
 
   await deleteImagesFromIndexedDb([media.id]);
+  if (dbDeletionError) throw dbDeletionError;
 };
 
-export const deleteImages = async (medias: GeneratedMedia[]): Promise<void> => {
-  if (medias.length === 0) return;
-  await Promise.allSettled(medias.map((media) => deleteImage(media)));
+// notQueued: the delete never ran, so nothing will retry it. queued: the database
+// delete failed and the id is queued for retry on the next load.
+export const deleteImages = async (medias: GeneratedMedia[]): Promise<{ notQueued: GeneratedMedia[]; queued: GeneratedMedia[] }> => {
+  const results = await Promise.allSettled(medias.map((media) => deleteImage(media)));
+  const rejected = (index: number) => results[index].status === 'rejected';
+  const notQueued = (index: number) => (results[index] as PromiseRejectedResult).reason instanceof DeleteNotQueuedError;
+  return {
+    notQueued: medias.filter((_, index) => rejected(index) && notQueued(index)),
+    queued: medias.filter((_, index) => rejected(index) && !notQueued(index)),
+  };
 };
 
 export const toggleFavorite = async (id: string, isFavorite: boolean): Promise<void> => {
@@ -2267,18 +2324,39 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
   };
 };
 
+const MOVE_BATCH_SIZE = 100;
+
+/** Some batches were committed before a later one failed. */
+export class MoveImagesError extends Error {
+  constructor(message: string, readonly movedIds: string[]) { super(message); }
+}
+
 export const moveImagesToFolder = async (imageIds: string[], folderId: string | null): Promise<void> => {
   const uniqueIds = Array.from(new Set(imageIds));
   if (uniqueIds.length === 0) return;
 
+  let cachedIds = uniqueIds;
+  let cloudError: MoveImagesError | null = null;
   if (supabase) {
     const userId = await getCurrentUserId();
     if (!userId) throw new Error('Not authenticated');
-    const { error } = await supabase.from('generations')
-      .update({ folder_id: folderId })
-      .eq('user_id', userId)
-      .in('id', uniqueIds);
-    if (error) throw new Error(`Media could not be moved: ${error.message}`);
+    // A large range selection would exceed the request URL limit as a single
+    // `in` filter, so move it in batches like the other bulk ID writes.
+    const movedIds: string[] = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += MOVE_BATCH_SIZE) {
+      const ids = uniqueIds.slice(offset, offset + MOVE_BATCH_SIZE);
+      const { error } = await supabase.from('generations')
+        .update({ folder_id: folderId })
+        .eq('user_id', userId)
+        .in('id', ids);
+      if (error) {
+        if (!movedIds.length) throw new Error(`Media could not be moved: ${error.message}`);
+        cloudError = new MoveImagesError(`Media could not be moved: ${error.message}`, movedIds);
+        break;
+      }
+      movedIds.push(...ids);
+    }
+    cachedIds = movedIds;
   }
 
   // Persist the cache only after the authoritative cloud write succeeds. A
@@ -2289,7 +2367,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
 
-      uniqueIds.forEach(id => {
+      cachedIds.forEach(id => {
         const req = store.get(id);
         req.onsuccess = () => {
           const img = req.result as GeneratedMedia;
@@ -2310,6 +2388,7 @@ export const moveImagesToFolder = async (imageIds: string[], folderId: string | 
     if (!supabase) throw error;
     console.warn('Media moved in cloud, but local cache could not be updated:', error);
   }
+  if (cloudError) throw cloudError;
 };
 
 export const moveFolderToFolder = async (folderId: string, targetParentId: string | null): Promise<void> => {

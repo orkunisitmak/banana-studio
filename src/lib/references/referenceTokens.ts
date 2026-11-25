@@ -5,6 +5,11 @@ import type { ReferenceImage } from '../../types.js';
 // The single-quoted body also accepts those word-internal apostrophes.
 export const getQuotedPromptPattern = (): RegExp => /"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{M}\p{N}_])'(?:[^'\n]|(?<=[\p{L}\p{M}\p{N}_])'(?=[\p{L}\p{M}\p{N}_]))*'(?![\p{L}\p{M}\p{N}_])/gu;
 
+// Spoken dialogue may wrap onto the next line. Only literal protection uses
+// this form; reference validation keeps the single-line pattern above so an
+// unmatched quote cannot hide a later line. A blank line still ends a quote.
+export const getMultilineQuotedPromptPattern = (): RegExp => /"(?:[^"\n]|\n(?![^\S\n]*\n))*"|“(?:[^”\n]|\n(?![^\S\n]*\n))*”|(?<![\p{L}\p{M}\p{N}_])'(?:[^'\n]|\n(?![^\S\n]*\n)|(?<=[\p{L}\p{M}\p{N}_])'(?=[\p{L}\p{M}\p{N}_]))*'(?![\p{L}\p{M}\p{N}_])/gu;
+
 // Quoted visible copy is literal, even when it looks like a reference.
 export const mapUnquotedPrompt = (prompt: string, map: (text: string) => string): string => {
   const quotes = getQuotedPromptPattern();

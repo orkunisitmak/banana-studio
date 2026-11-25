@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
 import { getNanoBanana21InputError, NANO_BANANA_21_ENDPOINT } from '../src/lib/images/nanoBanana21.js';
 
@@ -119,9 +120,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   let acceptedTaskId: string | undefined;
+  let guard: PaidRequest = null;
   try {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
+    if (!guard) return;
     const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
       method: 'POST',
       headers: {
@@ -130,6 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify(input),
     });
+    await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
 
     let data: any;
     // Read the body once: after json() fails, text() is always empty.
@@ -167,6 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ requestId: data.request_id, endpoint });
   } catch (error: any) {
+    await guard?.finish('failed');
     console.error('fal image generate error:', error.message);
     return res.status(500).json({ error: error.message || 'Image generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }

@@ -1,6 +1,7 @@
 import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
-import { videoProviderName, brokenVideoProviderLabel } from '../lib/video/videoProviderName';
+import { videoProviderName, brokenVideoProviderLabel, brokenVideoExpiryText } from '../lib/video/videoProviderName';
+import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
@@ -24,14 +25,18 @@ import { getComparisonSelection, isComparableImage } from './imageComparison';
 import { canGenerateVariation } from '../lib/gallery/recreateDraft';
 import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
+import { getCountLabel } from '../lib/gallery/countLabel';
 import { getGenerationsInProgressLabel } from '../lib/gallery/generationLabel';
 import { collectBatchDownload, describeBatchDownloadFailure } from '../lib/gallery/batchDownload';
+import { buildBatchManifest, loadManifestMedia } from '../lib/gallery/batchManifest';
+import { useMountedRef } from './useMountedRef';
 import { FolderPreview } from './FolderPreview';
 import { buildFolderPreviewIndex } from './folderPreviews';
 import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
 import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
 import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
+import { galleryCardLabel, isCardActivationKey } from '../lib/gallery/cardKeyboard';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
 
@@ -534,7 +539,8 @@ const CustomVideoPlayer: React.FC<{
   useEffect(() => {
     const handlePlayerKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (target?.matches('input, textarea, select, button, [role="button"], [contenteditable="true"]')) return;
+      if (target?.closest('[role="dialog"]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       const key = event.key.toLowerCase();
@@ -759,6 +765,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => { setIsYouTubePreviewOpen(false); }, [galleryOwner?.user_id, userProfile?.id]);
   const [searchRevealId, setSearchRevealId] = useState<string | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
 
   // Pagination State
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
@@ -813,13 +820,18 @@ export const Gallery: React.FC<GalleryProps> = ({
   const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const createFolderDialogRef = useRef<HTMLDivElement>(null);
+  const createFolderOpenerRef = useRef<HTMLElement | null>(null);
 
   // Move Menu State
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
   const [batchDownloadError, setBatchDownloadError] = useState<string | null>(null);
+  const galleryAccountRef = useRef('');
+  const galleryMountedRef = useMountedRef();
+  galleryAccountRef.current = `${userProfile?.id ?? ''}|${galleryOwner?.user_id ?? ''}`;
   useEffect(() => { if (!isSelectionMode) setBatchDownloadError(null); }, [isSelectionMode]);
   const moveMenuRef = useRef<HTMLDivElement>(null);
+  const moveButtonRef = useRef<HTMLButtonElement>(null);
   const isPhotoDevice = isMobilePhotoDevice();
   const [preparedPhotos, setPreparedPhotos] = useState<File[] | null>(null);
   const [isPreparingPhotos, setIsPreparingPhotos] = useState(false);
@@ -892,6 +904,9 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Popup Preview State
   const [previewRefImage, setPreviewRefImage] = useState<ReferenceImage | null>(null);
+  const previewOpenerRef = useRef<HTMLElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const openRefPreview = (ref: ReferenceImage, opener: HTMLElement) => { previewOpenerRef.current = opener; setPreviewRefImage(ref); };
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
@@ -958,9 +973,18 @@ export const Gallery: React.FC<GalleryProps> = ({
         setMoveMenuOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (!moveMenuOpen || isCreatingFolder || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setMoveMenuOpen(false);
+      moveButtonRef.current?.focus();
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen]);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen, isCreatingFolder]);
 
   // --- Derived State ---
   const currentFolder = folders.find(f => f.id === currentFolderId);
@@ -1121,6 +1145,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   useEffect(() => {
     setComparisonIds(null);
     setComparisonNotice(null);
+    setBatchDownloadError(null);
     setIsSelectionMode(false);
     setSelectedIds(new Set());
     setIsSearchOpen(false);
@@ -1144,6 +1169,7 @@ export const Gallery: React.FC<GalleryProps> = ({
     const handleModalKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isSavingFolder) {
         setIsCreatingFolder(false);
+        createFolderOpenerRef.current?.focus({ preventScroll: true });
         setNewFolderName("");
         setFolderCreateError(null);
         return;
@@ -1353,9 +1379,22 @@ export const Gallery: React.FC<GalleryProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMedia?.id, selectedMedia?.isLoading, handleNavigate, isSelectionMode, comparisonIds, isSearchOpen, isYouTubePreviewOpen, isCreatingFolder, isHelpCenterOpen, previewRefImage, sharingFolder, isReadOnly]);
 
+  useEffect(() => {
+    if (!previewRefImage) return;
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setPreviewRefImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      const opener = previewOpenerRef.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [previewRefImage]);
+
   // --- Actions ---
 
-  const openCreateFolderModal = () => {
+  const openCreateFolderModal = (event: React.MouseEvent<HTMLElement>) => {
     if (isReadOnly) return;
     setNewFolderName("");
     setFolderCreateError(null);
@@ -1363,12 +1402,15 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsNotificationPanelOpen(false);
     setIsGridMenuOpen(false);
     setIsUserMenuOpen(false);
+    // The button itself: Safari does not focus a clicked button, so document.activeElement could be elsewhere.
+    createFolderOpenerRef.current = event.currentTarget;
     setIsCreatingFolder(true);
   };
 
   const closeCreateFolderModal = () => {
     if (isSavingFolder) return;
     setIsCreatingFolder(false);
+    createFolderOpenerRef.current?.focus({ preventScroll: true });
     setNewFolderName("");
     setFolderCreateError(null);
   };
@@ -1390,6 +1432,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       setFolders(prev => [newFolder, ...prev]);
       setNewFolderName("");
       setIsCreatingFolder(false);
+      createFolderOpenerRef.current?.focus({ preventScroll: true });
     } catch (error: any) {
       setFolderCreateError(error?.message || 'The folder could not be created. Please try again.');
     } finally {
@@ -1669,12 +1712,28 @@ export const Gallery: React.FC<GalleryProps> = ({
     setIsDownloadingBatch(true);
     setBatchDownloadError(null);
     try {
-      const { files, failed } = await collectBatchDownload(Array.from(selectedIds), images);
+      const ids: string[] = Array.from(selectedIds);
+      // The manifest carries prompts and references, so a ZIP built for one
+      // account or gallery must never be saved after a switch to another. The
+      // key is pinned at the click, synchronously, from the state the gallery
+      // itself resets on a switch; no network lookup can race or fail here.
+      const startedFor = galleryAccountRef.current;
+      const { files, failed } = await collectBatchDownload(ids, images, undefined, url => refreshMediaAccessUrl(url, false));
       if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
       if (!files.length) return;
+      // Grid records omit reference_images; the manifest needs the full row.
+      // requireRemote: a record missing remotely must not be read from this browser's
+      // own cache, which may hold another account's row; the index record is the fallback.
+      const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id, { requireRemote: true }));
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
+      zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
       const content = await zip.generateAsync({ type: "blob" });
+      // The account switch already reset the gallery and its selection bar, so
+      // there is nowhere to report this; the new account's gallery is the feedback.
+      // An account switch remounts the whole workspace, so this handler may belong to
+      // an unmounted Gallery whose account ref is never updated again.
+      if (!galleryMountedRef.current || galleryAccountRef.current !== startedFor) return;
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
@@ -1862,7 +1921,10 @@ export const Gallery: React.FC<GalleryProps> = ({
   const searchDialog = isSearchOpen && <GallerySearchDialog images={images} folders={folders} ownerId={galleryOwner?.user_id} isLoading={isGalleryIndexLoading || isFoldersLoading} loadError={galleryLoadError || folderLoadError} onClose={closeSearch} onSelect={selectSearchResult} />;
   if (isEmpty && !currentFolderId && !showFavoritesOnly) {
     return (
-      <div className="relative flex-1 flex min-h-screen flex-col bg-[#0d1117] text-gray-600">
+      <div
+        className="relative flex-1 flex min-h-screen flex-col overflow-y-auto custom-scrollbar bg-[#0d1117] text-gray-600"
+        style={isReadOnly ? undefined : { paddingBottom: 'var(--generation-bar-safe-area, 16rem)' }}
+      >
         {searchDialog}
         {adminGalleryBanner}
         <button ref={searchButtonRef} onClick={openSearch} aria-label="Search gallery" aria-haspopup="dialog" aria-expanded={isSearchOpen} title="Search gallery (⌘K / Ctrl+K or /)" className="mr-4 mt-4 flex h-10 shrink-0 items-center gap-2 self-end rounded-xl border border-white/10 bg-[#161b22] px-3 text-sm text-gray-300 hover:text-white"><Search className="h-4 w-4" />Search</button>
@@ -1966,7 +2028,10 @@ export const Gallery: React.FC<GalleryProps> = ({
         <div
           className="fixed inset-0 z-[310] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeCreateFolderModal();
+            if (event.target !== event.currentTarget) return;
+            // Without this the browser moves focus to the body after the handler, undoing the focus return.
+            event.preventDefault();
+            closeCreateFolderModal();
           }}
         >
           <div
@@ -2075,7 +2140,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             ) : (
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-semibold text-white sm:text-base">{showFavoritesOnly ? 'Favorites' : 'Gallery'}</h2>
-                <p className="hidden text-[11px] text-gray-500 lg:block">{visibleImages.length} items</p>
+                <p className="hidden text-[11px] text-gray-500 lg:block">{getCountLabel(visibleImages.length, 'item', 'items')}</p>
               </div>
             )}
           </div>
@@ -2276,7 +2341,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-sm font-semibold text-white">Notifications</span>
                       <span className="text-xs text-gray-500">({toasts.length})</span>
                     </div>
-                    {toasts.length > 0 && onDismissAllToasts && (
+                    {toasts.some(toast => toast.type !== 'loading') && onDismissAllToasts && (
                       <button
                         onClick={onDismissAllToasts}
                         className="text-[10px] font-medium text-gray-400 hover:text-red-400 px-2 py-1 hover:bg-red-500/10 rounded-lg transition-colors"
@@ -2486,7 +2551,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <button
                   onClick={handleBatchDownload}
                   disabled={isDownloadingBatch || isMoving}
-                  aria-label="Download selected media as ZIP"
+                  aria-label="Download selected media as ZIP, including a manifest with prompts and references"
+                  title="Includes manifest.json with prompts, settings and reference names"
                   className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-white/15 hover:text-white disabled:cursor-wait disabled:opacity-60"
                 >
                   {isDownloadingBatch ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -2500,6 +2566,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               {!isReadOnly && <>
               <div ref={moveMenuRef} className="relative">
                 <button
+                  ref={moveButtonRef}
                   onClick={() => setMoveMenuOpen(!moveMenuOpen)}
                   disabled={isMoving}
                   onDragOver={(e) => {
@@ -2509,6 +2576,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     setDragOverTarget(null);
                     setMoveMenuOpen(true);
                   }}
+                  aria-label="Move"
                   aria-haspopup="menu"
                   aria-expanded={moveMenuOpen}
                   className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-colors ${moveMenuOpen ? 'border-violet-400/50 bg-violet-500/15 text-violet-200' : 'border-white/[0.08] bg-[#161b22] text-gray-300 hover:border-white/15 hover:text-white'}`}
@@ -2597,14 +2665,14 @@ export const Gallery: React.FC<GalleryProps> = ({
               </button>
               </div>
             </div>
-            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{selectedIds.size - comparableSelection.length} unavailable or non-image items excluded from comparison</p>}
+            {selectedIds.size > comparableSelection.length && <p role="status" className="mt-2 text-[11px] text-gray-400">{getCountLabel(selectedIds.size - comparableSelection.length, 'unavailable or non-image item', 'unavailable or non-image items')} excluded from comparison</p>}
             {batchDownloadError && <p role="alert" className="mt-2 text-xs text-amber-200">{batchDownloadError}</p>}
             {!isReadOnly && isPhotoDevice && (
               <div className="mt-2 border-t border-white/[0.06] pt-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p role="status" className="text-xs text-gray-400">
                     {isPreparingPhotos ? `Preparing photos ${photoProgress.completed}/${photoProgress.total || selectedIds.size}…`
-                      : preparedPhotos ? `${preparedPhotos.length} photos ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
+                      : preparedPhotos ? `${getCountLabel(preparedPhotos.length, 'photo', 'photos')} ready. Choose “Save ${preparedPhotos.length === 1 ? 'Image' : 'Images'}” in the share sheet.`
                       : 'Save originals to Photos using your phone’s share sheet.'}
                   </p>
                   {isPreparingPhotos && (
@@ -2615,7 +2683,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>
                 {(photoShareError || photoShareMessage) && <p role={photoShareError ? 'alert' : 'status'} className={`mt-2 text-xs ${photoShareError ? 'text-red-300' : 'text-gray-400'}`}>{photoShareError || photoShareMessage}</p>}
                 <button type="button" onClick={handleBatchDownload} disabled={isDownloadingBatch || isPreparingPhotos || isSharingPhotos || isMoving}
-                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50">Download ZIP to Files instead</button>
+                  className="mt-2 text-[11px] text-gray-500 underline underline-offset-2 disabled:opacity-50" title="Includes manifest.json with prompts, settings and reference names">Download ZIP to Files instead</button>
               </div>
             )}
           </div>
@@ -2730,7 +2798,7 @@ export const Gallery: React.FC<GalleryProps> = ({
           })}
 
           {/* Images */}
-          {visibleImages.map((media) => {
+          {visibleImages.map((media, mediaIndex) => {
             const isSelected = selectedIds.has(media.id);
             const aspectRatio = getMediaDisplayAspectRatio(media);
             const cardStyle = getGalleryCardStyle(aspectRatio, targetRowHeight);
@@ -2829,23 +2897,34 @@ export const Gallery: React.FC<GalleryProps> = ({
               );
             }
 
+            const activateCard = (shiftKey: boolean) => {
+              if (shiftKey && !isSelectionMode) {
+                setIsSelectionMode(true);
+                setSelectedIds(new Set([media.id]));
+                setLastSelectedId(media.id);
+                setSelectedMediaId(null);
+              } else if (isSelectionMode) {
+                toggleSelection(media.id, shiftKey);
+              } else {
+                setSelectedMediaId(media.id);
+              }
+            };
+
             return (
               <div
                 key={media.id}
                 data-gallery-media-id={media.id}
                 draggable={!isReadOnly && !isMoving}
                 onDragStart={(e) => handleDragStart(e, 'image', media.id, media)}
-                onClick={(e) => {
-                  if (e.shiftKey && !isSelectionMode) {
-                    setIsSelectionMode(true);
-                    setSelectedIds(new Set([media.id]));
-                    setLastSelectedId(media.id);
-                    setSelectedMediaId(null);
-                  } else if (isSelectionMode) {
-                    toggleSelection(media.id, e.shiftKey);
-                  } else {
-                    setSelectedMediaId(media.id);
-                  }
+                role="button"
+                tabIndex={0}
+                aria-label={galleryCardLabel(media.mediaType, media.prompt, isSelectionMode, isSelected, mediaIndex + 1, visibleImages.length)}
+                aria-pressed={isSelectionMode ? isSelected : undefined}
+                onClick={(e) => activateCard(e.shiftKey)}
+                onKeyDown={(e) => {
+                  if (!isCardActivationKey(e.key, e.target === e.currentTarget, e.repeat)) return;
+                  e.preventDefault();
+                  activateCard(e.shiftKey);
                 }}
                 style={cardStyle}
                 className={`group relative bg-gray-800 rounded-2xl overflow-hidden border transition-all shadow-lg ${isSelected
@@ -3035,8 +3114,8 @@ export const Gallery: React.FC<GalleryProps> = ({
 
       {/* Reference Image Preview Popup */}
       {previewRefImage && (
-        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200" onClick={() => setPreviewRefImage(null)}>
-          <button aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
+        <div role="dialog" aria-modal="true" aria-label="Reference photo preview" tabIndex={-1} className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-200 outline-none" onClick={() => setPreviewRefImage(null)} onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); previewCloseRef.current?.focus(); } }}>
+          <button type="button" ref={previewCloseRef} autoFocus aria-label="Close reference preview" title="Close reference preview" className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"><X className="w-6 h-6" /></button>
           <img src={previewRefImage.data} alt="Reference" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>
       )}
@@ -3072,7 +3151,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             onClick={() => setSelectedMediaId(null)}
           >
             <div data-gallery-viewer-toolbar className={`${isEditingSelectedMedia ? 'mb-3 flex w-full shrink-0 justify-end' : 'absolute right-4 top-4 z-50 flex'} items-center gap-2`}>
-              <button type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
+              <button ref={detailsToggleRef} type="button" data-gallery-details-toggle aria-label={isDetailsVisible ? 'Hide details' : 'Show details'} aria-expanded={isDetailsVisible} aria-controls="gallery-details-pane" aria-keyshortcuts="Shift+B" title={`${isDetailsVisible ? 'Hide' : 'Show'} details (Shift+B)`}
                 onClick={event => { event.stopPropagation(); setIsDetailsVisible(visible => !visible); }}
                 className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 text-xs font-medium text-gray-200 backdrop-blur-sm transition-colors hover:bg-gray-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/50">
                 {isDetailsVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}Details
@@ -3114,7 +3193,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <AlertCircle className="w-12 h-12 text-red-400" />
                   <span className="text-sm font-semibold">Video unavailable</span>
                   <span className="text-xs text-gray-500">
-                    {selectedMedia.error || `The source URL is no longer accessible. ${videoProviderName(selectedMedia.taskId, selectedMedia.videoModel === 'minimax-h3')} media URLs expire after a period of time and the file was not cached locally.`}
+                    {selectedMedia.error || brokenVideoExpiryText(selectedMedia)}
                   </span>
                   {!isReadOnly && <div className="flex items-center gap-2">
                     {selectedMedia.taskId && onRecoverVideo && (
@@ -3151,7 +3230,7 @@ export const Gallery: React.FC<GalleryProps> = ({
             {canEditSelectedMedia && (isEditingSelectedMedia || isDetailsVisible) && <div className={`w-full flex shrink-0 flex-col items-center ${isEditingSelectedMedia ? 'md:my-auto' : ''}`} onClick={event => event.stopPropagation()}>
               <LazyDialogErrorBoundary inline>
                 <React.Suspense fallback={<div role="status" className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="h-4 w-4 motion-safe:animate-spin" />Loading edit controls…</div>}>
-                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => setEditingMediaId(null)} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
+                  <GalleryImageEditor key={selectedMedia.id} image={selectedMedia} images={images} isEditing={isEditingSelectedMedia} onStart={() => setEditingMediaId(selectedMedia.id)} onGenerate={onEditGenerate!} onClose={() => { if (!isDetailsVisible) detailsToggleRef.current?.focus({ preventScroll: true }); setEditingMediaId(null); }} onEditResult={result => { setSelectedMediaId(result.id); setEditingMediaId(result.id); }} initialTextModel={imageEditTextModel} refreshSource={refreshComparisonSource} />
                 </React.Suspense>
               </LazyDialogErrorBoundary>
             </div>}
@@ -3250,7 +3329,9 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Duration</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
+                      {selectedMedia.h3MaxMode && H3_MAX_CAPABILITIES[selectedMedia.h3MaxMode]?.duration === null
+                        ? selectedMedia.videoOutputDuration ? `${Number(selectedMedia.videoOutputDuration.toFixed(1))}s` : '—'
+                        : selectedMedia.videoDuration === -1 ? 'Auto' : selectedMedia.videoDuration ? `${selectedMedia.videoDuration}s` : '—'}
                     </span>
                   </div>
                   <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
@@ -3280,7 +3361,12 @@ export const Gallery: React.FC<GalleryProps> = ({
                           ? 'Edit'
                           : selectedMedia.videoOperation === 'extend'
                             ? 'Extend'
-                            : 'Generate'}
+                            : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
+                              : selectedMedia.h3MaxMode === 'recast' ? 'Recast'
+                                : selectedMedia.h3MaxMode === 'relight' ? 'Relight'
+                                  : selectedMedia.h3MaxMode === 'extend_video' ? 'Extend'
+                                    : selectedMedia.h3MaxMode === 'insert_video' ? 'Insert'
+                                      : 'Generate'}
                     </span>
                   </div>
                   {selectedMedia.generationCost && (
@@ -3405,8 +3491,16 @@ export const Gallery: React.FC<GalleryProps> = ({
                       return (
                         <div
                           key={idx}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={isEditSource ? 'Preview edit source reference' : `Preview reference photo ${idx + 1}`}
                           className="aspect-square rounded-lg border border-gray-700 overflow-hidden bg-black/50 relative isolate group cursor-pointer"
-                          onClick={() => setPreviewRefImage(ref)}
+                          onClick={e => openRefPreview(ref, e.currentTarget)}
+                          onKeyDown={e => {
+                            if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                            e.preventDefault();
+                            openRefPreview(ref, e.currentTarget);
+                          }}
                         >
                           <img src={ref.data} alt={isEditSource ? 'Edit source reference' : 'Reference image'} className="w-full h-full object-cover" />
 

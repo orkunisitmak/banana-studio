@@ -15,10 +15,34 @@ internal static class Program
         if (args.Contains("--test-window-placement")) { try { WindowPlacement.Test(); return 0; } catch { return 1; } }
         ApplicationConfiguration.Initialize();
         using var instance = new Mutex(true, "Local\\BananaStudio.Workspace", out var first);
-        if (!first) { MessageBox.Show("Banana Studio is already running. Open its existing window.", "Banana Studio"); return 0; }
+        if (!first)
+        {
+            if (!ActivateExistingWindow()) MessageBox.Show("Banana Studio is already running. Open its existing window.", "Banana Studio");
+            return 0;
+        }
         Application.Run(new StudioWindow());
         return 0;
     }
+    private static bool ActivateExistingWindow()
+    {
+        using var current = Process.GetCurrentProcess();
+        foreach (var other in Process.GetProcessesByName(current.ProcessName))
+        {
+            using (other)
+            {
+                var window = other.MainWindowHandle;
+                if (other.Id == current.Id || window == IntPtr.Zero) continue;
+                // SW_RESTORE keeps the window's maximized state.
+                if (IsIconic(window)) ShowWindowAsync(window, 9);
+                return SetForegroundWindow(GetLastActivePopup(window));
+            }
+        }
+        return false;
+    }
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr window);
 }
 
 internal sealed class StudioWindow : Form
@@ -43,7 +67,7 @@ internal sealed class StudioWindow : Form
         var file = new ToolStripMenuItem("File");
         var keyItem = new ToolStripMenuItem("Provider API Keys…", null, async (_, _) => await ShowKeys()) { ShortcutKeys = Keys.Control | Keys.Oemcomma, ShortcutKeyDisplayString = "Ctrl+," };
         file.DropDownItems.Add(keyItem);
-        file.DropDownItems.Add("Open Local Data Folder", null, (_, _) => Process.Start(new ProcessStartInfo(WorkspaceProcess.DataDirectory) { UseShellExecute = true }));
+        file.DropDownItems.Add("Open Local Data Folder", null, (_, _) => OpenDataFolder());
         file.DropDownItems.Add("Check for Updates…", null, (_, _) => OpenExternal("https://github.com/orkunisitmak/banana-studio/releases/latest"));
         file.DropDownItems.Add("Exit", null, (_, _) => Close());
         var view = new ToolStripMenuItem("View");
@@ -116,7 +140,29 @@ internal sealed class StudioWindow : Form
         public override Color MenuItemBorder => MenuBorder;
     }
     private bool Local(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && origin != null && uri.Scheme == origin.Scheme && uri.Host == origin.Host && uri.Port == origin.Port;
-    private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+    /// <summary>
+    /// Opens an external https URL in the default browser. Only https URLs without user info are allowed.
+    /// Shows a warning message if the URL cannot be opened.
+    /// </summary>
+    private void OpenExternal(string url) { if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo)) OpenWithShell(uri.AbsoluteUri, "The link could not be opened. Check that a default web browser is set in Windows Settings."); }
+    /// <summary>
+    /// Creates the local data folder if it does not exist yet, then opens it in Windows Explorer.
+    /// Shows a warning with the folder path if it cannot be opened.
+    /// </summary>
+    private void OpenDataFolder()
+    {
+        try { Directory.CreateDirectory(WorkspaceProcess.DataDirectory); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        OpenWithShell(WorkspaceProcess.DataDirectory, "The local data folder could not be opened. It is at " + WorkspaceProcess.DataDirectory + ".");
+    }
+    /// <summary>
+    /// Attempts to open a file or folder using the Windows shell. Shows a failure message if the shell cannot handle the target.
+    /// </summary>
+    private void OpenWithShell(string target, string failure)
+    {
+        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { MessageBox.Show(this, failure, "Banana Studio", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
     private void ShowFailure(string message) { status.Text = message; status.Visible = true; status.BringToFront(); }
     private async Task StartWorkspace()
     {
@@ -192,9 +238,9 @@ internal sealed class StudioWindow : Form
         keysOpen = true;
         try
         {
-            using var dialog = new Form { Text = "Provider API Keys", Width = 670, Height = 480, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 3, RowCount = 8, AutoSize = true };
-            var info = new Label { Text = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank fields keep saved keys. Remove clears a key.", AutoSize = true, MaximumSize = new Size(600, 0) };
+            using var dialog = new Form { Text = "Provider API Keys", Width = 670, Height = 520, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(22, 27, 34), ForeColor = Color.Gainsboro };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 3, RowCount = 9, AutoSize = true };
+            var info = new Label { Text = "Add only the providers you use. OpenRouter covers text, images and supported Seedance video; fal.ai covers images and video; Anthropic runs Claude Opus 5.5 directly. Select routes in AI settings. Keys stay in Windows Credential Manager. Blank fields keep saved keys. Remove clears a key.", AutoSize = true, MaximumSize = new Size(600, 0) };
             grid.Controls.Add(info, 0, 0); grid.SetColumnSpan(info, 3);
             var rows = new List<(string Name, TextBox Field, CheckBox Remove)>();
             var row = 1;

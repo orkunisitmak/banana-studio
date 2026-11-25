@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import { buildH3MaxInput, H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { fetchFalRequestCosts } from './_lib/falBillingCosts.js';
@@ -137,6 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
 
+  let guard: PaidRequest = null;
   try {
     if (req.method === 'POST') {
       let prepared: ReturnType<typeof buildH3MaxInput>;
@@ -176,12 +178,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (saved.status !== 'pending' || metadata.h3SubmissionStartedAt) return res.status(409).json({
           code: 'GENERATION_SUBMITTING', error: 'This saved video was already submitted or its acceptance is uncertain. Do not submit again; check its saved task history and usage.',
         });
+        // Admit before claiming: a request stopped by the limit leaves the saved video submittable.
+        guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
+        if (!guard) return;
         const claimedMetadata = { ...metadata, h3SubmissionStartedAt: Date.now(), h3MaxMode: mode, falEndpoint: endpoint };
         const { data: claimed, error: claimError } = await registry.from('generations')
           .update({ status: 'processing', metadata: claimedMetadata }).eq('id', body.generationId).eq('user_id', user.id).eq('status', 'pending').select('id').maybeSingle();
+        if (claimError || !claimed) await guard.finish('rejected');
         if (claimError) return res.status(503).json({ error: 'The saved video could not be claimed. No provider request was sent.' });
         if (!claimed) return res.status(409).json({ code: 'GENERATION_SUBMITTING', error: 'This saved video is already being submitted. Check the existing task instead of submitting again.' });
         galleryClaim = { id: body.generationId, metadata: claimedMetadata };
+      } else {
+        guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
+        if (!guard) return;
       }
       const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
         method: 'POST',
@@ -191,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         body: JSON.stringify(input),
       });
+      await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
       const data = await readJson(response);
       if (!response.ok) {
         const error = extractFalErrorMessage(data?.detail ?? data?.error ?? data?.message ?? data);
@@ -307,6 +317,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { endpoint: selectedQueueEndpoint, data: statusData } = selectedStatus;
     if (statusData?.status === 'COMPLETED') {
+      // fal reports a failed request as COMPLETED with `error`; its result
+      // route repeats the model's error status instead of returning a video.
+      if (statusData?.error) return terminalFailure('ERROR', extractFalErrorMessage(statusData.error));
       const resultResponse = await fetch(
         // Match @fal-ai/client's queue.result() lifecycle route. The REST
         // submit payload may expose a convenience response_url ending in
@@ -357,6 +370,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       progress: statusData?.status === 'IN_PROGRESS' ? 0.5 : 0.1,
     });
   } catch (error: any) {
+    await guard?.finish('failed');
     console.error('fal MiniMax H3 video error:', error.message);
     return res.status(500).json({ error: error.message || 'MiniMax H3 generation failed' });
   }

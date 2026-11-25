@@ -9,16 +9,17 @@ const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.u
 const piece = (from, to) => { const a = src.indexOf(from); return src.slice(a, src.indexOf(to, a)); };
 const pvf = piece('  const processVideoFiles = async', '  const handleVideoFileUpload = async');
 const hv = piece('  const handleVideoFileUpload = async', '  const handleAudioFileUpload = async');
-const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, uploadingReferenceVideos, setUploadingReferenceVideos, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync } = env;
+const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, uploadingReferenceVideos, videoUploadDraft, insertUploadDraftRef, setUploadingReferenceVideos, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync } = env;
   ${pvf}\n${hv}\n return { handleVideoFileUpload }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
 
 // queued: updates wait for a render, as React batches them; flushSync applies them now.
 const scenario = async (start, steps, limits = { videos: 3 }, queued = false) => {
   let config = { mode: 'video', referenceVideos: start.map(id => ({ id })) }, uploading = 0; const errors = []; const gates = new Map(); const queue = [];
+  const videoUploadDraft = {}, insertUploadDraftRef = { current: { token: videoUploadDraft } };
   const flush = () => { while (queue.length) config = queue.shift()(config); };
   const render = () => mod.exports({ config, onChange: f => { if (queued) queue.push(f); else config = f(config); }, flushSync: fn => { fn(); flush(); }, setAttachmentError: e => { errors.push(typeof e === 'function' ? e(errors.at(-1) ?? null) : e); },
-    isH3VideoConfig: false, h3State: {}, currentReferenceVideos: config.referenceVideos, maxReferenceVideos: limits.videos, uploadingReferenceVideos: uploading,
+    isH3VideoConfig: false, h3State: {}, currentReferenceVideos: config.referenceVideos, maxReferenceVideos: limits.videos, uploadingReferenceVideos: uploading, videoUploadDraft, insertUploadDraftRef,
     setUploadingReferenceVideos: f => { uploading = f(uploading); }, videoInputRef: { current: null },
     uploadReferenceVideo: file => new Promise((ok, fail) => gates.set(file.name, { ok: () => ok({ id: file.name }), fail: () => fail(new Error(file.name + ' failed')) })),
     // What the latest committed render publishes; a step can lower it (an operation switch).

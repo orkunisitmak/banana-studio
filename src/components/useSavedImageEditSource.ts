@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { GeneratedMedia } from '../types';
 import { getImageById } from '../services/storageService';
 import { isComparableImage } from './imageComparison';
-import { getRecordedImageEditDetails } from './recordedGenerationDetails';
+import { getRecordedImageEditDetails, isCanvasExpansionEdit } from './recordedGenerationDetails';
 
 interface SourceLookup {
   key: string;
@@ -25,7 +25,10 @@ export const useSavedImageEditSource = (
   const [lookup, setLookup] = useState<SourceLookup | null>(null);
   const [attempt, setAttempt] = useState(0);
   const eligible = result?.mediaType === 'image' && isComparableImage(result);
-  const edit = eligible ? getRecordedImageEditDetails(result, images) : undefined;
+  const recorded = eligible ? getRecordedImageEditDetails(result, images) : undefined;
+  // Expanded canvases differ in size from their source, so they are never
+  // compared and their source is not fetched.
+  const edit = isCanvasExpansionEdit(recorded) ? undefined : recorded;
   const selfSource = Boolean(edit?.sourceId && edit.sourceId === result?.id);
   const sourceId = !selfSource ? edit?.sourceId : undefined;
   const indexed = isUsableSource(edit?.source, sourceId) ? edit.source : undefined;

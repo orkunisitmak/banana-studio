@@ -910,6 +910,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const isOverlayOpenRef = useRef(false);
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
 
@@ -979,8 +980,12 @@ export const Gallery: React.FC<GalleryProps> = ({
       moveButtonRef.current?.focus();
     };
     // The Move menu and its New Folder dialog sit on top of the header popups, so they get Escape first.
+    // So do the viewer and the other overlays: one Escape closes one layer, the topmost first.
     const handlePopupEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !moveMenuOpen && !isCreatingFolder) {
+        if (isOverlayOpenRef.current) return;
+        if (!isNotificationPanelOpen && !isGridMenuOpen && !isUserMenuOpen) return;
+        event.preventDefault();
         if (isNotificationPanelOpen) { setIsNotificationPanelOpen(false); notificationButtonRef.current?.focus(); }
         else if (isGridMenuOpen) { setIsGridMenuOpen(false); gridMenuRef.current?.querySelector('button')?.focus(); }
         else if (isUserMenuOpen) { setIsUserMenuOpen(false); userMenuRef.current?.querySelector('button')?.focus(); }
@@ -1048,6 +1053,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   const hasMoreImages = displayCount < allVisibleImages.length;
 
   const { selectedMedia } = useGalleryMediaDetails(images, selectedMediaId, galleryOwner?.user_id, userProfile?.id);
+  const isViewerOpen = Boolean(selectedMedia && !selectedMedia.isLoading && !isSelectionMode);
+  isOverlayOpenRef.current = Boolean(isViewerOpen || comparisonIds || isSearchOpen || isYouTubePreviewOpen || isHelpCenterOpen || previewRefImage || sharingFolder);
   const selectedEditSourceReference = selectedMedia ? getRecordedEditSourceReference(selectedMedia) : undefined;
   const selectedReferenceImages = (selectedMedia?.referenceImages || []).filter(reference =>
     reference.data && (selectedMedia?.mediaType !== 'image' || reference !== selectedEditSourceReference)

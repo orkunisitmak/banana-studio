@@ -31,3 +31,13 @@ test('a failed generation is labelled and has no empty image', () => {
   assert.match(html, /Failed/);
   assert.match(html, /title="Provider rejected the request\."/);
 });
+
+test('a video still being generated without a URL shows Processing, not Failed', () => {
+  // A recoverable status-check error keeps the video as processing with no URL and the polling warning as its error.
+  const pending = { ...base, mediaType: 'video', id: 'wait', url: '', prompt: 'city timelapse', status: 'processing', error: 'Status check failed, retrying.' };
+  const html = row(render([pending, done]), 'city timelapse');
+  assert.match(html, /Processing/);
+  assert.doesNotMatch(html, /Failed/);
+  assert.doesNotMatch(html, /Status check failed/);
+  assert.doesNotMatch(html, /<img(?![^>]*src="[^"]+")[^>]*>/);
+});

@@ -33,7 +33,9 @@ const setup = (start, gate, max = 14, failRead, queued, audios = 3) => {
 };
 
 const base = { prompt: 'old', mode: 'image', referenceImages: [], referenceVideos: [], referenceAudios: [] };
-const file = (name, type) => ({ name, type });
+// Image mode checks the first bytes, so image files carry a real PNG signature.
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const file = (name, type) => new File(type === 'image/png' ? [PNG] : [], name, { type });
 const gated = () => { let release; const gate = new Promise(r => { release = r; }); return { gate, release }; };
 
 test('one drop with an image, a video and an audio file keeps all three', async () => {

@@ -36,7 +36,8 @@ const fresh = 'https://p.example/storage/v1/object/sign/media/u/a.png?token=rene
 const fetched = [];
 const norefreshOk = 'https://p.example/storage/v1/object/sign/media/u/b.png?token=norefresh-ok';
 const norefreshBad = 'https://p.example/storage/v1/object/sign/media/u/c.png?token=norefresh-bad';
-globalThis.fetch = async url => { fetched.push(String(url)); if (String(url) === norefreshOk) return new Response(new Blob(['png'], { type: 'image/png' })); return String(url) === fresh ? new Response(new Blob(['png'], { type: 'image/png' })) : new Response('expired', { status: 400 }); };
+const png = () => new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: 'image/png' });
+globalThis.fetch = async url => { fetched.push(String(url)); if (String(url) === norefreshOk) return new Response(png()); return String(url) === fresh ? new Response(png()) : new Response('expired', { status: 400 }); };
 globalThis.FileReader = class { readAsDataURL() { this.result = 'data:image/png;base64,eA=='; setTimeout(() => { this.onload?.(); this.onloadend?.(); }, 0); } };
 globalThis.__saved = [];
 const exp = await bundle('src/components/Controls.tsx', [{ name: 'probe', setup(b) {

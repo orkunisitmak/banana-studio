@@ -910,6 +910,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
   // Notification Panel State
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const isOverlayOpenRef = useRef(false);
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
 
@@ -978,11 +979,25 @@ export const Gallery: React.FC<GalleryProps> = ({
       setMoveMenuOpen(false);
       moveButtonRef.current?.focus();
     };
+    // The Move menu and its New Folder dialog sit on top of the header popups, so they get Escape first.
+    // So do the viewer and the other overlays: one Escape closes one layer, the topmost first.
+    const handlePopupEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !moveMenuOpen && !isCreatingFolder) {
+        if (isOverlayOpenRef.current) return;
+        if (!isNotificationPanelOpen && !isGridMenuOpen && !isUserMenuOpen) return;
+        event.preventDefault();
+        if (isNotificationPanelOpen) { setIsNotificationPanelOpen(false); notificationButtonRef.current?.focus(); }
+        else if (isGridMenuOpen) { setIsGridMenuOpen(false); gridMenuRef.current?.querySelector('button')?.focus(); }
+        else if (isUserMenuOpen) { setIsUserMenuOpen(false); userMenuRef.current?.querySelector('button')?.focus(); }
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handlePopupEscape);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handlePopupEscape);
     };
   }, [isGridMenuOpen, isNotificationPanelOpen, isUserMenuOpen, moveMenuOpen, isCreatingFolder]);
 
@@ -1038,6 +1053,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   const hasMoreImages = displayCount < allVisibleImages.length;
 
   const { selectedMedia } = useGalleryMediaDetails(images, selectedMediaId, galleryOwner?.user_id, userProfile?.id);
+  const isViewerOpen = Boolean(selectedMedia && !selectedMedia.isLoading && !isSelectionMode);
+  isOverlayOpenRef.current = Boolean(isViewerOpen || comparisonIds || isSearchOpen || isYouTubePreviewOpen || isHelpCenterOpen || previewRefImage || sharingFolder);
   const selectedEditSourceReference = selectedMedia ? getRecordedEditSourceReference(selectedMedia) : undefined;
   const selectedReferenceImages = (selectedMedia?.referenceImages || []).filter(reference =>
     reference.data && (selectedMedia?.mediaType !== 'image' || reference !== selectedEditSourceReference)
@@ -2190,7 +2207,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
               <div ref={gridMenuRef} className="relative hidden sm:block">
                 <button
-                  onClick={() => setIsGridMenuOpen(!isGridMenuOpen)}
+                  onClick={() => { setIsGridMenuOpen(!isGridMenuOpen); setIsNotificationPanelOpen(false); setIsUserMenuOpen(false); }}
                   aria-label="Grid density"
                   aria-expanded={isGridMenuOpen}
                   className={`relative grid h-10 w-10 place-items-center rounded-xl border transition-colors ${isGridMenuOpen ? 'border-violet-400/60 bg-violet-600 text-white' : 'border-white/[0.08] bg-[#161b22] text-gray-400 hover:border-white/15 hover:text-white'}`}

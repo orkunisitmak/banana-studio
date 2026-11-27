@@ -136,7 +136,7 @@ export class LocalWorkspace {
       if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
       return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
     }
-    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
+    if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');
     return this.workerRpc(name,args);
   }

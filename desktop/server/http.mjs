@@ -6,7 +6,7 @@ import { LOCAL_AUTH } from './context.mjs';
 
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.gif':'image/gif','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.avif':'image/avif','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4'};
 const MEDIA_CSP = "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-const equal=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
+const equal=(a,b)=>{if(typeof a!=='string'||typeof b!=='string')return false;const left=Buffer.from(a),right=Buffer.from(b);return left.length===right.length&&timingSafeEqual(left,right);};
 const json=(res,status,value)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
 const body=async(req,limit)=>{const parts=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>limit)throw new Error('LIMIT');parts.push(chunk);}return Buffer.concat(parts);};
 const serveFile=(req,res,file,media=false)=>{
@@ -56,7 +56,7 @@ export async function startLocalServer({ workspace, root, bootstrap, routes={}, 
       if(media&&['GET','HEAD'].includes(req.method))return serveFile(req,res,workspace.mediaPath(decodeURIComponent(media[1])),true);
       if(url.pathname==='/local/health'&&req.method==='GET')return json(res,200,{ready:true});
       if(url.pathname.startsWith('/api/')) {
-        const route=routes[url.pathname.slice(5)];if(!route)return json(res,404,{error:'This feature is not available in local mode.'});
+        const routeKey=url.pathname.slice(5);const route=Object.hasOwn(routes,routeKey)&&typeof routes[routeKey]==='function'?routes[routeKey]:null;if(!route)return json(res,404,{error:'This feature is not available in local mode.'});
         req.query=Object.fromEntries(url.searchParams);req.body=undefined;
         if(req.method==='POST')req.body=JSON.parse((await body(req,16*1024*1024)).toString()||'{}');
         await route(req,res);onWake();return;

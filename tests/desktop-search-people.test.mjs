@@ -45,3 +45,26 @@ test('legacy subject and second-person flags remain searchable; empty rows remai
   ]), ['Me', 'Guest']);
   assert.deepEqual(await people(t, []), []);
 });
+
+test('desktop search keyset pagination visits every id once across pages regardless of case or punctuation', async t => {
+  for (const ids of [['a_1', 'a_2', 'a-2'], ['a', 'A', 'b', 'B', 'c', 'C']]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-search-page-'));
+    const store = new LocalWorkspace(root);
+    t.after(() => { store.close(); fs.rmSync(root, { recursive: true, force: true }); });
+    const client = store.client();
+    for (const id of ids) {
+      assert.equal((await client.from('generations').insert({ id, reference_images: [{ personId: 3, personName: 'Alex' }] })).error, null);
+    }
+    const seen = [];
+    let afterId = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await client.rpc('get_gallery_search_people', { p_owner_id: store.user.id, p_after_id: afterId, p_limit: 2 });
+      assert.equal(page.error, null);
+      if (!page.data.length) break;
+      seen.push(...page.data.map(row => row.id));
+      if (page.data.length < 2) break;
+      afterId = page.data.at(-1).id;
+    }
+    assert.deepEqual(seen, [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  }
+});

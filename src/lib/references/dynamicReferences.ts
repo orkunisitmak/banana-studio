@@ -100,7 +100,10 @@ export const displayReferencePrompt = (prompt: string, references: ReferenceImag
   const pairs = aliases(references, definitions);
   const lookup = new Map(pairs);
   if (!pairs.length) return prompt;
-  const pattern = new RegExp(`(?:${pairs.map(([tag]) => escapePattern(tag)).sort((a, b) => b.length - a.length).join('|')})(?![\\p{L}\\p{N}_])`, 'gu');
+  const parts = [...pairs]
+    .sort(([a], [b]) => b.length - a.length)
+    .map(([tag, display]) => `${escapePattern(tag)}(?![\\p{L}\\p{M}\\p{N}_])${display.startsWith('@[') ? '' : '(?!\\.[\\p{L}\\p{N}])'}`);
+  const pattern = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_])(?:${parts.join('|')})`, 'gu');
   return mapUnquotedPrompt(prompt, text => text.replace(pattern, tag => lookup.get(tag) || tag));
 };
 
@@ -108,6 +111,9 @@ export const storeReferencePrompt = (prompt: string, references: ReferenceImage[
   const pairs = aliases(references, definitions);
   const lookup = new Map(pairs.map(([tag, display]) => [display, tag]));
   if (!pairs.length) return prompt;
-  const pattern = new RegExp(`(?:${pairs.map(([, display]) => escapePattern(display)).sort((a, b) => b.length - a.length).join('|')})(?![\\p{L}\\p{N}_])`, 'gu');
+  const parts = [...pairs]
+    .sort(([, a], [, b]) => b.length - a.length)
+    .map(([, display]) => `${escapePattern(display)}(?![\\p{L}\\p{M}\\p{N}_])${display.startsWith('@[') ? '' : '(?!\\.[\\p{L}\\p{N}])'}`);
+  const pattern = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_])(?:${parts.join('|')})`, 'gu');
   return bindImageReferences(mapUnquotedPrompt(prompt, text => text.replace(pattern, display => lookup.get(display) || display)), references, referenceTag);
 };

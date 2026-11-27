@@ -39,6 +39,7 @@ import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
+import { useUnloadWarning } from '../lib/shared/unloadWarning';
 import { assignSeedanceFrames, getSeedanceFrameError } from '../lib/video/seedanceFrames';
 import { getYouTubeDraftKey, prepareYouTubeBrainstormDraft, type YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
 
@@ -72,12 +73,13 @@ const isH3MetadataOnlyUpdate = (before: GenerationConfig, after: GenerationConfi
   return sameReferences(beforeImages, afterImages) && sameReferences(beforeVideos || [], afterVideos || []);
 };
 
-const readFileAsBase64 = (file: File | Blob): Promise<string> => {
+const readFileAsBase64 = (file: File | Blob, mimeType?: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    // The data URL carries the Blob's type, and the upload later takes its content type from it.
+    reader.readAsDataURL(mimeType && file.type !== mimeType ? new Blob([file], { type: mimeType }) : file);
   });
 };
 
@@ -107,6 +109,11 @@ const readMediaDuration = (url: string, kind: 'video' | 'audio'): Promise<number
 };
 
 const readVideoDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'video');
+// A saved Video Edit result has no length of its own (-1 = source length), so measure it like an uploaded file.
+export const galleryVideoDuration = async (media: { url: string; videoOutputDuration?: number; videoDuration?: number }): Promise<number | undefined> => {
+  const known = media.videoOutputDuration != null && media.videoOutputDuration > 0 ? media.videoOutputDuration : media.videoDuration;
+  return known && known > 0 ? known : readVideoDuration(media.url);
+};
 const readAudioDuration = (url: string): Promise<number | undefined> => readMediaDuration(url, 'audio');
 
 const uploadReferenceVideo = async (file: File, allowNativeWebm = false): Promise<ReferenceVideo> => {
@@ -390,8 +397,23 @@ export const Controls: React.FC<ControlsProps> = ({
     field.scrollTop = 0;
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadingReferenceVideos, setUploadingReferenceVideos] = useState(0);
-  const insertSourceUploadRef = useRef(false);
+  const insertSourceUploadRef = useRef<{ draft: object } | null>(null);
+  const insertDraftKeyFor = (draftConfig: GenerationConfig) => JSON.stringify([promptLoadVersion, draftConfig.mode, draftConfig.videoModel, draftConfig.videoOperation, draftConfig.h3MaxMode]);
+  const insertDraftKey = insertDraftKeyFor(config);
+  const insertUploadDraftRef = useRef({ key: insertDraftKey, token: {} });
+  const videoUploadDraft = insertUploadDraftRef.current.key === insertDraftKey ? insertUploadDraftRef.current.token : {};
+  // Discarded renders must not invalidate work belonging to the committed draft.
+  useLayoutEffect(() => { insertUploadDraftRef.current = { key: insertDraftKey, token: videoUploadDraft }; }, [insertDraftKey, videoUploadDraft]);
+  const [videoUploads, setVideoUploads] = useState<{ draft: object; count: number } | null>(null);
+  const uploadingReferenceVideos = videoUploads?.draft === videoUploadDraft ? videoUploads.count : 0;
+  const setUploadingReferenceVideos = (update: (count: number) => number) => setVideoUploads(previous => {
+    // Old completions must neither occupy nor release the current draft's slots.
+    if (videoUploadDraft !== insertUploadDraftRef.current.token) return previous;
+    return { draft: videoUploadDraft, count: update(previous?.draft === videoUploadDraft ? previous.count : 0) };
+  });
+  const galleryDropEpochRef = useRef(0);
+  const galleryDropChainRef = useRef<Promise<void>>(Promise.resolve());
+  useUnloadWarning(uploadingReferenceVideos > 0);
 
   useLayoutEffect(() => {
     const element = generationBarRef.current;
@@ -665,17 +687,38 @@ export const Controls: React.FC<ControlsProps> = ({
       const currentImages = config.referenceImages || [];
       const remainingSlots = Math.max(0, MAX_IMAGES - currentImages.length);
 
-      if (files.length > remainingSlots) {
-        setAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
+      // Image providers only read these formats; the Gallery editor refuses the rest up front too.
+      // Drop unsupported files before counting slots, so one of them cannot use up the slot a valid file needs.
+      // A gallery download can come back with no content type or file name, so look at its first bytes.
+      const sniffImageType = async (file: File | Blob) => {
+        const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+        if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png';
+        if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+        if (String.fromCharCode(...head.slice(0, 4)) === 'RIFF' && String.fromCharCode(...head.slice(8, 12)) === 'WEBP') return 'image/webp';
+        return '';
+      };
+      // In image mode the first bytes decide the format, so a GIF named photo.jpg is refused too.
+      // A file whose first bytes cannot be read counts as unrecognised, so it cannot reject the other files.
+      const kinds = await Promise.all(files.map(async file => {
+        const named = getMimeType(file, (file as File).name);
+        if (config.mode === 'image') return await sniffImageType(file).catch(() => '');
+        if (named === 'application/octet-stream') return await sniffImageType(file).catch(() => '') || named;
+        return named;
+      }));
+      const supported = config.mode !== 'image' ? files : files.filter((_, index) => ['image/png', 'image/jpeg', 'image/webp'].includes(kinds[index]));
+      const unsupportedFormat = supported.length < files.length;
+
+      if (supported.length > remainingSlots) {
+        addAttachmentError(`Limit reached: ${MAX_IMAGES} ${MAX_IMAGES === 1 ? 'image' : 'images'} max.`);
       }
 
-      const filesToProcess = files.slice(0, remainingSlots);
+      const filesToProcess = supported.slice(0, remainingSlots);
       const newImages: ReferenceImage[] = [];
 
       for (const file of filesToProcess) {
-          let data = await readFileAsBase64(file);
           const name = (file as File).name;
-          let mimeType = getMimeType(file, name);
+          let mimeType = kinds[files.indexOf(file)];
+          let data = await readFileAsBase64(file, mimeType);
 
           // Keep image-edit sources intact, including imports made before the
           // user switches from Nano Banana to Sunburst. Image generation sends
@@ -697,6 +740,8 @@ export const Controls: React.FC<ControlsProps> = ({
             mimeType
           });
       }
+
+      if (unsupportedFormat) addAttachmentError('Choose a PNG, JPG or WebP reference image.');
 
       if (newImages.length > 0) {
         // Merge into the latest draft: reading/compressing the files awaited,
@@ -722,12 +767,13 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || videoUploadDraft !== insertUploadDraftRef.current.token) return;
     setAttachmentError(null);
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
+    const draft = videoUploadDraft;
     const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
     const needsSource = isInsert && !sourceId;
-    if (needsSource && insertSourceUploadRef.current) {
+    if (needsSource && insertSourceUploadRef.current?.draft === draft) {
       addAttachmentError('Wait for the Insert source video to finish uploading before adding more clips.');
       return;
     }
@@ -743,13 +789,15 @@ export const Controls: React.FC<ControlsProps> = ({
       files = files.filter(file => file.size <= 50 * 1024 * 1024);
       if (!files.length) return;
     }
-    if (needsSource) insertSourceUploadRef.current = true;
+    const sourceUpload = needsSource ? { draft: draft! } : null;
+    if (sourceUpload) insertSourceUploadRef.current = sourceUpload;
     setUploadingReferenceVideos(count => count + files.length);
     try {
       const results: PromiseSettledResult<ReferenceVideo>[] = [];
       if (needsSource) {
         // Supplemental clips must never become the source after its upload fails.
         const source = await Promise.allSettled([uploadReferenceVideo(files[0], isH3VideoConfig)]);
+        if (draft !== insertUploadDraftRef.current.token) return;
         if (source[0].status === 'rejected') {
           setAttachmentError(source[0].reason instanceof Error ? source[0].reason.message : 'Source video upload failed.');
           return;
@@ -757,6 +805,7 @@ export const Controls: React.FC<ControlsProps> = ({
         results.push(...source);
       }
       results.push(...await Promise.allSettled(files.slice(needsSource ? 1 : 0).map(file => uploadReferenceVideo(file, isH3VideoConfig))));
+      if (draft !== insertUploadDraftRef.current.token) return;
       const newRefs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failures = results.flatMap(result =>
         result.status === 'rejected'
@@ -770,17 +819,21 @@ export const Controls: React.FC<ControlsProps> = ({
         // even if another selection finished first. flushSync applies the update now,
         // so the warning reflects what it kept.
         flushSync(() => onChange(previous => {
-          if (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length)) {
+          if (draft !== insertUploadDraftRef.current.token || (isInsert && (sourceId ? previous.referenceVideos?.[0]?.id !== sourceId : previous.referenceVideos?.length))) {
             sourceChanged = true;
             return previous;
           }
           const kept = newRefs.slice(0, Math.max(0, attachLimitsRef.current.videos - (previous.referenceVideos?.length || 0)));
           dropped = newRefs.length - kept.length;
-          return {
+          const next = {
             ...previous,
             referenceVideos: [...(previous.referenceVideos || []), ...kept],
             ...(switchToVideo ? { mode: 'video' as const } : {}),
           };
+          // This drop's own switch to video mode is not a replacement draft: keep its
+          // token so the remaining phases of the same drop (audio, warnings) still run.
+          if (switchToVideo) insertUploadDraftRef.current = { key: insertDraftKeyFor(next), token: draft };
+          return next;
         }));
       }
       if (failures.length > 0) {
@@ -789,7 +842,7 @@ export const Controls: React.FC<ControlsProps> = ({
       if (sourceChanged) addAttachmentError('The Insert source video changed while uploading. Add the clips again for the current source.');
       if (dropped) addAttachmentError(`Limit reached: ${attachLimitsRef.current.videos} ${attachLimitsRef.current.videos === 1 ? 'video' : 'videos'} max.`);
     } finally {
-      if (needsSource) insertSourceUploadRef.current = false;
+      if (sourceUpload && insertSourceUploadRef.current === sourceUpload) insertSourceUploadRef.current = null;
       setUploadingReferenceVideos(count => Math.max(0, count - files.length));
     }
   };
@@ -811,10 +864,12 @@ export const Controls: React.FC<ControlsProps> = ({
     // A model switch can leave more inputs than the new limit; never slice with a negative end.
     const room = Math.max(0, MAX_VIDEOS - current);
     const picked = Array.from(e.target.files) as File[];
+    // Clear now, so the same file can be picked again even if this selection becomes obsolete.
+    if (videoInputRef.current) videoInputRef.current.value = '';
     await processVideoFiles(picked.slice(0, room));
+    if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
     // After processing (which clears earlier errors), keeping any upload error it reported.
     if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
-    if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
   const processAudioFiles = async (files: File[], switchToVideo = false) => {
@@ -951,6 +1006,9 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleClearAll = () => {
+    insertUploadDraftRef.current = { ...insertUploadDraftRef.current, token: {} };
+    insertSourceUploadRef.current = null;
+    galleryDropEpochRef.current += 1;
     if (config.prompt || config.referenceImages.length > 0 || config.personGroups?.length || (config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0) {
         setUndoStack(prev => [...prev.slice(-9), { images: [...config.referenceImages], prompt: config.prompt, imagePromptCategory: config.imagePromptCategory, promptPreparation: config.promptPreparation, youtubeSource: config.youtubeSource, personGroups: getPersonDefinitions(config), h3MaxOptions: config.h3MaxOptions, clearedConfig: config }]);
         onChange({
@@ -1472,6 +1530,7 @@ export const Controls: React.FC<ControlsProps> = ({
             await processImageFiles(imageFiles);
         }
 
+        if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
         if (videoFiles.length > 0) {
             if (isH3VideoConfig && maxReferenceVideos === 0) {
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
@@ -1483,6 +1542,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 if (toAdd.length > 0) {
                     await processVideoFiles(toAdd, true);
                 }
+                if (videoUploadDraft !== insertUploadDraftRef.current.token) return;
                 if (videoFiles.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
             }
         }
@@ -1507,19 +1567,40 @@ export const Controls: React.FC<ControlsProps> = ({
                 setAttachmentError('Choose an H3 Max action that accepts videos before adding a video.');
                 return;
               }
-              const MAX_VIDEOS = maxReferenceVideos;
-              if ((config.referenceVideos?.length || 0) >= MAX_VIDEOS) {
-                setAttachmentError(`Maximum of ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} allowed for the selected action.`);
-                return;
+              // Reading the length can take seconds: hold Generate meanwhile, add drops in the order they were dropped,
+              // and skip the add if Clear ran while waiting.
+              const epoch = galleryDropEpochRef.current;
+              const turn = galleryDropChainRef.current;
+              let release: () => void = () => {};
+              galleryDropChainRef.current = new Promise<void>(resolve => { release = resolve; });
+              setUploadingReferenceVideos(count => count + 1);
+              // Start reading now so slow drops overlap; the chain only orders the adds.
+              const durationRead = galleryVideoDuration(media);
+              try {
+                await turn;
+                const duration = await durationRead;
+                if (epoch !== galleryDropEpochRef.current) return;
+                // Merge into the latest draft and its latest limit.
+                let full = false;
+                flushSync(() => onChange(previous => {
+                  if ((previous.referenceVideos?.length || 0) >= attachLimitsRef.current.videos) {
+                    full = true;
+                    return previous;
+                  }
+                  return {
+                    ...previous,
+                    referenceVideos: [
+                      ...(previous.referenceVideos || []),
+                      { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration }
+                    ],
+                    mode: 'video',
+                  };
+                }));
+                if (full) setAttachmentError(`Maximum of ${attachLimitsRef.current.videos} videos allowed for the selected action.`);
+              } finally {
+                release();
+                setUploadingReferenceVideos(count => count - 1);
               }
-              onChange({
-                ...config,
-                referenceVideos: [
-                  ...(config.referenceVideos || []),
-                  { id: Math.random().toString(36).substr(2, 9), url: media.url, mimeType: 'video/mp4', duration: media.videoDuration }
-                ],
-                mode: 'video',
-              });
               return;
             }
             const response = await fetch(await refreshMediaAccessUrl(media.url, false).catch(() => media.url));
@@ -1631,7 +1712,7 @@ export const Controls: React.FC<ControlsProps> = ({
         return;
       }
 
-      if (e.key === 'Escape' && isBrainstormPanelOpen) {
+      if (e.key === 'Escape' && !e.defaultPrevented && isBrainstormPanelOpen) {
         e.preventDefault();
         setIsBrainstormPanelOpen(false);
         return;
@@ -1953,7 +2034,7 @@ export const Controls: React.FC<ControlsProps> = ({
   const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
   const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
     ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+    : uploadingReferenceVideos === 0 && !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
   if (isMinimized) {
     return (

@@ -25,14 +25,14 @@ const pickers = await transform(`export const createPicker = (getMimeType, initi
   const setAttachmentError = error => { attachmentError = error; };
   const addAttachmentError = setAttachmentError, flushSync = callback => callback();
   const readAudioDuration = async () => 3, estimateBase64Size = data => data.length;
-  const readFileAsBase64 = async file => 'data:' + file.type + ';base64,' + Buffer.from(await file.arrayBuffer()).toString('base64');
+  const readFileAsBase64 = async (file, mimeType) => 'data:' + (mimeType || file.type) + ';base64,' + Buffer.from(await file.arrayBuffer()).toString('base64');
   const compressImage = () => { throw new Error('Unexpected compression'); };
   ${controls.slice(imageStart, imageEnd)}
   ${controls.slice(audioStart, audioEnd)}
   return { processImageFiles, handleAudioFileUpload, getConfig: () => config, getError: () => attachmentError };
 };`, { loader: 'ts', format: 'esm' });
 const { createPicker } = await import('data:text/javascript;base64,' + Buffer.from(pickers.code).toString('base64'));
-const picker = () => createPicker(getMimeType, { mode: 'image', prompt: 'Synthetic', referenceImages: [], referenceAudios: [] });
+const picker = (mode = 'image') => createPicker(getMimeType, { mode, prompt: 'Synthetic', referenceImages: [], referenceAudios: [] });
 
 const state = { uploads: [], rows: [], allowedMimeTypes: null };
 globalThis.__referenceMimeUpload = {
@@ -101,9 +101,11 @@ test('specific MIME types and unrecognized filenames are not relabeled as media'
   }
 });
 
+const pngBytes = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+
 test('generic PNG picker bytes retain the inferred MIME through reference storage upload', async t => {
   setup(t);
-  const file = new File(['synthetic-png'], 'photo.png', { type: 'application/octet-stream' });
+  const file = new File([pngBytes], 'photo.png', { type: 'application/octet-stream' });
   const input = picker();
   await input.processImageFiles([file]);
   const [reference] = input.getConfig().referenceImages;
@@ -113,7 +115,7 @@ test('generic PNG picker bytes retain the inferred MIME through reference storag
   assert.ok(url?.startsWith('https://storage.invalid/'));
   assert.equal(state.uploads[0].contentType, 'image/png');
   assert.equal(state.uploads[0].blob.type, 'image/png');
-  assert.equal(await state.uploads[0].blob.text(), 'synthetic-png');
+  assert.deepEqual(Buffer.from(await state.uploads[0].blob.arrayBuffer()), pngBytes);
 });
 
 test('generic MP3 picker bytes keep their inferred MIME when saving a template', async t => {
@@ -197,12 +199,12 @@ const fileTypeBox = (major, compatible = [], minor = '\0\0\0\0') => {
 
 for (const brand of ['heic', 'heix', 'heim', 'heis', 'mif1']) {
   for (const type of ['', 'application/octet-stream']) {
-    test(`unnamed ${brand} image blob with ${type || 'missing'} MIME survives picker and reference upload`, async t => {
+    test(`unnamed ${brand} image blob with ${type || 'missing'} MIME survives the video reference picker and reference upload`, async t => {
       setup(t);
       const expected = brand === 'mif1' ? 'image/heif' : 'image/heic';
       // The generic brand comes first; codec-specific compatible brands take priority.
       const bytes = fileTypeBox('mif1', ['mif1', brand]);
-      const input = picker();
+      const input = picker('video');
       await input.processImageFiles([new Blob([bytes], { type })]);
       const ref = input.getConfig().referenceImages[0];
       assert.ok(await uploadBase64ToPublicUrl(ref.data, ref.mimeType));
@@ -214,10 +216,10 @@ for (const brand of ['heic', 'heix', 'heim', 'heis', 'mif1']) {
 
 for (const [brand, expected] of [['hevc', 'image/heic-sequence'], ['hevx', 'image/heic-sequence'], ['msf1', 'image/heif-sequence']]) {
   for (const type of ['', 'application/octet-stream']) {
-    test(`generic ${brand} sequence preserves its MIME and bytes through reference upload`, async t => {
+    test(`generic ${brand} sequence preserves its MIME and bytes through video reference upload`, async t => {
       setup(t);
       for (const bytes of [fileTypeBox(brand), fileTypeBox('mif1', ['mif1', brand])]) {
-        const input = picker();
+        const input = picker('video');
         await input.processImageFiles([new Blob([bytes], { type })]);
         const ref = input.getConfig().referenceImages[0];
         assert.ok(await uploadBase64ToPublicUrl(ref.data, ref.mimeType));
@@ -314,7 +316,7 @@ for (const [kind, save] of [['image', saveImage], ['video', saveVideo]]) {
   const result = { id: `generated-${kind}`, url: kind === 'image' ? 'data:image/png;base64,c3ludGhldGlj' : 'https://provider.invalid/video.mp4', prompt: 'Synthetic', mediaType: kind, createdAt: 1 };
   test(`${kind} persistence retains a generic PNG picker's inferred MIME and bytes`, async t => {
     setup(t);
-    const file = new File(['synthetic-png'], 'photo.png', { type: 'application/octet-stream' });
+    const file = new File([pngBytes], 'photo.png', { type: 'application/octet-stream' });
     const input = picker();
     await input.processImageFiles([file]);
     const referenceImages = input.getConfig().referenceImages;
@@ -322,7 +324,7 @@ for (const [kind, save] of [['image', saveImage], ['video', saveVideo]]) {
     const uploaded = state.uploads.find(upload => upload.path.includes('/refs/'));
     assert.equal(uploaded.contentType, 'image/png');
     assert.equal(uploaded.blob.type, 'image/png');
-    assert.equal(await uploaded.blob.text(), 'synthetic-png');
+    assert.deepEqual(Buffer.from(await uploaded.blob.arrayBuffer()), pngBytes);
     assert.equal(state.rows[0].reference_images[0].mimeType, 'image/png');
     assert.match(state.rows[0].reference_images[0].data, /\/storage\/v1\/object\/authenticated\/media\//);
   });
@@ -448,6 +450,8 @@ const dropEnd = controls.indexOf('    // 2. Handle Gallery Drops', dropStart);
 assert.ok(dropStart > 0 && dropEnd > dropStart);
 const dropHandler = await transform(`export const dropFiles = async (files, getMimeType, options = {}) => {
   const seen = { images: [], videos: [], audios: [], errors: [] };
+  const videoUploadDraft = {};
+  const insertUploadDraftRef = { current: { token: videoUploadDraft } };
   const e = { dataTransfer: { files } };
   const isH3VideoConfig = options.isH3VideoConfig ?? false;
   const maxReferenceVideos = options.maxReferenceVideos ?? 3, maxReferenceAudios = 3;
@@ -496,13 +500,17 @@ test('inferred video drops retain pending-upload limits and H3 action restrictio
 });
 
 for (const type of ['', 'application/octet-stream']) {
-  test(`generic GIF with ${type || 'empty'} MIME survives drop, picker and upload`, async t => {
+  test(`generic GIF with ${type || 'empty'} MIME survives drop, video reference picker and upload`, async t => {
     setup(t);
     const bytes = Buffer.from('GIF89a', 'ascii');
     const file = new File([bytes], 'photo.GIF', { type });
     const result = await dropFiles([file], getMimeType);
     assert.deepEqual(result.images, [file]);
-    const input = picker();
+    const imageInput = picker();
+    await imageInput.processImageFiles(result.images);
+    assert.deepEqual(imageInput.getConfig().referenceImages, []);
+    assert.match(imageInput.getError(), /PNG, JPG or WebP/);
+    const input = picker('video');
     await input.processImageFiles(result.images);
     const ref = input.getConfig().referenceImages[0];
     assert.equal(ref.mimeType, 'image/gif');

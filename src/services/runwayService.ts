@@ -2,12 +2,14 @@ import { selectProvider } from './providerRouting';
 import { videoProviderName } from '../lib/video/videoProviderName';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
+import { getMultilineQuotedPromptPattern } from '../lib/references/referenceTokens';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
 import { logUsage, supabase } from './authService';
 import { uploadBase64ToPublicUrl, uploadBlobToPublicUrl, uploadVideoBlobToPublicUrl, refreshMediaAccessUrl } from './storageService';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { getSeedanceFrameError, prepareSeedanceFramePrompt } from '../lib/video/seedanceFrames';
 import { prepareReferenceAudio } from '../lib/video/referenceAudio';
+import { formatRejectedDuration } from '../lib/video/rejectedDuration';
 import { buildH3MaxInput, H3_MAX_CAPABILITIES, type H3MaxMode } from '../lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxMode, getH3MaxReferenceImages, getH3MaxRequestBody, getKnownVideoDuration } from '../lib/video/h3MaxConfig';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
@@ -244,15 +246,6 @@ export const getNormalizedVideoDimensions = (
     else dimensions.height += 2;
   }
   return dimensions;
-};
-
-// Round for display without landing on the accepted range: 30.001 is shown as
-// 30.01 and 3.999 as 3.99, so the number never contradicts the refusal.
-const formatRejectedDuration = (duration: number, min: number, max: number): string => {
-  const shown = duration.toFixed(2);
-  if (duration < min && Number(shown) >= min) return (Math.floor(duration * 100) / 100).toFixed(2);
-  if (duration > max && Number(shown) <= max) return (Math.ceil(duration * 100) / 100).toFixed(2);
-  return shown;
 };
 
 export const validateEditSourceMetadata = (
@@ -564,13 +557,13 @@ const prepareReferenceVideos = async (
     persistedVideos.push(persistedRef);
 
     if (videoModel !== 'minimax-h3' && operation === 'generate' && ref.isContinuation && targetAspectRatio !== 'adaptive') {
-      const matchesTarget = await videoAspectMatchesTarget(ref.url, targetAspectRatio);
+      const matchesTarget = await videoAspectMatchesTarget(publicUrl, targetAspectRatio);
       if (!matchesTarget) {
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
         assertRoomForFrames(generatedFirstFrames.length + 1);
-        generatedFirstFrames.push(await extractContinuationFirstFrame(ref.url, targetAspectRatio, quality, label));
+        generatedFirstFrames.push(await extractContinuationFirstFrame(publicUrl, targetAspectRatio, quality, label));
         extractedVideoIndices.push(i);
         continue;
       }
@@ -668,10 +661,15 @@ export const prepareSeedanceReferenceGenerationPrompt = (
     ? `${referenceTags.slice(0, -1).join(', ')} and ${referenceTags[referenceTags.length - 1]}`
     : referenceTags[0] || 'the attached material';
 
-  const rephrased = prompt
+  // Keep literal copy opaque while matching whole commands around quoted nouns.
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  const protectedPrompt = prompt.replace(getMultilineQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const rephrased = protectedPrompt
     .replace(/\[(?:EDIT|EXTEND)(?:\s+DIRECTION)?\]/gi, '[NEW SHOT DIRECTION]')
     .replace(
-      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n]*[:.]\s*/gi,
+      /\b(?:edit|extend)\s+(@video\d+)\b[^:.\n\uE000]*[:.]\s*/gi,
       (_match, tag: string) => `Use ${tag} as visual reference material. `,
     )
     .replace(
@@ -743,7 +741,8 @@ export const prepareSeedanceReferenceGenerationPrompt = (
   const direction = continuationSource
     ? `Create a new ${aspectRatio} shot that chronologically follows ${continuationSource}'s final visible moment. Match the opening pose, identity, environment, camera framing, and motion to that terminal state; portray only subsequent action. Use other attached material as supplementary visual guidance.`
     : `Create a new standalone ${aspectRatio} composition. Use ${referenceList} only as visual reference material for the people, setting, lighting, camera language, and motion. The result is a newly generated shot with independent framing.`;
-  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`);
+  return normalizeVideoPromptWhitespace(`${direction} ${rephrased}`)
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
 };
 
 // Convert app-internal @ tags (and user-entered @/# aliases) to each
@@ -761,7 +760,12 @@ const cleanPromptForVideoModel = (
   refs: ReferenceImage[],
   videoOperation: VideoOperation,
 ): string => {
-  let cleaned = prompt;
+  const literals: string[] = [];
+  let literalMarker = '\uE000';
+  while (prompt.includes(literalMarker)) literalMarker += literalMarker;
+  let cleaned = prompt.replace(getMultilineQuotedPromptPattern(), literal => `${literalMarker}${literals.push(literal) - 1}\uE001`);
+  const restoreLiterals = (value: string): string => value
+    .replace(new RegExp(`${literalMarker}(\\d+)\uE001`, 'g'), (_match, index) => literals[Number(index)]);
   if (videoModel === 'minimax-h3') {
     const frameLabel = (rawIndex: string): string => {
       const index = Number(rawIndex);
@@ -783,7 +787,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/\[EDIT DIRECTION\]/gi, '[VIDEO DIRECTION]');
     cleaned = cleaned.replace(/[@#]VIDEO(?:[_ ]?\d+)?\b/gi, 'the described motion');
     cleaned = cleaned.replace(/[@#]AUDIO(?:[_ ]?\d+)?\b/gi, 'the requested sound');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   const personBinding = (personId: number, fallback: string): string => {
@@ -816,7 +820,7 @@ const cleanPromptForVideoModel = (
     cleaned = cleaned.replace(/@VIDEO_(\d+)/gi, (_m, n) => Number(n) === 1 ? '@VIDEO' : `reference video ${n}`);
     cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
     cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-    return normalizeVideoPromptWhitespace(cleaned);
+    return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
   }
 
   // Seedance 2.5 is stricter than 2.0 here: a bare @VIDEO can be interpreted
@@ -833,7 +837,7 @@ const cleanPromptForVideoModel = (
   cleaned = cleaned.replace(/@AUDIO_(\d+)/gi, (_m, n) => `@audio${n}`);
   cleaned = cleaned.replace(/@VIDEO\b/gi, '@video1');
   cleaned = cleaned.replace(/@AUDIO\b/gi, '@audio1');
-  return normalizeVideoPromptWhitespace(cleaned);
+  return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
 };
 
 /** Every Max route uses its own media contract; no Seedance extraction or

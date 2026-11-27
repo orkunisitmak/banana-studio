@@ -2,7 +2,7 @@ import { isLocalWorkspace } from './lib/config/runtimeConfig';
 import { WorkspaceBar } from './components/WorkspaceBar';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Controls } from './components/Controls';
+import { Controls, galleryVideoDuration } from './components/Controls';
 import { getReferenceImageLimit } from './lib/images/imageReferences';
 import { Gallery } from './components/Gallery';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -32,8 +32,9 @@ import { validateImageGenerationReferences } from './lib/images/imagePrompting';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
-import { refreshPendingVideoSubmission, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
+import { refreshPendingVideoSubmission, saveVideoTaskId, failStalePendingVideo, scheduleStaleVideoCheck, allowPeriodicStaleCheck } from './lib/gallery/videoSubmissionLease';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
+import { hasUnresumableVideoSubmission, useUnloadWarning } from './lib/shared/unloadWarning';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { describeMediaCount } from './lib/gallery/deleteConfirmation';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
@@ -192,6 +193,7 @@ const AuthorizedWorkspace: React.FC<{
   const [isInitialGalleryLoading, setIsInitialGalleryLoading] = useState(false);
   const [isGalleryIndexLoading, setIsGalleryIndexLoading] = useState(false);
   const [galleryHistoryError, setGalleryHistoryError] = useState<string | null>(null);
+  useUnloadWarning(hasUnresumableVideoSubmission(generatedMedia));
 
   // Generation progress tracking
   const [generationProgress, setGenerationProgress] = useState<{ completed: number; total: number } | null>(null);
@@ -1011,10 +1013,9 @@ const AuthorizedWorkspace: React.FC<{
         h3MaxMode, h3MaxOptions: config.h3MaxOptions,
           },
         });
-        // Also store task_id
-        if (supabase) {
-          await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
-        }
+        // Also store task_id. Until the row holds it, a reload cannot resume
+        // this video, so the close warning stays on.
+        const taskIdSaved = !supabase || await saveVideoTaskId(supabase, userId, videoId, taskId);
         clearInterval(submissionHeartbeat);
 
         // Log as soon as EvoLink accepts/reserves credits for the task. The
@@ -1027,7 +1028,7 @@ const AuthorizedWorkspace: React.FC<{
         if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+          item.id === videoId ? { ...item, status: 'processing', taskId, taskIdUnsaved: !taskIdSaved || undefined, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
         ));
 
         const videoResult = await pollVideoTask(taskId, (progress) => {
@@ -1697,6 +1698,7 @@ const AuthorizedWorkspace: React.FC<{
   const handleUseAsReference = async (media: GeneratedMedia) => {
     try {
       if (media.mediaType === 'video') {
+        const duration = await galleryVideoDuration(media);
         let limit: number | null = null;
         flushSync(() => setConfig(prev => {
           const MAX_VIDEOS = prev.videoModel === 'minimax-h3'
@@ -1714,7 +1716,7 @@ const AuthorizedWorkspace: React.FC<{
                 id: Math.random().toString(36).substr(2, 9),
                 url: media.url,
                 mimeType: 'video/mp4',
-                duration: media.videoOutputDuration || media.videoDuration,
+                duration,
                 previousPrompt: media.prompt,
               }
             ],
@@ -1838,6 +1840,7 @@ const AuthorizedWorkspace: React.FC<{
         imageModel,
         count: config.count
       });
+      setPromptLoadVersion(version => version + 1);
       toast.info('Template Applied', `"${template.name}" settings loaded.`);
     } catch (error) {
       toast.error('Template could not be applied', error instanceof Error ? error.message : 'Check the template references.');

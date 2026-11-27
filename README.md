@@ -26,6 +26,8 @@ The app is free under the [MIT license](LICENSE). AI providers bill their API us
 
 Turn one brief into **multiple distinct concepts**, then generate multiple images per concept. Choose **Simple** for general ideas or **YouTube** for cover concepts. Idea count and images per idea are separate controls: five ideas × four images produces twenty results.
 
+**Önce 1 görsel** generates the first requested image and waits for approval in the gallery before submitting the rest. That image counts toward the total and uses the selected provider's normal fee or plan quota; Brainstorm text usage is separate. Stop or change the prompt/settings to discard the unsubmitted remainder. Reloading also discards that pending approval. Choose **Hepsini üret** to submit the whole batch as before.
+
 Brainstorm uses your brief, selected People and the roles of your references. For YouTube covers it directs the model to use readable composition, camera-facing people and different wardrobe plans across ideas, unless your brief specifies a fixed outfit. Your own creative instructions remain part of the request.
 
 <p align="center"><img src="docs/assets/brainstorm-real.jpg" width="1000" alt="Brainstorm panel over real generated thumbnails: YouTube mode, five ideas, grouped identity photos and images-per-idea total" /></p>

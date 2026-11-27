@@ -2,11 +2,31 @@
 
 ## Windows community archive
 
-The verification workflow builds Windows x64 on `windows-2022`, tests the shared workspace and an isolated Credential Manager entry, runs the packaged mocked generation/protected edit, then uploads `prepared-windows-x64`. The archive includes the self-contained .NET application, pinned Node runtime, shared web/server build and sharp's installed runtime dependencies with licenses. No user data or provider key is included. The archive is unsigned; do not claim Authenticode validation or automatic updates.
+The verification workflow builds Windows x64 on `windows-2022`, tests the shared workspace and an isolated Credential Manager entry, runs the packaged mocked generation/protected edit, then uploads `prepared-windows-x64`. The archive includes the self-contained .NET application, pinned Node runtime, shared web/server build and sharp's installed runtime dependencies with licenses. No user data or provider key is included. The archive is not Authenticode-signed; do not claim Authenticode validation. Automatic updates need a signed `windows-update.json`; see [Verified Windows updates](#verified-windows-updates).
 
 Download the artifact from the verified source commit. Confirm `verification-windows-x64.json` matches the zip hash and commit before attaching both to the release. Test interactive clipboard, keyboard, Library and image/video preview in a Windows session. CI does not claim to perform that interactive acceptance test. A tester needing only Windows can download the portable zip, extract all files together and run `BananaStudio.exe`. Document the WebView2 Runtime requirement.
 
 Keep Mac assets and signed feeds on the latest release too; publishing a Windows-only latest release would interrupt the Mac update URL.
+
+### Verified Windows updates
+
+**File → Check for Updates…** installs an update only after verifying `windows-update.json`, its signature, and the archive's size and SHA-256. Until a public key is tracked, the app keeps opening the releases page.
+
+Set up once. Keep the private key outside the repository and back it up; if it is lost, every Windows user has to install the next version by hand:
+
+```powershell
+node scripts/sign-windows-update.mjs --generate-key C:\secure\banana-windows-update.pem
+```
+
+Commit the resulting `desktop/windows/WindowsUpdatePublicKey.txt`. Builds made after that commit trust the key.
+
+For each release, sign in the folder holding the verified artifact and record, then attach the zip, `verification-windows-x64.json` and `windows-update.json` to the same release:
+
+```powershell
+node scripts/sign-windows-update.mjs .build\Banana-Studio-<version>-windows-x64.zip --key C:\secure\banana-windows-update.pem
+```
+
+Before publishing, run an actual older-to-newer update on Windows and confirm that the new version opens with the same gallery and Credential Manager keys. This update signature proves the release came from this project. It is not Authenticode: Windows may still show an unrecognized-publisher warning.
 
 ## macOS release procedure
 

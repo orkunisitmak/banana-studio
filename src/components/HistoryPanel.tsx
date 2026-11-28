@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, RotateCcw, X, Image as ImageIcon, Layers } from 'lucide-react';
+import { Clock, RotateCcw, X, Image as ImageIcon, Layers, AlertCircle } from 'lucide-react';
 import { GeneratedImage } from '../types';
 import { getImageOutputRatio, getImageResolutionLabel } from '../lib/images/openaiImage';
 
@@ -63,7 +63,24 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             >
               <div className="flex gap-3 mb-3">
                 <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-gray-900 border border-gray-700 relative">
-                  {img.mediaType === 'video' && !img.thumbnailUrl ? (
+                  {img.status === 'failed' ? (
+                    <span
+                      title={img.error || 'Generation failed'}
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] text-gray-400"
+                    >
+                      <AlertCircle className="w-4 h-4 text-red-400" />
+                      Failed
+                    </span>
+                  ) : !(img.thumbnailUrl || img.url) ? (
+                    // A video kept after a recoverable status-check error has no URL yet and is still being generated.
+                    <span
+                      title="Still being generated"
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] text-gray-400"
+                    >
+                      <Clock className="w-4 h-4" />
+                      Processing
+                    </span>
+                  ) : img.mediaType === 'video' && !img.thumbnailUrl ? (
                     <video
                       src={`${img.url}#t=0.1`}
                       preload="metadata"

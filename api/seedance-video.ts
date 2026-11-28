@@ -66,8 +66,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response = await fetch(provider === 'fal' ? `${base}/status` : base, { headers, redirect: 'error', signal: AbortSignal.timeout(45_000), cache:'no-store' });
     let data = await response.json().catch(() => null);
     if (!response.ok) return res.status(response.status).json({ error: 'Video status is temporarily unavailable.', retryable: true });
-    if (['FAILED','failed','cancelled','expired'].includes(data?.status)) return res.status(200).json({ status: 'FAILED', error: 'The provider could not generate this video. Check its task history.' });
-    if (data?.status !== 'COMPLETED' && data?.status !== 'completed') return res.status(200).json({ status:'RUNNING', progress: data?.status === 'IN_QUEUE' || data?.status === 'pending' ? .05 : .5 });
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return res.status(502).json({ error: 'Video status is temporarily unavailable.', retryable: true });
+    const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : '';
+    if (!status) return res.status(502).json({ error: 'Video status is temporarily unavailable.', retryable: true });
+    if (status === 'cancelled' || status === 'canceled') return res.status(200).json({ status: 'CANCELLED', error: 'The provider cancelled this video. Check its task history.' });
+    if (['failed', 'error', 'expired'].includes(status)) return res.status(200).json({ status: 'FAILED', error: 'The provider could not generate this video. Check its task history.' });
+    if (status !== 'completed') return res.status(200).json({ status:'RUNNING', progress: status === 'in_queue' || status === 'pending' ? .05 : .5 });
     if (provider === 'fal') {
       // fal reports a failed request as COMPLETED with `error`. Its result
       // route repeats the model's error status (often 5xx), which would be

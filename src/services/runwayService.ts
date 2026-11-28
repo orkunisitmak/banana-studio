@@ -1,6 +1,14 @@
 import { selectProvider } from './providerRouting';
 import { videoProviderName } from '../lib/video/videoProviderName';
 import { seedanceProviderError } from '../lib/video/seedanceProviders';
+import type { AIProvider } from '../lib/providers';
+import { isSeedanceModel, isSeedanceQuality, seedanceConfigError, seedanceMode, seedanceReferenceDurationError, type SeedanceModel, type SeedanceMode } from '../lib/video/seedance';
+import { buildFalSeedanceInput, estimateFalSeedance20Usd, falSeedanceLimits, falSeedanceReferenceError, falSeedanceReferenceDurationError, FAL_SEEDANCE_20_MODEL, type FalSeedanceModel } from '../lib/video/falSeedance25';
+import { buildEvoH3MaxInput, EVO_H3_ENDPOINTS, EVO_H3_MODEL } from '../lib/video/evoH3Max';
+import { getEvoH3DraftMode, getEvoH3MaxError, normalizeEvoH3Prompt, toEvoH3Mode, EVO_H3_CLIP_MIME } from '../lib/video/evoH3MaxConfig';
+import { buildMagi2Input, isMagi2PublicUrl, MAGI2_MODEL, MAGI2_ENDPOINTS, MAGI2_LIMITS } from '../lib/video/magi2';
+import { getMagi2Error, getMagi2Images, getMagi2Prompt, isWorkspaceMediaUrl } from '../lib/video/magi2Config';
+import { buildOmniInput, estimateOmniCost, getOmniConfigError, getOmniFrames, getOmniMode, normalizeOmniPrompt, OMNI_MODEL, OMNI_QUEUE_APP, toOmniResolution, type OmniMode, type OmniRequestBody } from '../lib/video/omniFlash';
 import { getPersonGroups, buildPersonIdentityContract } from '../lib/references/personReferences';
 import { getMultilineQuotedPromptPattern } from '../lib/references/referenceTokens';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, DEFAULT_VIDEO_MODEL, VideoAspectRatio, VideoQuality, VideoCost, VideoModelId, VideoOperation, H3GenerationMode, estimateVideoCost, EVOLINK_CREDITS_PER_USD } from '../types';
@@ -21,15 +29,16 @@ const H3_MAX_POLL_INTERVAL = 750;
 const VIDEO_PREPROCESS_POLL_INTERVAL = 1500;
 const VIDEO_PREPROCESS_TIMEOUT = 5 * 60 * 1000;
 
-type SeedanceVideoQuality = Extract<VideoQuality, '480p' | '720p' | '1080p'>;
+type SeedanceVideoQuality = Extract<VideoQuality, '480p' | '720p' | '1080p' | '4K'>;
 
 const VIDEO_QUALITY_PIXEL_BUDGET: Record<SeedanceVideoQuality, number> = {
   '480p': 854 * 480,
   '720p': 1280 * 720,
   '1080p': 1920 * 1080,
+  '4K': 3840 * 2160,
 };
 
-type EvoMode = H3GenerationMode | H3MaxMode | 'video_edit' | 'video_extend';
+type EvoMode = H3GenerationMode | H3MaxMode | OmniMode | SeedanceMode;
 
 class TerminalVideoTaskError extends Error {
   constructor(message: string) {
@@ -59,26 +68,18 @@ export const isRecoverableVideoTaskError = (error: unknown): boolean => {
     || (typeof error === 'object' && error !== null && (error as any).recoverable === true);
 };
 
-const determineMode = (
-  refs: ReferenceImage[],
-  refVids: ReferenceVideo[],
-  refAudios: ReferenceAudio[],
-  operation: VideoOperation,
-): EvoMode => {
-  if (operation === 'reference_edit') return 'reference_to_video';
-  if (operation === 'edit') return 'video_edit';
-  if (operation === 'extend') return 'video_extend';
-  const hasFirstLast = refs.some(r => r.isFirstFrame) || refs.some(r => r.isLastFrame);
-  if (hasFirstLast && refVids.length === 0 && refAudios.length === 0) {
-    const nonFrameRefs = refs.filter(r => !r.isFirstFrame && !r.isLastFrame);
-    if (nonFrameRefs.length === 0) return 'image_to_video';
-  }
-  if (refs.length > 0 || refVids.length > 0 || refAudios.length > 0) return 'reference_to_video';
-  return 'text_only';
-};
+const determineMode = seedanceMode;
 
-const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
-  if (img.data.startsWith('http')) return refreshMediaAccessUrl(img.data);
+const resolveImageUrl = async (img: ReferenceImage, maxBytes = 30 * 1024 * 1024): Promise<string | null> => {
+  if (isHttpUrl(img.data)) return refreshMediaAccessUrl(img.data);
+  if (img.data.startsWith('blob:')) {
+    const response = await fetch(img.data);
+    if (!response.ok) throw new Error('Could not read the reference image. Attach it again.');
+    const blob = await response.blob();
+    const mime = blob.type || img.mimeType;
+    if (!blob.size || blob.size > maxBytes || !/^image\/[a-z0-9.+-]+$/i.test(mime)) throw new Error('Invalid or oversized reference image.');
+    return uploadBlobToPublicUrl(blob, mime, 'vref', mime.split('/')[1].replace('jpeg','jpg'));
+  }
   return uploadBase64ToPublicUrl(img.data, img.mimeType || 'image/jpeg', 'vref');
 };
 
@@ -107,39 +108,49 @@ const TARGET_VIDEO_DIMENSIONS: Record<Exclude<VideoAspectRatio, 'adaptive'>, Rec
     '480p': { width: 864, height: 496 },
     '720p': { width: 1280, height: 720 },
     '1080p': { width: 1920, height: 1080 },
+    '4K': { width: 3840, height: 2160 },
   },
   '9:16': {
     '480p': { width: 496, height: 864 },
     '720p': { width: 720, height: 1280 },
     '1080p': { width: 1080, height: 1920 },
+    '4K': { width: 2160, height: 3840 },
   },
   '1:1': {
     '480p': { width: 640, height: 640 },
     '720p': { width: 960, height: 960 },
     '1080p': { width: 1440, height: 1440 },
+    '4K': { width: 2880, height: 2880 },
   },
   '4:3': {
     '480p': { width: 752, height: 560 },
     '720p': { width: 1112, height: 834 },
     '1080p': { width: 1664, height: 1248 },
+    '4K': { width: 3326, height: 2494 },
   },
   '3:4': {
     '480p': { width: 560, height: 752 },
     '720p': { width: 834, height: 1112 },
     '1080p': { width: 1248, height: 1664 },
+    '4K': { width: 2494, height: 3326 },
   },
   '21:9': {
     '480p': { width: 992, height: 432 },
     '720p': { width: 1470, height: 630 },
     '1080p': { width: 2206, height: 946 },
+    '4K': { width: 4398, height: 1886 },
   },
 };
 
 const getTargetVideoDimensions = (
   aspectRatio: VideoAspectRatio,
-  quality: VideoQuality
+  quality: VideoQuality, model: SeedanceModel
 ): { width: number; height: number } => {
-  const seedanceQuality: SeedanceVideoQuality = quality === '480p' || quality === '1080p' ? quality : '720p';
+  const seedanceQuality = isSeedanceQuality(quality) ? quality : '720p';
+  if (model === 'seedance-2.5' && seedanceQuality === '480p') {
+    if (aspectRatio === '16:9') return { width: 854, height: 480 };
+    if (aspectRatio === '9:16') return { width: 480, height: 854 };
+  }
   if (aspectRatio === 'adaptive') return TARGET_VIDEO_DIMENSIONS['16:9'][seedanceQuality];
   return TARGET_VIDEO_DIMENSIONS[aspectRatio][seedanceQuality];
 };
@@ -225,12 +236,12 @@ export const getNormalizedVideoDimensions = (
   quality: VideoQuality,
 ): { width: number; height: number } | null => {
   if (!width || !height) return null;
-  const seedanceQuality: SeedanceVideoQuality = quality === '480p' || quality === '1080p' ? quality : '720p';
+  const seedanceQuality = isSeedanceQuality(quality) ? quality : '720p';
   const pixelBudget = VIDEO_QUALITY_PIXEL_BUDGET[seedanceQuality];
   const sourcePixels = width * height;
   if (sourcePixels <= pixelBudget) return null;
 
-  const scale = Math.sqrt(pixelBudget / sourcePixels);
+  const scale = Math.min(Math.sqrt(pixelBudget / sourcePixels), 4320 / height);
   const toEven = (value: number): number => Math.max(300, Math.round(value / 2) * 2);
   const dimensions = {
     width: toEven(width * scale),
@@ -244,6 +255,12 @@ export const getNormalizedVideoDimensions = (
     const tallerError = Math.abs(dimensions.width / (dimensions.height + 2) - sourceRatio);
     if (widerError < tallerError) dimensions.width += 2;
     else dimensions.height += 2;
+  }
+  // Even rounding at 4K can cross EvoLink's 8,295,044-pixel input ceiling.
+  while (dimensions.width * dimensions.height > 8295044) {
+    const sourceRatio = width / height;
+    if (Math.abs((dimensions.width - 2) / dimensions.height - sourceRatio) < Math.abs(dimensions.width / (dimensions.height - 2) - sourceRatio)) dimensions.width -= 2;
+    else dimensions.height -= 2;
   }
   return dimensions;
 };
@@ -376,7 +393,7 @@ const extractContinuationFirstFrame = async (
   url: string,
   targetAspectRatio: Exclude<VideoAspectRatio, 'adaptive'>,
   quality: VideoQuality,
-  label: string
+  label: string, model: SeedanceModel
 ): Promise<ReferenceImage> => {
   let video: HTMLVideoElement | null = null;
   try {
@@ -385,7 +402,7 @@ const extractContinuationFirstFrame = async (
     const seekTime = Math.max(0, duration - 0.08);
     if (seekTime > 0) await seekVideo(video, seekTime);
 
-    const { width, height } = getTargetVideoDimensions(targetAspectRatio, quality);
+    const { width, height } = getTargetVideoDimensions(targetAspectRatio, quality, model);
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -512,7 +529,7 @@ const prepareReferenceVideos = async (
   refVids: ReferenceVideo[],
   targetAspectRatio: VideoAspectRatio,
   quality: VideoQuality,
-  videoModel: VideoModelId,
+  videoModel: SeedanceModel,
   operation: VideoOperation,
   hasManualFirstFrame = false,
   assertRoomForFrames: (frameCount: number) => void = () => {},
@@ -556,14 +573,14 @@ const prepareReferenceVideos = async (
     };
     persistedVideos.push(persistedRef);
 
-    if (videoModel !== 'minimax-h3' && operation === 'generate' && ref.isContinuation && targetAspectRatio !== 'adaptive') {
+    if (operation === 'generate' && ref.isContinuation && targetAspectRatio !== 'adaptive') {
       const matchesTarget = await videoAspectMatchesTarget(publicUrl, targetAspectRatio);
       if (!matchesTarget) {
         if (hasManualFirstFrame) {
           throw new Error('Continue needs the previous video\'s final frame to match the selected ratio. Remove the First Frame role from the attached image or disable Continue before generating.');
         }
         assertRoomForFrames(generatedFirstFrames.length + 1);
-        generatedFirstFrames.push(await extractContinuationFirstFrame(publicUrl, targetAspectRatio, quality, label));
+        generatedFirstFrames.push(await extractContinuationFirstFrame(publicUrl, targetAspectRatio, quality, label, videoModel));
         extractedVideoIndices.push(i);
         continue;
       }
@@ -580,9 +597,8 @@ const prepareReferenceVideos = async (
     requestVideos.push(persistedRef);
   }
 
-  if (operation === 'edit' && requestVideos.reduce((total, ref) => total + (ref.duration || 0), 0) > 30) {
-    throw new Error('Video Edit reference videos must total no more than 30 seconds. Trim or remove a reference video.');
-  }
+  const durationError = seedanceReferenceDurationError(videoModel, seedanceMode([], requestVideos, [], operation), 'video', requestVideos.map(v => v.duration));
+  if (durationError) throw new Error(durationError);
   // Validate all sources before requesting potentially billable preprocessing.
   if (editNormalization && requestVideos[0]) {
     requestVideos[0] = {
@@ -615,7 +631,8 @@ export const remapVideoReferencesForRequest = (
   });
 };
 
-const buildImageUrls = async (refs: ReferenceImage[], mode: EvoMode): Promise<string[]> => {
+const buildImageUrls = async (refs: ReferenceImage[], mode: EvoMode) => {
+  const resolvedById = new Map<string, string>();
   const urls: string[] = [];
   const inputs = mode === 'image_to_video'
     ? [refs.find(r => r.isFirstFrame), refs.find(r => r.isLastFrame)].filter((ref): ref is ReferenceImage => !!ref)
@@ -624,8 +641,9 @@ const buildImageUrls = async (refs: ReferenceImage[], mode: EvoMode): Promise<st
     const u = await resolveImageUrl(ref);
     if (!u) throw new Error('A reference image could not be loaded. Restore it before generating so person identities stay correctly matched.');
     urls.push(u);
+    resolvedById.set(ref.id, u);
   }
-  return urls;
+  return { urls, resolvedById };
 };
 
 const normalizeVideoPromptWhitespace = (value: string): string => value
@@ -840,9 +858,287 @@ const cleanPromptForVideoModel = (
   return restoreLiterals(normalizeVideoPromptWhitespace(cleaned));
 };
 
+interface VideoSubmissionContext {
+  id: string;
+  userId?: string;
+  savePreparedReferences?: (refs: Pick<GenerationConfig, 'referenceImages' | 'referenceVideos' | 'referenceAudios'>) => Promise<boolean>;
+}
+
+async function submitVideo(path: string, body: object, refs: Pick<GenerationConfig, 'referenceImages' | 'referenceVideos' | 'referenceAudios'>, owner: string | undefined, context?: VideoSubmissionContext) {
+  if (context?.savePreparedReferences && !await context.savePreparedReferences(refs)) throw new Error('Could not save video references. No provider request was sent.');
+  const headers = await getServerAuthHeaders(owner);
+  if (!owner || !headers.Authorization) throw new Error('Sign in before submitting a video.');
+  let response: Response;
+  try { response = await fetch(path, { method: 'POST', headers, body: JSON.stringify({ ...body, ...(context?.id ? { generationId: context.id } : {}) }) }); }
+  catch { throw new RecoverableVideoTaskError('Video acceptance is unknown. Check the saved task before submitting again.'); }
+  const result = await response.json().catch(() => null);
+  if ((await supabase.auth.getSession()).data.session?.user.id !== owner) throw new RecoverableVideoTaskError('Session changed. Check the saved task from the original account.');
+  if (typeof result?.taskId !== 'string' || !result.taskId.trim()) {
+    const definitelyNotSent = (result?.code === 'PROVIDER_ADMISSION_REJECTED' && result.providerRequestSent === false)
+      || (typeof result?.error === 'string' && /No (?:(?:provider|generation) request was sent|generation was submitted)\./i.test(result.error));
+    if (result?.code === 'GENERATION_SUBMITTING' || result?.code === 'SUBMISSION_UNKNOWN' || !result || response.ok || ((response.status === 408 || response.status >= 500) && !definitelyNotSent))
+      throw new RecoverableVideoTaskError(result?.error || 'No task ID was confirmed. Check task history before submitting again.');
+    throw new Error(result.error || 'The provider rejected this video.');
+  }
+  return { taskId: result.taskId as string, endpoint: typeof result.endpoint === 'string' ? result.endpoint as string : undefined,
+    queueEndpoint: typeof result.queueEndpoint === 'string' ? result.queueEndpoint as string : undefined,
+    cost: readEvoReservation(result.usage?.credits_reserved ?? result.usage?.credits_consumed ?? result.usage?.credits_used ?? result.usage?.total_credits) };
+}
+
+const usesDesktopMedia = (refs: Pick<GenerationConfig, 'referenceImages' | 'referenceVideos' | 'referenceAudios'>) =>
+  refs.referenceImages.some(ref => isWorkspaceMediaUrl(ref.data)) || refs.referenceVideos.some(ref => isWorkspaceMediaUrl(ref.url)) || refs.referenceAudios.some(ref => isWorkspaceMediaUrl(ref.url));
+
+const createOmniVideoTask = async (config: GenerationConfig, initiatingUserId?: string, context?: VideoSubmissionContext) => {
+  const error = getOmniConfigError(config);
+  if (error) throw new Error(error);
+  const mode = getOmniMode(config);
+  const referenceImages = await Promise.all(config.referenceImages.map(async image => {
+    const url = await resolveImageUrl(image);
+    if (!url || !isHttpUrl(url)) throw new Error('An Omni reference image could not be loaded. Attach it again.');
+    return { ...image, data: url };
+  }));
+  const frames = getOmniFrames(referenceImages);
+  const referenceVideos = await Promise.all((config.referenceVideos || []).map(async (ref, index) => {
+    // Extend accepts any length and conditions on the last 10 seconds.
+    const url = await resolveReferenceMediaUrl(ref.url, ref.mimeType, `Omni video ${index + 1}`, 'omni_video', 'mp4', 'video', 1, mode === 'extend' ? Infinity : 15, true);
+    const duration = ref.duration ?? await getMediaDuration(url, 'video') ?? undefined;
+    return { ...ref, url, duration };
+  }));
+  const resolved = { ...config, referenceVideos };
+  const hydratedError = getOmniConfigError(resolved);
+  if (hydratedError) throw new Error(hydratedError);
+  const body: OmniRequestBody & { videoModel: typeof OMNI_MODEL } = {
+    videoModel: OMNI_MODEL, mode,
+    ...(mode !== 'upscale' ? { prompt: normalizeOmniPrompt(config.prompt, mode, referenceImages) } : {}),
+    resolution: toOmniResolution(config.videoQuality),
+    ...(mode === 'text_to_video' || mode === 'image_to_video' || mode === 'reference_to_video' ? { aspectRatio: config.videoAspectRatio } : {}),
+    ...(mode !== 'edit' && mode !== 'upscale' ? { duration: Number(config.videoDuration) } : {}),
+    imageUrls: mode === 'image_to_video' ? [frames.start!.data] : referenceImages.map(image => image.data),
+    ...(mode === 'image_to_video' && frames.end ? { endImageUrl: frames.end.data } : {}),
+    videoUrls: referenceVideos.map(video => video.url),
+  };
+  const refs = { referenceImages, referenceVideos, referenceAudios: [] as ReferenceAudio[] };
+  if (!usesDesktopMedia(refs)) buildOmniInput(body);
+  return { ...await submitVideo('/api/fal-h3-video', body, refs, initiatingUserId, context), provider: 'fal' as const,
+    cost: estimateOmniCost(resolved) ?? undefined, mode, ...refs };
+};
+
+const mediaExtension = (mime: string, kind: 'video' | 'audio') => kind === 'video'
+  ? /quicktime|mov/i.test(mime) ? 'mov' : 'mp4'
+  : /mpeg|mp3/i.test(mime) ? 'mp3' : 'wav';
+
+/** Both owned EvoLink routes upload native clips without rewriting their content. */
+async function prepareEvoClip<T extends ReferenceVideo | ReferenceAudio>(
+  ref: T, index: number, kind: 'video' | 'audio', model: typeof EVO_H3_MODEL | typeof MAGI2_MODEL,
+) {
+  const label = `${kind} ${index + 1}`;
+  let url: string | null;
+  let { size, mimeType } = ref;
+  if (model === MAGI2_MODEL) mimeType = mimeType.split(';')[0].trim().toLowerCase();
+  if (isHttpUrl(ref.url)) {
+    url = await refreshMediaAccessUrl(ref.url);
+  } else {
+    if (!/^(?:blob:|data:)/i.test(ref.url)) throw new Error(`Restore ${label} before generating.`);
+    const response = await fetch(ref.url);
+    if (!response.ok) throw new Error(`Could not read ${label}.`);
+    const blob = await response.blob();
+    size = blob.size;
+    const maxMB = kind === 'audio' ? 15 : model === MAGI2_MODEL ? MAGI2_LIMITS.videoMaxMB : 50;
+    if (!size || size > maxMB * 1024 * 1024) throw new Error(`${label} must be nonempty and no larger than ${maxMB} MB.`);
+    if (blob.type && blob.type !== 'application/octet-stream') mimeType = blob.type.split(';')[0].trim().toLowerCase();
+    if (!EVO_H3_CLIP_MIME[kind].test(mimeType)) throw new Error(`Unsupported ${label} format: ${mimeType}.`);
+    const upload = kind === 'video' ? uploadVideoBlobToPublicUrl : uploadBlobToPublicUrl;
+    const extension = mediaExtension(mimeType, kind);
+    url = await upload(blob, mimeType, `${model === MAGI2_MODEL ? 'magi2' : 'evo_h3'}_${kind}`, extension);
+  }
+  if (!url || (model === MAGI2_MODEL ? !isMagi2PublicUrl(url) && !isWorkspaceMediaUrl(url) : !isHttpUrl(url))) throw new Error(`Restore ${label} before generating.`);
+  const knownDuration = getKnownVideoDuration(ref.duration);
+  const metadata = model === EVO_H3_MODEL && kind === 'video' && knownDuration == null ? await inspectVideo(url) : undefined;
+  const source = model === MAGI2_MODEL && !isHttpUrl(ref.url) ? ref.url : url;
+  const duration = knownDuration ?? (metadata ? metadata.duration : await getMediaDuration(source, kind));
+  if (duration == null) throw new Error(`Could not measure ${label}. Reattach it before generating.`);
+  return { ...ref, ...(metadata ? { width: metadata.width, height: metadata.height } : {}), url, mimeType, duration, size };
+}
+
+const createMagi2VideoTask = async (config: GenerationConfig, owner: string | undefined, context?: VideoSubmissionContext) => {
+  if (!owner) throw new Error('Sign in before submitting an EvoLink video.');
+  const error = getMagi2Error(config);
+  if (error) throw new Error(error);
+  const mode = config.magi2Mode ?? 'text_only';
+  const duration = config.videoDuration ?? 5;
+  const [referenceImages, referenceVideos, referenceAudios] = await Promise.all([
+    Promise.all(config.referenceImages.map(async (image, i) => {
+      let data: string | null;
+      let mimeType = image.mimeType;
+      if (/^blob:/i.test(image.data)) {
+        const response = await fetch(image.data);
+        if (!response.ok) throw new Error(`Could not read Image ${i + 1}.`);
+        const blob = await response.blob();
+        if (!blob.size || blob.size >= MAGI2_LIMITS.imageMaxMB * 1024 * 1024) throw new Error(`Image ${i + 1} must be nonempty and under ${MAGI2_LIMITS.imageMaxMB} MB.`);
+        if (blob.type && blob.type !== 'application/octet-stream') mimeType = blob.type;
+        if (!/^image\//i.test(mimeType)) throw new Error(`Image ${i + 1} must be an image file.`);
+        data = await uploadBlobToPublicUrl(blob, mimeType, 'magi2_image', 'jpg');
+      } else {
+        if (isHttpUrl(image.data)) data = await refreshMediaAccessUrl(image.data);
+        else {
+          const header = /^data:(image\/[\w.+-]+);base64,/i.exec(image.data);
+          if (header) mimeType = header[1].toLowerCase();
+          data = await uploadBase64ToPublicUrl(image.data, mimeType, 'magi2_image');
+        }
+      }
+      if (!data || (!isMagi2PublicUrl(data) && !isWorkspaceMediaUrl(data))) throw new Error(`Restore Image ${i + 1} with a public HTTPS URL before generating.`);
+      return { ...image, data, mimeType };
+    })),
+    Promise.all((config.referenceVideos || []).map((ref, i) => prepareEvoClip(ref, i, 'video', MAGI2_MODEL))),
+    Promise.all((config.referenceAudios || []).map((ref, i) => prepareEvoClip(ref, i, 'audio', MAGI2_MODEL))),
+  ]);
+  const refs = { referenceImages, referenceVideos, referenceAudios };
+  const body = {
+    videoModel: MAGI2_MODEL, mode, prompt: getMagi2Prompt(config), duration,
+    quality: config.videoQuality ?? '1080p', aspectRatio: config.videoAspectRatio,
+    generateAudio: config.audioEnabled ?? true, ...(context?.id ? { generationId: context.id } : {}),
+    ...(referenceImages.length ? { imageUrls: getMagi2Images({ magi2Mode: mode, referenceImages }).map(image => image.data) } : {}),
+    ...(referenceVideos.length ? { videoUrls: referenceVideos.map(ref => ref.url), videoDurations: referenceVideos.map(ref => ref.duration) } : {}),
+    ...(referenceAudios.length ? { audioUrls: referenceAudios.map(ref => ref.url), audioDurations: referenceAudios.map(ref => ref.duration) } : {}),
+  };
+  if (!usesDesktopMedia(refs)) buildMagi2Input(body);
+  const accepted = await submitVideo('/api/evolink-generate', body, refs, owner, context);
+  return { ...accepted, provider: 'evolink' as const, cost: accepted.cost ?? estimateVideoCost(MAGI2_MODEL, '1080p', duration, false), mode, ...refs };
+};
+
+/** EvoLink accepts native media, not fal's frame controls or Seedance's edit/continuation preprocessing. */
+const createEvoH3VideoTask = async (config: GenerationConfig, owner: string | undefined, context?: VideoSubmissionContext) => {
+  if (!owner) throw new Error('Sign in before submitting an EvoLink video.');
+  const error = getEvoH3MaxError(config);
+  if (error) throw new Error(error);
+  const mode = getEvoH3DraftMode(config);
+  const prompt = normalizeEvoH3Prompt(config.prompt, mode, config);
+  const prepareImage = async (image: ReferenceImage, i: number) => {
+    // Raw base64 and data URLs contain four characters per three decoded bytes.
+    if (!isHttpUrl(image.data)) {
+      const encodedLength = image.data.length - (image.data.indexOf(',') + 1);
+      if (encodedLength > 4 * Math.ceil(30 * 1024 * 1024 / 3)) throw new Error(`Image ${i + 1} exceeds 30 MB.`);
+    }
+    const data = await resolveImageUrl(image);
+    if (!data || !isHttpUrl(data)) throw new Error(`Restore Image ${i + 1} before generating.`);
+    return { ...image, data };
+  };
+  // Preserve the original media bytes and hydrate missing reference geometry.
+  const [images, videos, referenceAudios] = await Promise.all([
+    Promise.all(config.referenceImages.map(prepareImage)),
+    Promise.all((config.referenceVideos || []).map((v, i) => prepareEvoClip(v, i, 'video', EVO_H3_MODEL))),
+    Promise.all((config.referenceAudios || []).map((a, i) => prepareEvoClip(a, i, 'audio', EVO_H3_MODEL))),
+  ]);
+  const resolved = await hydrateH3MaxReferenceDimensions({ ...config, referenceImages: images, referenceVideos: videos, referenceAudios }, inspectVideo);
+  const { referenceImages, referenceVideos } = resolved;
+  const hydratedError = getEvoH3MaxError(resolved);
+  if (hydratedError) throw new Error(hydratedError);
+  const body = {
+    videoModel: EVO_H3_MODEL, mode: toEvoH3Mode(mode), duration: config.videoDuration, quality: config.videoQuality,
+    prompt,
+    ...(mode !== 'image_to_video' ? { aspectRatio: config.videoAspectRatio } : {}),
+    ...(referenceImages.length ? { imageUrls: referenceImages.map(i => i.data) } : {}),
+    ...(referenceVideos.length ? { videoUrls: referenceVideos.map(v => v.url) } : {}),
+    ...(referenceAudios.length ? { audioUrls: referenceAudios.map(a => a.url) } : {}),
+    ...(context?.id ? { generationId: context.id } : {}),
+  };
+  const refs = { referenceImages, referenceVideos, referenceAudios };
+  if (!usesDesktopMedia(refs)) buildEvoH3MaxInput(body);
+  return { ...await submitVideo('/api/evolink-generate', body, refs, owner, context), provider: 'evolink' as const, mode, ...refs };
+};
+
+/** fal accepts the original footage; never apply EvoLink's edit transcode or final-frame extraction. */
+async function createFalSeedanceTask(config: GenerationConfig, model: FalSeedanceModel, owner?: string, context?: VideoSubmissionContext) {
+  const limits = falSeedanceLimits(model);
+  if (!owner) throw new Error('Sign in before submitting a fal video.');
+  const { referenceImages: images, referenceVideos: videos = [], referenceAudios: audios = [], videoOperation: operation } = config;
+  if (operation === 'upscale') throw new Error('Seedance does not support Upscale.');
+  const mode = seedanceMode(images, videos, audios, operation);
+  const setupError = getSeedanceFrameError(images, videos.length, audios.length, operation)
+    || falSeedanceReferenceError(mode, images.length, videos.length, audios.length, model)
+    || falSeedanceReferenceDurationError(mode, 'video', videos.map(ref => getKnownVideoDuration(ref.duration)), model)
+    || falSeedanceReferenceDurationError(mode, 'audio', audios.map(ref => getKnownVideoDuration(ref.duration)), model);
+  if (setupError) throw new Error(setupError);
+  if (operation === 'reference_edit' && (model !== 'seedance-2.0' || !videos.length)) throw new Error('Ref Edit needs Seedance 2.0 and a source video.');
+  // Validate person bindings before uploading reference files.
+  const continuations = operation === 'generate' ? videos.flatMap((video,i) => video.isContinuation ? ['@Video'+(i+1)] : []) : [];
+  const intent = operation === 'reference_edit' ? 'Edit @Video1 as the source footage; preserve anything not requested to change. '
+    : continuations.length ? 'Continue seamlessly from '+continuations.join(' and ')+' (the previous shot). ' : '';
+  const prompt = mode === 'image_to_video' ? config.prompt.trim() && prepareSeedanceFramePrompt(config.prompt, images)
+    : intent + cleanPromptForVideoModel(config.prompt, model, images, operation === 'reference_edit' ? 'generate' : operation);
+  const referenceImages = await Promise.all(images.map(async (ref, i) => {
+    if (!ref.data) throw new Error(`Restore Image ${i + 1} before generating.`);
+    if (!isHttpUrl(ref.data) && ref.data.length - (ref.data.indexOf(',') + 1) > 4 * Math.ceil(limits.imageMB * 1024 * 1024 / 3))
+      throw new Error(`Image ${i + 1} exceeds ${limits.imageMB} MB.`);
+    const data = await resolveImageUrl(ref, limits.imageMB * 1024 * 1024);
+    if (!data || !isHttpUrl(data)) throw new Error(`Restore Image ${i + 1} before generating.`);
+    return { ...ref, data };
+  }));
+  const prepareClip = async (ref: ReferenceVideo | ReferenceAudio, index: number, kind: 'video' | 'audio') => {
+    const label = `${kind} ${index + 1}`;
+    let { url, size, mimeType } = ref;
+    if (isHttpUrl(url)) {
+      url = await refreshMediaAccessUrl(url);
+    } else {
+      if (!/^(blob:|data:)/i.test(url)) throw new Error(`Restore ${label} before generating.`);
+      const source = await fetch(url);
+      if (!source.ok) throw new Error(`Could not read ${label}.`);
+      let blob = await source.blob();
+      if (kind === 'audio') blob = await prepareReferenceAudio(blob, label, model === FAL_SEEDANCE_20_MODEL ? 0 : 1.8, limits.referenceSeconds);
+      size = blob.size;
+      mimeType = blob.type || mimeType;
+      const maxMB = kind === 'video' ? limits.videoMB : limits.audioMB;
+      if (!size || size > maxMB * 1024 * 1024) throw new Error(`${label} must be nonempty and no larger than ${maxMB} MB.`);
+      const upload = kind === 'video' ? uploadVideoBlobToPublicUrl : uploadBlobToPublicUrl;
+      url = await upload(blob, mimeType, `fal_seedance_${kind}`, mediaExtension(mimeType, kind)) || '';
+    }
+    if (!url || !isHttpUrl(url)) throw new Error(`Restore ${label} before generating.`);
+    return { url, size, mimeType };
+  };
+  const [referenceVideos, referenceAudios] = await Promise.all([
+    Promise.all(videos.map(async (ref, i) => {
+      const clip = await prepareClip(ref, i, 'video');
+      const meta = getKnownVideoDuration(ref.duration) && ref.width && ref.height ? ref : await inspectVideo(clip.url);
+      if (!meta.duration || !meta.width || !meta.height) throw new Error(`Could not measure Video ${i + 1}. Reattach it before generating.`);
+      return { ...ref, ...clip, duration: meta.duration, width: meta.width, height: meta.height };
+    })),
+    Promise.all(audios.map(async (ref, i) => {
+      const clip = await prepareClip(ref, i, 'audio');
+      const duration = getKnownVideoDuration(ref.duration) ?? await getMediaDuration(clip.url, 'audio');
+      if (!duration) throw new Error(`Could not measure Audio ${i + 1}. Reattach it before generating.`);
+      return { ...ref, ...clip, duration };
+    })),
+  ]);
+  const orderedImages = mode === 'image_to_video'
+    ? [referenceImages.find(ref => ref.isFirstFrame)!, ...referenceImages.filter(ref => ref.isLastFrame)]
+    : referenceImages;
+  const { seed, task, draft, outputFormat, ...options } = config.falSeedanceOptions || {};
+  const body = {
+    ...options, provider: 'fal', videoModel: model, mode, prompt, duration: mode === 'video_edit' ? -1 : config.videoDuration,
+    quality: config.videoQuality, aspectRatio: config.videoAspectRatio, generateAudio: config.audioEnabled !== false,
+    ...(model !== FAL_SEEDANCE_20_MODEL ? { draft, outputFormat,
+      ...(mode === 'reference_to_video' ? { task } : {}),
+      ...(mode !== 'text_only' && mode !== 'image_to_video' ? { seed } : {}),
+    } : {}),
+    imageUrls: orderedImages.map(ref => ref.data), videoUrls: referenceVideos.map(ref => ref.url), audioUrls: referenceAudios.map(ref => ref.url),
+    videoDurations: referenceVideos.map(ref => ref.duration), audioDurations: referenceAudios.map(ref => ref.duration),
+    mediaMetadata: {
+      images: orderedImages.map(({ width, height, mimeType }) => ({ width, height, mimeType })),
+      videos: referenceVideos.map(({ width, height, duration, size, mimeType }) => ({ width, height, duration, size, mimeType })),
+      audios: referenceAudios.map(({ duration, size, mimeType }) => ({ duration, size, mimeType })),
+    },
+    generationId: context?.id,
+  };
+  const refs = { referenceImages, referenceVideos, referenceAudios };
+  if (!usesDesktopMedia(refs)) buildFalSeedanceInput(body);
+  const accepted = await submitVideo('/api/seedance-video', body, refs, owner, context);
+  const usd = model === FAL_SEEDANCE_20_MODEL ? estimateFalSeedance20Usd({ videoQuality: body.quality, videoDuration: body.duration, referenceVideos }) : undefined;
+  return { ...accepted, provider: 'fal' as const, cost: usd === undefined ? undefined : {usd, source:'published_estimate' as const}, mode, ...refs };
+}
+
 /** Every Max route uses its own media contract; no Seedance extraction or
  * edit preprocessing is allowed to rewrite its source footage. */
-const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?: string, context?:{id:string}) => {
+const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?: string, context?: VideoSubmissionContext) => {
   const error=getH3MaxConfigError(config);if(error)throw new Error(error);
   const mode=getH3MaxMode(config);
   const referenceImages=await Promise.all(config.referenceImages.map(async image=>{
@@ -858,9 +1154,8 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     return {...ref,url,duration};
   }));
   const referenceAudios=await Promise.all((config.referenceAudios||[]).map(async(ref,index)=>{
-    if(mode==='reference_to_video'||mode==='extend_video')return prepareH3ReferenceAudio(ref,index);
-    // Lip Sync follows up to 15 minutes of audio and has no target-track 15 MB
-    // constraint. T2V/I2V trim long target tracks; only their 15 MB cap applies.
+    if ((mode === 'reference_to_video' && !config.h3MaxOptions?.useTargetAudio) || mode === 'extend_video') return prepareH3ReferenceAudio(ref,index);
+    // Lip Sync follows its source. Target soundtracks can extend beyond the generated clip.
     const url=await resolveReferenceMediaUrl(ref.url,ref.mimeType,`H3 Max audio ${index+1}`,'h3_audio','wav','audio',mode==='lip_sync'?5:2,mode==='lip_sync'?900:Infinity,true,mode==='lip_sync'?MAX_VIDEO_UPLOAD_BYTES:15*1024*1024);
     const duration=ref.duration??await getMediaDuration(url,'audio')??undefined;
     return {...ref,url,duration};
@@ -871,37 +1166,34 @@ const createH3MaxVideoTask = async (config: GenerationConfig, initiatingUserId?:
     images:getH3MaxReferenceImages(resolved).map(image=>({width:image.width,height:image.height})),
     videos:resolved.referenceVideos.map(video=>({duration:video.duration,width:video.width,height:video.height,size:video.size})),
   }};
-  const submissionBody={...body,...(context?.id?{generationId:context.id}:{})};
-  // Validate final URLs and hydrated duration limits immediately before admission.
-  buildH3MaxInput(body);
-  const {data:{session}}=await supabase.auth.getSession();
-  if(session?.user?.id!==initiatingUserId)throw new Error('Session changed before video submission.');
-  let response:Response;
-  const headers=await getServerAuthHeaders(initiatingUserId);
-  try{response=await fetch('/api/fal-h3-video',{method:'POST',headers,body:JSON.stringify(submissionBody)});}
-  catch{throw new RecoverableVideoTaskError('fal.ai did not confirm whether the video was accepted. Do not submit again; check fal task history and usage first.');}
-  const result=await response.json().catch(()=>null);
-  // An accepted task remains usable if only its gallery acknowledgement failed.
-  if(!response.ok&&!result?.taskId){
-    if(response.status>=500||!result)throw new RecoverableVideoTaskError(result?.error||'fal.ai acceptance could not be confirmed. Check task history and usage before submitting again.');
-    throw new Error(result?.error||'Failed to start H3 Max generation.');
-  }
-  if(!result?.taskId)throw new RecoverableVideoTaskError('fal.ai did not confirm a task ID. Check task history before submitting again.');
-  return {taskId:result.taskId,endpoint:typeof result.endpoint==='string'?result.endpoint:undefined,queueEndpoint:typeof result.queueEndpoint==='string'?result.queueEndpoint:undefined,
-    cost:estimateH3MaxCost(resolved),mode,referenceImages:resolved.referenceImages,referenceVideos:resolved.referenceVideos,referenceAudios};
+  const refs = { referenceImages: resolved.referenceImages, referenceVideos: resolved.referenceVideos, referenceAudios };
+  // The desktop sidecar replaces local media with public URLs and runs the same validator before billing.
+  if (!usesDesktopMedia(refs)) buildH3MaxInput(body);
+  const accepted = await submitVideo('/api/fal-h3-video', { ...body, videoModel: 'minimax-h3' }, refs, initiatingUserId, context);
+  return { ...accepted, provider: 'fal' as const, cost: estimateH3MaxCost(resolved), mode, ...refs };
 };
 
 export const createVideoTask = async (
-  config: GenerationConfig, context?:{id:string}
-): Promise<{ taskId: string; endpoint?: string; queueEndpoint?: string; cost: VideoCost | undefined; mode: EvoMode; referenceImages?: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[] }> => {
+  config: GenerationConfig, context?: VideoSubmissionContext
+): Promise<{ taskId: string; provider: AIProvider; endpoint?: string; queueEndpoint?: string; cost?: VideoCost; mode: EvoMode; referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[] }> => {
   const { data: { session: startingSession } } = await supabase.auth.getSession();
   const initiatingUserId = startingSession?.user?.id;
   const { prompt, referenceImages, referenceVideos, referenceAudios, videoAspectRatio, videoQuality, videoDuration, audioEnabled } = config;
   const videoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
   const videoOperation = config.videoOperation || 'generate';
-  if(videoModel==='minimax-h3')return createH3MaxVideoTask(config,initiatingUserId,context);
-
+  if (context?.userId && initiatingUserId !== context.userId) throw new Error('Session changed before video submission.');
+  if (referenceImages.some(ref => typeof ref?.data !== 'string' || !ref.data.trim())) throw new Error('A reference image could not be loaded. Restore it before generating so person identities stay correctly matched.');
   const selectedProvider = await selectProvider(videoModel);
+  if (config.videoProvider && selectedProvider !== config.videoProvider) throw new Error('Video provider changed. Review the model settings before submitting.');
+  if (videoModel === EVO_H3_MODEL) return selectedProvider === 'evolink' ? createEvoH3VideoTask(config, initiatingUserId, context) : createH3MaxVideoTask(config, initiatingUserId, context);
+  if (videoModel === OMNI_MODEL) return createOmniVideoTask(config, initiatingUserId, context);
+  if (videoModel === MAGI2_MODEL) return createMagi2VideoTask(config, initiatingUserId, context);
+  if (!isSeedanceModel(videoModel)) throw new Error('Unsupported video model.');
+  if (selectedProvider === 'fal') return createFalSeedanceTask(config, videoModel, initiatingUserId, context);
+  if (selectedProvider === 'evolink') {
+    const configError = seedanceConfigError(config);
+    if (configError) throw new Error(configError);
+  }
   const refVids = referenceVideos || [];
   const refAudios = referenceAudios || [];
   if (videoModel === 'seedance-2.5' && !refVids.some(video => video.isContinuation)) {
@@ -936,7 +1228,7 @@ export const createVideoTask = async (
   // Same person-tag check cleanPromptForVideoModel runs later, moved ahead of
   // the paid video preparation and the image uploads.
   if (!(videoModel === 'seedance-2.5' && determineMode(referenceImages, refVids, refAudios, videoOperation) === 'image_to_video')) {
-    for (const [, id] of (prompt || '').matchAll(/@PERSON_(\d+)\b/gi)) findPersonGroup(referenceImages, Number(id));
+    for (const [, id] of (prompt || '').replace(getMultilineQuotedPromptPattern(), '').matchAll(/@PERSON_(\d+)\b/gi)) findPersonGroup(referenceImages, Number(id));
   }
 
   // Audio size, format and length checks are cheap; run them before the paid
@@ -945,6 +1237,10 @@ export const createVideoTask = async (
   const audioUrls = await Promise.all(refAudios.map((a, i) =>
     resolveReferenceMediaUrl(a.url, a.mimeType, `reference audio ${i + 1}`, 'vref_audio', 'mp3', 'audio', 2, maximumReferenceDuration)
   ));
+
+  const audioDurations = await Promise.all(refAudios.map(async audio => audio.duration ?? await getMediaDuration(audio.url, 'audio') ?? undefined));
+  const audioError = seedanceReferenceDurationError(videoModel, determineMode(referenceImages, refVids, refAudios, videoOperation), 'audio', audioDurations);
+  if (audioDurations.some(value => value === undefined) || audioError) throw new Error(audioError || 'Could not determine the reference audio duration.');
 
   const preparedVideos = await prepareReferenceVideos(
     refVids,
@@ -974,7 +1270,7 @@ export const createVideoTask = async (
     const error = getSeedanceFrameError(requestReferenceImages, preparedVideos.requestVideos.length, refAudios.length, videoOperation);
     if (error) throw new Error(error);
   }
-  const imageUrls = await buildImageUrls(requestReferenceImages, mode);
+  const { urls: imageUrls, resolvedById } = await buildImageUrls(requestReferenceImages, mode);
   const videoUrls = preparedVideos.requestVideos.map(v => v.url);
   const resolvedReferenceVideos = preparedVideos.persistedVideos;
   const resolvedReferenceAudios = refAudios.map((a, i) => ({ ...a, url: audioUrls[i] }));
@@ -988,7 +1284,7 @@ export const createVideoTask = async (
     ? preparedVideos.requestVideos[0].duration!
     : 0;
   const requestDuration = videoOperation === 'edit' ? -1 : videoDuration;
-  let cost = estimateVideoCost(
+  const cost = estimateVideoCost(
     videoModel,
     videoQuality,
     requestDuration,
@@ -1062,53 +1358,19 @@ export const createVideoTask = async (
       };
 
   if (imageUrls.length > 0) body.imageUrls = imageUrls;
-  if (videoUrls.length > 0) body.videoUrls = videoUrls;
-  if (audioUrls.length > 0) body.audioUrls = audioUrls;
+  if (videoUrls.length > 0) {
+    const durations = preparedVideos.requestVideos.map(video => video.duration);
+    if (durations.some(value => !value)) throw new Error('Could not measure a reference video. Reattach it before generating.');
+    body.videoUrls = videoUrls; body.videoDurations = durations;
+  }
+  if (audioUrls.length > 0) { body.audioUrls = audioUrls; body.audioDurations = audioDurations; }
 
   const preparedRouteError = seedanceProviderError(selectedProvider, body as any);
   if (preparedRouteError) throw new Error(preparedRouteError);
-  const { data: { session: submitSession } } = await supabase.auth.getSession();
-  if (submitSession?.user?.id !== initiatingUserId) throw new Error('Session changed before video submission.');
-  const createRes = await fetch('/api/seedance-video', {
-    method: 'POST',
-    headers: await getServerAuthHeaders(initiatingUserId),
-    body: JSON.stringify(body),
-  });
-
-  const createData = await createRes.json().catch(() => null);
-  // As with H3, an accepted task stays usable if only its gallery save failed.
-  if (!createRes.ok && !createData?.taskId) throw new Error(createData?.error || 'Failed to start video generation');
-  if (!createData?.taskId) throw new Error('No task ID returned');
-
-  const usage = createData.usage && typeof createData.usage === 'object'
-    ? createData.usage
-    : {};
-  const providerCredits = [
-    usage.credits_reserved,
-    usage.credits_consumed,
-    usage.credits_used,
-    usage.total_credits,
-  ]
-    .map(Number)
-    .find(value => Number.isFinite(value) && value > 0);
-
-  if (providerCredits) {
-    cost = {
-      credits: providerCredits,
-      usd: providerCredits / EVOLINK_CREDITS_PER_USD,
-      source: 'provider_reserved',
-    };
-  }
-
-  return {
-    taskId: createData.taskId,
-    endpoint: typeof createData.endpoint === 'string' ? createData.endpoint : undefined,
-    queueEndpoint: typeof createData.queueEndpoint === 'string' ? createData.queueEndpoint : undefined,
-    cost: selectedProvider === 'evolink' ? cost : undefined,
-    mode,
-    referenceVideos: resolvedReferenceVideos,
-    referenceAudios: resolvedReferenceAudios,
-  };
+  const resolvedReferenceImages = referenceImages.map(ref => ({ ...ref, data: resolvedById.get(ref.id) ?? ref.data }));
+  const refs = { referenceImages: resolvedReferenceImages, referenceVideos: resolvedReferenceVideos, referenceAudios: resolvedReferenceAudios };
+  const accepted = await submitVideo('/api/seedance-video', body, refs, initiatingUserId, context);
+  return { ...accepted, provider: selectedProvider, cost: selectedProvider === 'evolink' ? accepted.cost ?? cost : undefined, mode, ...refs };
 };
 
 export interface VideoTaskResult {
@@ -1116,6 +1378,8 @@ export interface VideoTaskResult {
   actualCostUsd?: number;
   expandedPrompt?: string;
   duration?: number;
+  reservedCost?: VideoCost;
+  falSeedanceResult?: { seed?: number; draftId?: string; lastFrameUrl?: string };
 }
 
 const parseVideoActualCostUsd = (value: unknown): number | undefined => {
@@ -1127,23 +1391,31 @@ const parseVideoActualCostUsd = (value: unknown): number | undefined => {
   return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
 };
 
+function readEvoReservation(value: unknown): VideoCost | undefined {
+  const credits = parseVideoActualCostUsd(value);
+  return credits === undefined ? undefined : { credits, usd: credits / EVOLINK_CREDITS_PER_USD, source: 'provider_reserved' };
+}
+
 export const pollVideoTask = async (
   taskId: string,
   onProgress?: (progress: number) => void,
   videoModel: VideoModelId = DEFAULT_VIDEO_MODEL,
   endpoint?: string,
   queueEndpoint?: string,
+  provider?: AIProvider,
+  expectedUserId?: string,
 ): Promise<VideoTaskResult> => {
   const { data: { session: startingSession } } = await supabase.auth.getSession();
   const initiatingUserId = startingSession?.user?.id;
-  const isH3 = videoModel === 'minimax-h3';
-  const effectiveQueueEndpoint = queueEndpoint || endpoint;
-  const isH3Max = isH3 && (
+  if (expectedUserId && expectedUserId !== initiatingUserId) throw new RecoverableVideoTaskError('Resume this task from the original account.');
+  const isFalVideo = provider ? provider === 'fal' : !endpoint?.startsWith('evolink/') && (videoModel === 'minimax-h3' || videoModel === OMNI_MODEL);
+  const effectiveQueueEndpoint = queueEndpoint || endpoint || (videoModel === OMNI_MODEL ? OMNI_QUEUE_APP : undefined);
+  const isH3Max = isFalVideo && (
     endpoint?.startsWith('minimax/h3-max/') === true
     || effectiveQueueEndpoint === 'minimax/h3-max'
   );
   const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_');
-  const providerName = videoProviderName(taskId, isH3);
+  const providerName = videoProviderName(taskId, isFalVideo, provider);
   let consecutiveErrors = 0;
   const MAX_ERRORS = 5;
   let retryableStatusErrors = 0;
@@ -1151,18 +1423,28 @@ export const pollVideoTask = async (
 
   while (true) {
     const { data: { session: pollingSession } } = await supabase.auth.getSession();
-    if (pollingSession?.user?.id !== initiatingUserId) throw new Error('Session changed while checking the video.');
+    if (pollingSession?.user?.id !== initiatingUserId) throw new RecoverableVideoTaskError('Session changed while checking the video.');
+    let pollDelay = isH3Max ? H3_MAX_POLL_INTERVAL : POLL_INTERVAL;
     try {
       const res = await fetch(
-        routed ? `/api/seedance-video?taskId=${encodeURIComponent(taskId)}` : isH3
+        routed ? `/api/seedance-video?taskId=${encodeURIComponent(taskId)}` : isFalVideo
           ? `/api/fal-h3-video?requestId=${encodeURIComponent(taskId)}${effectiveQueueEndpoint ? `&endpoint=${encodeURIComponent(effectiveQueueEndpoint)}` : ''}`
           : `/api/evolink-status?taskId=${encodeURIComponent(taskId)}`,
         { headers: await getServerAuthHeaders(initiatingUserId), cache: 'no-store' },
       );
+      if (res.status === 429) {
+        const retryAfter = res.headers?.get('retry-after');
+        if (retryAfter && /^\d+$/.test(retryAfter)) {
+          const waitMs = Number(retryAfter) * 1000;
+          if (waitMs >= 30 * 60_000) throw new RecoverableVideoTaskError('Rate limited. Resume the saved video later.');
+          pollDelay = Math.max(pollDelay, waitMs);
+        }
+      }
 
       let data: any;
       // Read the body once: after json() fails, text() is always empty.
       const text = await res.text().catch(() => '');
+      if ((await supabase.auth.getSession()).data.session?.user.id !== initiatingUserId) throw new RecoverableVideoTaskError('Session changed while checking the video.');
       try {
         data = JSON.parse(text);
       } catch {
@@ -1194,6 +1476,11 @@ export const pollVideoTask = async (
         return {
           urls: output,
           actualCostUsd,
+          ...(!routed && !isFalVideo ? { reservedCost: readEvoReservation(data.usage?.credits_reserved) } : {}),
+          ...(taskId.startsWith('bs_fal_') ? { falSeedanceResult: {
+            seed: Number.isSafeInteger(data.seed) ? data.seed : undefined, draftId: typeof data.draftId === 'string' ? data.draftId : undefined,
+            lastFrameUrl: typeof data.lastFrameUrl === 'string' && /^https:\/\//i.test(data.lastFrameUrl) ? data.lastFrameUrl : undefined,
+          } } : {}),
           expandedPrompt,
           duration: providerDuration ?? (isH3Max ? await getMediaDuration(output[0], 'video') ?? undefined : undefined),
         };
@@ -1202,7 +1489,7 @@ export const pollVideoTask = async (
       if (data.status === 'CANCELLED') throw new TerminalVideoTaskError(data.error || 'Video generation was cancelled');
       onProgress?.(data.progress ?? 0);
     } catch (err: any) {
-      if (err instanceof TerminalVideoTaskError) throw err;
+      if (err instanceof TerminalVideoTaskError || isRecoverableVideoTaskError(err)) throw err;
       if (err instanceof VideoStatusHttpError && err.retryable) {
         retryableStatusErrors++;
         consecutiveErrors = 0;
@@ -1227,7 +1514,7 @@ export const pollVideoTask = async (
       }
     }
 
-    await new Promise(resolve => setTimeout(resolve, isH3Max ? H3_MAX_POLL_INTERVAL : POLL_INTERVAL));
+    await new Promise(resolve => setTimeout(resolve, pollDelay));
   }
 };
 
@@ -1237,11 +1524,18 @@ export const logVideoUsage = (prompt: string, count: number, config: GenerationC
     (total, video) => total + (video.duration != null && video.duration > 0 ? video.duration : 0),
     0,
   );
-  logUsage('video_generate' as any, `${videoModel}-${mode.replace(/_/g, '-')}`, prompt, count, {
+  const evoH3 = videoModel === EVO_H3_MODEL && config.videoProvider === 'evolink';
+  const usageModel = videoModel === MAGI2_MODEL && (mode === 'text_only' || mode === 'image_to_video' || mode === 'reference_to_video')
+    ? MAGI2_ENDPOINTS[mode]
+    : evoH3 && (mode === 'text_to_video' || mode === 'image_to_video' || mode === 'reference_to_video')
+      ? EVO_H3_ENDPOINTS[toEvoH3Mode(mode)]
+      : videoModel + '-' + mode.replace(/_/g, '-');
+  logUsage('video_generate', usageModel, prompt, count, {
+    videoProvider: config.videoProvider,
     estimatedCost: cost?.usd ?? null,
     videoQuality: config.videoQuality,
     videoDuration: config.videoDuration,
-    audioEnabled: config.audioEnabled !== false,
+    audioEnabled: evoH3 ? undefined : config.audioEnabled !== false,
     referenceImageCount: config.referenceImages.length,
     referenceVideoCount: (config.referenceVideos || []).length,
     referenceVideoDuration,
@@ -1249,9 +1543,9 @@ export const logVideoUsage = (prompt: string, count: number, config: GenerationC
       ? config.referenceVideos[0].duration
       : 0,
     videoOperation: config.videoOperation || 'generate',
-    promptExpansionMode: videoModel === 'minimax-h3' ? config.h3MaxOptions?.promptExpansionMode || config.videoPromptExpansionMode || 'balanced' : undefined,
-    h3MaxMode: videoModel === 'minimax-h3' ? getH3MaxMode(config) : undefined,
-    h3MaxOptions: videoModel === 'minimax-h3' ? config.h3MaxOptions : undefined,
+    promptExpansionMode: videoModel === EVO_H3_MODEL && !evoH3 ? config.h3MaxOptions?.promptExpansionMode || config.videoPromptExpansionMode || 'balanced' : undefined,
+    h3MaxMode: videoModel === EVO_H3_MODEL ? getH3MaxMode(config) : undefined,
+    h3MaxOptions: videoModel === EVO_H3_MODEL && !evoH3 ? config.h3MaxOptions : undefined,
     referenceAudioCount: (config.referenceAudios || []).length,
   }).catch(e => console.warn('Failed to log video usage:', e));
 };

@@ -11,6 +11,9 @@ import { Upload } from 'tus-js-client';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { normalizeH3MaxMode, H3_MAX_ENDPOINTS } from '../lib/video/h3Max';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
+import { isOpenAIImageModel, SUNBURST_MODEL } from '../lib/images/openaiImage';
+import { MAGI2_ENDPOINTS, type Magi2Mode } from '../lib/video/magi2';
+import { videoTaskProvider } from '../lib/video/videoProviderName';
 
 const DB_NAME = 'NanoGenDB';
 const STORE_NAME = 'images';
@@ -101,11 +104,12 @@ const resolveVideoModel = (value: unknown): VideoModelId => {
   if (value === 'seedance-2.0' || value === 'seedance2') return 'seedance-2.0';
   if (value === 'seedance-2.5' || value === 'seedance2.5') return 'seedance-2.5';
   if (value === 'minimax-h3' || value === 'minimax/h3') return 'minimax-h3';
+  if (value === 'gemini-omni-1.2-flash' || value === 'magi-2') return value;
   return DEFAULT_VIDEO_MODEL;
 };
 
 const resolveVideoOperation = (value: unknown): VideoOperation => {
-  if (value === 'reference_edit' || value === 'edit' || value === 'extend') return value;
+  if (value === 'reference_edit' || value === 'edit' || value === 'extend' || value === 'upscale') return value;
   return 'generate';
 };
 
@@ -284,6 +288,101 @@ const resolveMediaReference = (url: string | undefined): string | undefined => {
   return path ? getSignedMediaUrl(path) : url;
 };
 
+const canonicalSeedreamResult = (result: GeneratedMedia['seedreamResult']): GeneratedMedia['seedreamResult'] => {
+  if (!Array.isArray(result?.images)) return undefined;
+  const canonical = (image: NonNullable<typeof result>['images'][number]) => ({ ...image, url: persistMediaReference(image.url) || image.url });
+  return { images: result.images.map(canonical), ...(Array.isArray(result.layers) ? { layers: result.layers.map(layer => ({ ...layer, image: canonical(layer.image) })) } : {}) };
+};
+
+// Only remove derived artifacts in the selected generation's own archive.
+const extraOutputPaths = (id: string, userId: string, original: string, result?: GeneratedMedia['seedreamResult'], lastFrame?: string): string[] => {
+  const paths: string[] = [];
+  if (original.startsWith(`${userId}/seedream/`) && /\/[a-f0-9]{64}\/0\.(?:png|jpg)$/.test(original) && Array.isArray(result?.images)) {
+    const directory = original.slice(0, original.lastIndexOf('/') + 1);
+    for (const image of result.images) {
+      const path = extractStoragePathFromUrl(image?.url);
+      if (path && path !== original && path.startsWith(directory) && /^\d+\.(?:png|jpg)$/.test(path.slice(directory.length))) paths.push(path);
+    }
+  }
+  if (extractStoragePathFromUrl(lastFrame) === `${userId}/${id}_last_frame`) paths.push(`${userId}/${id}_last_frame`);
+  return paths;
+};
+
+// Pending rows record identity and role flags, never inline pixel buffers or
+// short-lived bearer tokens. Use the same wire format after provider upload.
+const pendingReferences = (refs: GeneratedMedia['referenceImages'] = []) =>
+  refs.map(ref => {
+    const { data, ...fields } = withoutLegacyMask(ref);
+    return isPublicHttpUrl(data) ? { ...fields, data: persistMediaReference(data) } : fields;
+  });
+
+const referenceFormats = new Map([
+  ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['png', 'image/png'], ['webp', 'image/webp'],
+  ['gif', 'image/gif'], ['avif', 'image/avif'], ['bmp', 'image/bmp'], ['tif', 'image/tiff'],
+  ['tiff', 'image/tiff'], ['heic', 'image/heic'], ['heif', 'image/heif'],
+]);
+
+async function saveGenerationReference(
+  ref: GeneratedMedia['referenceImages'][number],
+  mediaId: string,
+  userId: string,
+  assertSameUser: () => Promise<void>,
+) {
+  if (typeof ref.data !== 'string' || !ref.data.trim()) {
+    throw new Error(`Reference image ${ref.id || 'unknown'} has no source data and was not saved.`);
+  }
+  const source = extractStoragePathFromUrl(ref.data);
+  if (!source && isPublicHttpUrl(ref.data)) return withoutLegacyMask(ref);
+  // Reference ids can contain colons and path separators; the object name
+  // must also be valid on the desktop workspace's Windows filesystem.
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([mediaId, ref.id])));
+  const key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  const basePath = `${userId}/refs/${key}`;
+  const sourceExt = source?.split('.').pop()?.toLowerCase() || '';
+  if (source === `${basePath}.${sourceExt}` && referenceFormats.get(sourceExt) === ref.mimeType && ref.mimeType) {
+    return withoutLegacyMask({ ...ref, data: getStorageReferenceUrl(source) });
+  }
+  await assertSameUser();
+  const bucket = supabase.storage.from(MEDIA_BUCKET_NAME);
+  let blob: Blob | undefined;
+  let storedType: string | undefined;
+  if (source && !isLocalWorkspace()) {
+    // A storage copy preserves its source bytes and Content-Type. Draft MIME
+    // can be stale (e.g. after cropping); prefer the actual object metadata.
+    const { data, error } = await bucket.info(source);
+    if (error) throw error;
+    storedType = data.contentType || data.metadata?.mimetype;
+  } else if (source) {
+    const { data, error } = await bucket.download(source);
+    if (error || !data) throw new Error('The local reference image is unavailable.');
+    blob = data;
+  } else {
+    const response = await fetch(ref.data);
+    if (!response.ok) throw new Error('The reference image could not be read.');
+    blob = await response.blob();
+  }
+  if (blob && !blob.size) throw new Error('The reference image is empty.');
+  const contentType = (storedType || blob?.type || '').split(';')[0].trim().toLowerCase();
+  const mimeType = contentType.startsWith('image/') ? contentType : referenceFormats.get(sourceExt) || ref.mimeType;
+  const subtype = mimeType?.split('/')[1];
+  const canonicalExt = subtype === 'jpeg' ? 'jpg' : subtype || '';
+  const extension = referenceFormats.get(canonicalExt) === mimeType && canonicalExt ? canonicalExt : 'bin';
+  const destination = `${basePath}.${extension}`;
+  if (source !== destination) {
+    await assertSameUser();
+    if (blob) {
+      const { error } = await bucket.upload(destination, blob, { contentType: mimeType, cacheControl: '0', upsert: true });
+      if (error) throw error;
+    } else if (source) {
+      const { error } = await bucket.copy(source, destination);
+      // Retrying an interrupted row save can find the immutable copy already
+      // present. Other errors must not turn a foreign object into an owned one.
+      if (error && !('statusCode' in error && String(error.statusCode) === '409') && !/already exists/i.test(error.message)) throw error;
+    }
+  }
+  return withoutLegacyMask({ ...ref, mimeType, data: getStorageReferenceUrl(destination) });
+}
+
 /** Refresh a selected gallery/reference asset immediately before provider submission. */
 export const refreshMediaAccessUrl = async (url: string, forProvider = true): Promise<string> => {
   const path = extractStoragePathFromUrl(url);
@@ -297,6 +396,7 @@ const hydrateMediaRows = async (rows: any[]): Promise<void> => {
   const paths: Array<string | undefined> = [];
   for (const row of rows) {
     paths.push(row.storage_path || extractStoragePathFromUrl(row.url));
+    paths.push(extractStoragePathFromUrl(row.metadata?.falSeedanceResult?.lastFrameUrl));
     paths.push(row.thumbnail_path || extractStoragePathFromUrl(row.thumbnail_url)
       || (row.type !== 'video' ? deriveLegacyThumbnailPath(row.url, row.storage_path) : undefined));
     for (const ref of row.reference_images || []) {
@@ -335,7 +435,7 @@ export const clearLocalMediaCache = async (previousUserId?: string): Promise<voi
 
 const deriveLegacyThumbnailPath = (url: string | null | undefined, storagePath?: string | null): string | undefined => {
   const candidatePath = storagePath || extractStoragePathFromUrl(url);
-  if (!candidatePath) return undefined;
+  if (!candidatePath || /\/seedream\/[a-f0-9]{64}\//.test(candidatePath)) return undefined;
 
   if (candidatePath.includes('_thumb.')) return candidatePath;
   return candidatePath.replace(/\.[^.]+$/, `._legacy_placeholder`).replace('._legacy_placeholder', `_thumb.${THUMBNAIL_EXTENSION}`);
@@ -641,10 +741,17 @@ const openDB = async (expectedUserId?: string | null): Promise<IDBDatabase> => {
   return opening;
 };
 
+const magiModeByEndpoint = new Map<string, Magi2Mode>((Object.keys(MAGI2_ENDPOINTS) as Magi2Mode[]).map(mode => [MAGI2_ENDPOINTS[mode], mode]));
+
 const mapRowToMedia = (row: any): GeneratedMedia => {
   const isVideo = row.type === 'video';
   const meta = row.metadata || {};
-  const videoModel = isVideo ? resolveVideoModel(meta.videoModel || row.image_model) : undefined;
+  const savedModel = meta.videoModel || row.image_model;
+  const magiEndpointMode = isVideo ? magiModeByEndpoint.get(savedModel) ?? magiModeByEndpoint.get(meta.providerModel) : undefined;
+  const videoModel = !isVideo ? undefined : magiEndpointMode ? 'magi-2' : resolveVideoModel(savedModel);
+  const magi2Mode = videoModel === 'magi-2' ? magiEndpointMode ?? meta.magi2Mode ?? 'text_only' : undefined;
+  const generationProvider = isVideo ? videoTaskProvider(row.task_id, meta.generationProvider, videoModel === 'minimax-h3') : meta.generationProvider;
+  const evoH3 = videoModel === 'minimax-h3' && generationProvider === 'evolink';
   const referenceVideos = sanitizePublicMediaRefs(meta.referenceVideos)
     .map(ref => ({ ...ref, url: resolveMediaReference(ref.url) || '' })) as ReferenceVideo[];
   const h3Mode = typeof meta.falEndpoint === 'string' && meta.falEndpoint.includes('h3-max/image-to-video')
@@ -654,8 +761,8 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
       : 'reference_to_video' as const;
   const modernH3Mode=normalizeH3MaxMode(meta.h3MaxMode)||Object.entries(H3_MAX_ENDPOINTS).find(([,endpoint])=>endpoint===meta.falEndpoint)?.[0] as GeneratedMedia['h3MaxMode'];
   const storedGenerationCost = meta.generationCost;
-  const generationCost = videoModel === 'minimax-h3'
-    && storedGenerationCost?.source !== 'provider_actual'
+  const generationCost = videoModel === 'minimax-h3' && !evoH3
+    && (!storedGenerationCost?.source || storedGenerationCost.source === 'published_estimate')
     ? modernH3Mode ? storedGenerationCost || estimateH3MaxCost({h3MaxMode:modernH3Mode,h3MaxOptions:meta.h3MaxOptions,videoQuality:meta.videoQuality||'768p',videoDuration:Number(meta.videoDuration)||5,referenceImages:row.reference_images||[],referenceVideos,referenceAudios:meta.referenceAudios||[]} as any) : estimateVideoCost(
         videoModel,
         (meta.videoQuality || '2K') as VideoQuality,
@@ -687,7 +794,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     : undefined;
   return {
     id: row.id,
-    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel,
+    generationProvider, providerModel: meta.providerModel,
     url: resolveOriginalUrl(row),
     // Images can use the legacy derived thumbnail convention. Historical
     // video rows never created that file, so deriving one gives mobile Safari
@@ -707,9 +814,15 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
       : undefined,
     aspectRatio: row.aspect_ratio || '1:1',
     resolution: row.resolution || '1K',
-    imageModel: isVideo ? undefined : (row.image_model || row.imageModel || DEFAULT_IMAGE_MODEL),
+    // Missing model columns belong to historical rows, not today's default for new drafts.
+    imageModel: isVideo ? undefined : (row.image_model || row.imageModel || SUNBURST_MODEL),
     openaiImageOptions: meta.openaiImageOptions,
+    imageOperation: meta.imageOperation,
+    seedreamOptions: meta.seedreamOptions,
+    // Private archive URLs are signed on demand, not all at once for a gallery page.
+    seedreamResult: meta.seedreamResult,
     imageOutputSize: meta.imageOutputSize,
+    imageEditMarkup: typeof meta.imageEditMarkup === 'boolean' ? meta.imageEditMarkup : undefined,
     imageEditProtection: meta.imageEditProtection,
     imageEditSourceId: meta.imageEditSourceId,
     imageRequestedSize: meta.imageRequestedSize,
@@ -719,7 +832,9 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     openaiUsage: meta.openaiUsage,
     openaiStartedAt: meta.openaiStartedAt,
     imageQueue: meta.imageQueue?.version === 1 ? { version: 1, queuedAt: Number(meta.imageQueue.queuedAt) || row.created_at } : undefined,
-    imageStage: meta.imageQueue?.version === 1 && row.status === 'pending' ? 'queued' : undefined,
+    preparationBatch: typeof meta.preparationBatch === 'string' ? meta.preparationBatch : undefined,
+    brainstormBatchId: meta.brainstorm && row.status === 'pending' ? meta.preparationBatch : undefined,
+    imageStage: row.status === 'pending' ? meta.preparationBatch ? 'preparing' : meta.imageQueue?.version === 1 ? 'queued' : undefined : undefined,
     imageQueueWaitReason: meta.imageQueueWaitReason === 'quota' ? 'quota' : meta.imageQueueWaitReason === 'rate' ? 'rate' : undefined,
     createdAt: row.created_at,
     referenceImages: (row.reference_images || []).map((ref: any) => withoutLegacyMask({ ...ref, data: resolveMediaReference(ref.data) })),
@@ -727,9 +842,13 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     isFavorite: row.is_favorite || false,
     mediaType: isVideo ? 'video' : 'image',
     videoModel,
+    magi2Mode,
+    videoReferenceImageIds: Array.isArray(meta.videoReferenceImageIds) ? meta.videoReferenceImageIds : undefined,
+    falSeedanceOptions: meta.falSeedanceOptions,
+    falSeedanceResult: meta.falSeedanceResult && { ...meta.falSeedanceResult, lastFrameUrl: resolveMediaReference(meta.falSeedanceResult.lastFrameUrl) },
     videoOperation: isVideo ? resolveVideoOperation(meta.videoOperation) : undefined,
-    videoAspectRatio: meta.videoAspectRatio || (isVideo ? row.aspect_ratio : undefined),
-    videoQuality: meta.videoQuality || (isVideo ? row.resolution || '720p' : undefined),
+    videoAspectRatio: meta.videoAspectRatio || (magi2Mode === 'image_to_video' ? 'adaptive' : isVideo ? row.aspect_ratio : undefined),
+    videoQuality: meta.videoQuality || (videoModel === 'magi-2' ? '1080p' : evoH3 ? '768p' : isVideo ? row.resolution || '720p' : undefined),
     videoDuration: meta.videoDuration,
     audioEnabled: meta.audioEnabled,
     videoPromptExpansionMode: meta.videoPromptExpansionMode,
@@ -779,10 +898,11 @@ const readImagesFromIndexedDb = async (): Promise<GeneratedMedia[]> => {
       if (media) {
         await hydrateMediaRows([{
           url: media.url, thumbnail_url: media.thumbnailUrl, type: media.mediaType,
-          reference_images: media.referenceImages, metadata: { referenceVideos: media.referenceVideos, referenceAudios: media.referenceAudios },
+          reference_images: media.referenceImages, metadata: { falSeedanceResult: media.falSeedanceResult, referenceVideos: media.referenceVideos, referenceAudios: media.referenceAudios },
         }]);
         media.url = resolveMediaReference(media.url) || '';
         media.thumbnailUrl = resolveMediaReference(media.thumbnailUrl);
+        if (media.falSeedanceResult?.lastFrameUrl) media.falSeedanceResult.lastFrameUrl = resolveMediaReference(media.falSeedanceResult.lastFrameUrl);
         media.referenceImages = media.referenceImages?.map(ref => withoutLegacyMask({ ...ref, data: resolveMediaReference(ref.data) }));
         media.referenceVideos = media.referenceVideos?.map(ref => ({ ...ref, url: resolveMediaReference(ref.url) || '' }));
         media.referenceAudios = media.referenceAudios?.map(ref => ({ ...ref, url: resolveMediaReference(ref.url) || '' }));
@@ -833,7 +953,9 @@ const putImageInIndexedDb = async (media: GeneratedMedia, expectedUserId?: strin
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.put({
-        ...media, url: persistMediaReference(media.url), thumbnailUrl: persistMediaReference(media.thumbnailUrl),
+        ...media, seedreamResult: canonicalSeedreamResult(media.seedreamResult),
+        falSeedanceResult: media.falSeedanceResult && { ...media.falSeedanceResult, lastFrameUrl: persistMediaReference(media.falSeedanceResult.lastFrameUrl) },
+        url: persistMediaReference(media.url), thumbnailUrl: persistMediaReference(media.thumbnailUrl),
         referenceImages: media.referenceImages?.map(ref => withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) })),
         referenceVideos: media.referenceVideos?.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })),
         referenceAudios: media.referenceAudios?.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })),
@@ -1008,9 +1130,6 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
         ? media.thumbnailPath : `${userId}/${getThumbnailStoragePath(media.id)}`;
 
       const downloadUrl = await refreshMediaAccessUrl(media.url, false);
-      const res = await fetch(downloadUrl);
-      if (!res.ok) throw new Error('Saved image could not be downloaded.');
-      const originalBlob = await res.blob();
 
       let thumbBlob: Blob | null = null;
       try {
@@ -1019,53 +1138,19 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
         console.warn("Thumbnail generation failed, skipping", err);
       }
 
-      // Handle reference images - upload base64 ones to storage to avoid DB size limits
-      const safeReferenceImages = await Promise.all((media.referenceImages || []).map(withoutLegacyMask).map(async (ref) => {
-        if (!ref.data) {
-          throw new Error(`Reference image ${ref.id || 'unknown'} has no source data and was not saved.`);
-        }
-        if (ref.data.startsWith('http')) {
-          return withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) }); // Keep object references without bearer tokens
-        }
+      const safeReferenceImages = await Promise.all((media.referenceImages || []).map(ref =>
+        saveGenerationReference(ref, media.id, userId, assertSameUser)));
 
-        try {
-          const refPath = `${userId}/refs/${media.id}_${ref.id}.jpg`;
-          const res = await fetch(ref.data);
-          const refBlob = await res.blob();
-
-          await assertSameUser();
-
-          const { error: refUploadError } = await supabase.storage
-            .from(MEDIA_BUCKET_NAME)
-            .upload(refPath, refBlob, {
-              contentType: refBlob.type || 'image/jpeg',
-              cacheControl: '0',
-              upsert: true
-            });
-
-          if (!refUploadError) {
-            const publicUrl = getStorageReferenceUrl(refPath);
-            if (publicUrl) {
-              return { ...ref, data: publicUrl };
-            }
-          }
-        } catch (e) {
-          console.error("Failed to upload reference image", e);
-        }
-
-        // Never persist an identity/reference row without its source bytes.
-        // A missing ref is worse than a local-only result: it looks complete
-        // in the gallery but later regenerations silently lose the identity.
-        throw new Error(`Reference image ${ref.id || 'unknown'} could not be persisted. The generated image was kept locally; retry saving after the connection recovers.`);
-      }));
-
-      // OpenAI already stores the original on the server. Keep its chosen
-      // format/alpha and avoid uploading a large result a second time.
-      const isStoredOpenAIImage = media.imageModel === 'gpt-image-2.5-sunburst'
-        && media.storagePath?.startsWith(`openai/${userId}/`)
-        && extractStoragePathFromUrl(downloadUrl) === media.storagePath;
+      // Preserve the format and exact bytes of originals already archived by a worker.
+      const alreadyStored = Boolean(media.storagePath && extractStoragePathFromUrl(downloadUrl) === storagePath
+        && (isOpenAIImageModel(media.imageModel) && storagePath.startsWith(`openai/${userId}/`)
+          || media.imageModel === 'seedream-5.5' && storagePath.startsWith(`${userId}/seedream/`)));
       await assertSameUser();
-      if (!isStoredOpenAIImage) {
+      if (!alreadyStored) {
+        const res = await fetch(downloadUrl);
+        if (!res.ok) throw new Error('Saved image could not be downloaded.');
+        const originalBlob = await res.blob();
+        await assertSameUser();
         const { error: uploadError } = await supabase.storage
           .from(MEDIA_BUCKET_NAME)
           .upload(storagePath, originalBlob, {
@@ -1095,8 +1180,9 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
       // Retain diagnostics and prompt/edit metadata when enriching the saved
       // image; upsert replaces the JSON column wholesale.
       let existingImageMetadata: Record<string, unknown> = {};
-      const hasImageMetadata = media.imageModel === 'gpt-image-2.5-sunburst' || media.imageEditSourceId
-        || media.imageEditProtection || media.promptPreparation || media.youtubeSource || media.originalPrompt != null;
+      const hasImageMetadata = isOpenAIImageModel(media.imageModel) || media.imageModel === 'seedream-5.5' || media.imageEditSourceId
+        || media.imageEditProtection || media.promptPreparation || media.youtubeSource || media.originalPrompt != null
+        || media.imageOperation || media.generationProvider || media.generationCost;
       if (hasImageMetadata) {
         const { data, error } = await supabase.from('generations').select('metadata').eq('id', media.id).maybeSingle();
         if (error) throw new Error(`Could not preserve the saved image details: ${error.message}`);
@@ -1115,25 +1201,21 @@ export const saveImage = async (media: GeneratedMedia, expectedUserId?: string):
         reference_images: safeReferenceImages,
         folder_id: media.folderId,
         is_favorite: media.isFavorite || false,
-        ...(media.imageModel === 'gpt-image-2.5-sunburst' ? { metadata: {
+        ...(hasImageMetadata ? { metadata: {
           ...existingImageMetadata,
-          ...(media.promptPreparation ? { promptPreparation: normalizePromptPreparation(media.promptPreparation) } : {}),
-          ...(media.youtubeSource ? { youtubeSource: normalizeYouTubeSource(media.youtubeSource) } : {}),
-          originalPrompt: media.originalPrompt, openaiImageOptions: media.openaiImageOptions,
-          imageOutputSize: media.imageOutputSize, openaiUsage: media.openaiUsage,
-          imageEditProtection: media.imageEditProtection,
-          imageEditSourceId: media.imageEditSourceId,
-          imageRequestedSize: media.imageRequestedSize, imageGenerationPrompt: media.imageGenerationPrompt,
-          imageGenerationReferenceIds: media.imageGenerationReferenceIds,
-          imagePromptCategory: media.imagePromptCategory,
-          openaiStartedAt: media.openaiStartedAt, generationCost: media.generationCost,
-          generationStartedAt: media.generationStartedAt, generationCompletedAt: media.generationCompletedAt,
-          generationTime: media.generationTime,
-        } } : hasImageMetadata ? { metadata: { ...existingImageMetadata,
-          ...(media.youtubeSource ? { youtubeSource: normalizeYouTubeSource(media.youtubeSource) } : {}),
-          ...(media.promptPreparation ? { promptPreparation: normalizePromptPreparation(media.promptPreparation) } : {}), imageEditSourceId: media.imageEditSourceId,
-          imageEditProtection: media.imageEditProtection, originalPrompt: media.originalPrompt,
-          imagePromptCategory: media.imagePromptCategory, imageOutputSize: media.imageOutputSize } } : {}),
+          // A lite/partially hydrated gallery item must not erase richer server metadata.
+          ...Object.fromEntries(Object.entries({
+            promptPreparation: normalizePromptPreparation(media.promptPreparation), youtubeSource: normalizeYouTubeSource(media.youtubeSource),
+            originalPrompt: media.originalPrompt, openaiImageOptions: media.openaiImageOptions, imageOperation: media.imageOperation,
+            seedreamOptions: media.seedreamOptions, seedreamResult: canonicalSeedreamResult(media.seedreamResult), imageEditMarkup: media.imageEditMarkup,
+            imageOutputSize: media.imageOutputSize, openaiUsage: media.openaiUsage, imageEditProtection: media.imageEditProtection,
+            imageEditSourceId: media.imageEditSourceId, imageRequestedSize: media.imageRequestedSize, imageGenerationPrompt: media.imageGenerationPrompt,
+            imageGenerationReferenceIds: media.imageGenerationReferenceIds, imagePromptCategory: media.imagePromptCategory,
+            openaiStartedAt: media.openaiStartedAt, generationCost: media.generationCost, generationProvider: media.generationProvider,
+            providerModel: media.providerModel, falEndpoint: media.falEndpoint, falQueueEndpoint: media.falQueueEndpoint, falRequestId: media.falRequestId,
+            generationStartedAt: media.generationStartedAt, generationCompletedAt: media.generationCompletedAt, generationTime: media.generationTime,
+          }).filter(([,value]) => value != null)),
+        } } : {}),
       };
 
       const generationInsertWithPaths = {
@@ -1199,7 +1281,7 @@ const mergeVideoMetadata = (existing: Record<string, any>, incoming: Record<stri
   // server reconciles billing. Keep that measured cost, including an actual
   // zero charge, while allowing subsequent provider corrections to replace it.
   if (existing.generationCost?.source === 'provider_actual'
-    && incoming.generationCost?.source === 'published_estimate') {
+    && incoming.generationCost?.source !== 'provider_actual') {
     merged.generationCost = existing.generationCost;
   }
   return merged;
@@ -1228,10 +1310,18 @@ const acquireVideoSave = async (mediaId: string): Promise<() => void> => {
   };
 };
 
+interface StoredVideo {
+  publicUrl: string;
+  thumbnailUrl?: string;
+  storagePath: string;
+  thumbnailPath: string;
+  falSeedanceResult?: GeneratedMedia['falSeedanceResult'];
+}
+
 const saveVideoWithoutQueue = async (
   media: GeneratedMedia,
   expectedUserId?: string,
-): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
+): Promise<StoredVideo | undefined> => {
   if (!supabase) return undefined;
 
   try {
@@ -1247,7 +1337,9 @@ const saveVideoWithoutQueue = async (
     const videoUrl = media.url;
     if (!videoUrl) { console.warn('saveVideo: no videoUrl'); return undefined; }
 
-    const storagePath = `${userId}/${media.id}.mp4`;
+    const provider = videoTaskProvider(media.taskId, media.generationProvider, media.videoModel === 'minimax-h3');
+    const wantsMov = provider === 'fal' && media.videoModel === 'seedance-2.5' && media.falSeedanceOptions?.outputFormat === 'mov';
+    let storagePath = `${userId}/${media.id}.${wantsMov ? 'mov' : 'mp4'}`;
     const thumbnailPath = `${userId}/${media.id}_thumb.png`;
 
     let publicUrl = videoUrl;
@@ -1295,6 +1387,9 @@ const saveVideoWithoutQueue = async (
           throw new Error(`Video download returned ${responseType || 'a non-video response'}`);
         }
         const videoBlob = await response.blob();
+        const mime = responseType.split(';', 1)[0].trim();
+        const mov = mime === 'video/quicktime' || mime === 'video/mov' || (wantsMov && mime !== 'video/mp4');
+        storagePath = `${userId}/${media.id}.${mov ? 'mov' : 'mp4'}`;
 
         let thumbnailBlob: Blob | null = null;
         try {
@@ -1335,7 +1430,7 @@ const saveVideoWithoutQueue = async (
         const { error: uploadError } = await supabase.storage
           .from(MEDIA_BUCKET_NAME)
           .upload(storagePath, videoBlob, {
-            contentType: 'video/mp4',
+            contentType: mov ? 'video/quicktime' : 'video/mp4',
             cacheControl: '0',
             upsert: true,
           });
@@ -1398,22 +1493,6 @@ const saveVideoWithoutQueue = async (
       }
     }
 
-    const safeReferenceImages = await Promise.all((media.referenceImages || []).map(withoutLegacyMask).map(async (ref) => {
-      if (!ref.data) throw new Error(`Reference image ${ref.id || 'unknown'} has no source data and was not saved.`);
-      if (ref.data.startsWith('http')) return withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) });
-      try {
-        const refPath = `${userId}/refs/${media.id}_${ref.id}.jpg`;
-        const res = await fetch(ref.data);
-        const refBlob = await res.blob();
-        await assertSameUser();
-        const { error: refUploadError } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(refPath, refBlob, { contentType: refBlob.type || 'image/jpeg', cacheControl: '0', upsert: true });
-        if (!refUploadError) {
-          const refPublicUrl = getStorageReferenceUrl(refPath);
-          if (refPublicUrl) return { ...ref, data: refPublicUrl };
-        }
-      } catch (e) { console.warn("Failed to upload video ref image", e); }
-      throw new Error(`Reference image ${ref.id || 'unknown'} could not be persisted. The generated video was kept locally; retry saving after the connection recovers.`);
-    }));
 
     // Read any existing metadata + reference_images so we MERGE rather than
     // blindly overwrite. Postgres' upsert replaces the entire JSONB metadata
@@ -1449,8 +1528,27 @@ const saveVideoWithoutQueue = async (
     const finalReferenceVideos = safeReferenceVideos.length > 0 ? safeReferenceVideos : existingReferenceVideos;
     const finalReferenceAudios = safeReferenceAudios.length > 0 ? safeReferenceAudios : existingReferenceAudios;
 
+    let falSeedanceResult = media.falSeedanceResult;
+    if (falSeedanceResult?.lastFrameUrl) {
+      const path = `${userId}/${media.id}_last_frame`;
+      if (extractStoragePathFromUrl(falSeedanceResult.lastFrameUrl) !== path && extractStoragePathFromUrl(existingMeta.falSeedanceResult?.lastFrameUrl) !== path) {
+        const frame = await fetch(await refreshMediaAccessUrl(falSeedanceResult.lastFrameUrl, false));
+        if (!frame.ok) throw new Error(`Last frame download failed (${frame.status}).`);
+        const blob = await frame.blob();
+        if (!blob.size || !/^image\/(?:jpeg|png|webp)$/i.test(blob.type)) throw new Error('Invalid last frame image.');
+        await assertSameUser();
+        const { error } = await supabase.storage.from(MEDIA_BUCKET_NAME).upload(path, blob, { contentType: blob.type, cacheControl: '0', upsert: true });
+        if (error) throw error;
+      }
+      falSeedanceResult = { ...falSeedanceResult, lastFrameUrl: getStorageReferenceUrl(path) };
+    }
+    const signedLastFrame = falSeedanceResult?.lastFrameUrl ? await refreshMediaAccessUrl(falSeedanceResult.lastFrameUrl, false) : undefined;
     const newMeta: Record<string, any> = {
       videoModel: media.videoModel || DEFAULT_VIDEO_MODEL,
+      magi2Mode: media.magi2Mode,
+      videoReferenceImageIds: media.videoReferenceImageIds ?? existingMeta.videoReferenceImageIds ?? media.referenceImages?.map(ref => ref.id),
+      falSeedanceOptions: media.falSeedanceOptions,
+      falSeedanceResult,
       videoOperation: media.videoOperation || 'generate',
       videoAspectRatio: media.videoAspectRatio,
       videoQuality: media.videoQuality,
@@ -1470,7 +1568,7 @@ const saveVideoWithoutQueue = async (
       referenceVideos: finalReferenceVideos.length > 0 ? finalReferenceVideos.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       referenceAudios: finalReferenceAudios.length > 0 ? finalReferenceAudios.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       providerModel: media.providerModel || media.falEndpoint,
-      generationProvider: media.generationProvider || (media.taskId?.startsWith('bs_openrouter_') ? 'openrouter' : media.taskId?.startsWith('bs_fal_') ? 'fal' : undefined),
+      generationProvider: videoTaskProvider(media.taskId, media.generationProvider ?? existingMeta.generationProvider, media.videoModel === 'minimax-h3'),
       falEndpoint: media.falEndpoint,
       falQueueEndpoint: media.falQueueEndpoint,
     };
@@ -1481,11 +1579,19 @@ const saveVideoWithoutQueue = async (
     }
     const mergedMetadata = mergeVideoMetadata(existingMeta, definedNewMeta);
 
-    // If the in-memory media has no refs but the existing DB row does,
-    // preserve the DB version so we don't wipe references on resumed videos.
-    const finalReferenceImages = (safeReferenceImages.length === 0 && existingReferenceImages && existingReferenceImages.length > 0)
-      ? existingReferenceImages
-      : safeReferenceImages;
+    // Grid cards omit reference_images. A resumed video still owns copies
+    // of the provider-uploaded inputs in the saved pending row. Legacy empty
+    // slots have no bytes to copy: retain them for explicit repair on Re-create.
+    const visibleRefs = media.referenceImages || [];
+    const sourceRefs = visibleRefs.length ? visibleRefs : existingReferenceImages || [];
+    const finalReferenceImages = await Promise.all(sourceRefs.map(ref => {
+      if (typeof ref.data === 'string' && ref.data.trim()) return saveGenerationReference(ref, media.id, userId, assertSameUser);
+      const stored = existingReferenceImages?.find(item => item?.id === ref.id);
+      if (!stored) throw new Error('A video reference is missing its source data.');
+      const merged = { ...stored, ...ref, data: stored.data };
+      return typeof stored.data === 'string' && stored.data.trim()
+        ? saveGenerationReference(merged, media.id, userId, assertSameUser) : withoutLegacyMask(merged);
+    }));
 
     const generationInsertFull = {
       id: media.id,
@@ -1539,6 +1645,7 @@ const saveVideoWithoutQueue = async (
     return {
       publicUrl,
       thumbnailUrl,
+      ...(falSeedanceResult ? { falSeedanceResult: { ...falSeedanceResult, lastFrameUrl: signedLastFrame } } : {}),
       storagePath: uploadedStoragePath || storagePath,
       thumbnailPath: uploadedThumbnailPath || thumbnailPath,
     };
@@ -1551,7 +1658,7 @@ const saveVideoWithoutQueue = async (
 export const saveVideo = async (
   media: GeneratedMedia,
   expectedUserId?: string,
-): Promise<{ publicUrl: string; thumbnailUrl?: string; storagePath: string; thumbnailPath: string } | undefined> => {
+): Promise<StoredVideo | undefined> => {
   if (!supabase) return undefined;
   const release = await acquireVideoSave(media.id);
   try {
@@ -1572,7 +1679,7 @@ export const createPendingVideo = async (
   id: string,
   taskId: string,
   prompt: string,
-  config: { videoModel?: VideoModelId; videoOperation?: VideoOperation; videoAspectRatio?: string; videoQuality?: string; videoDuration?: number; audioEnabled?: boolean; videoPromptExpansionMode?: string; h3MaxMode?: GeneratedMedia['h3MaxMode']; h3MaxOptions?: GeneratedMedia['h3MaxOptions']; folderId?: string | null; referenceImages?: any[]; referenceVideos?: any[]; referenceAudios?: any[]; generationCost?: any; generationStartedAt?: number; originalPrompt?: string; promptPreparation?: GeneratedMedia['promptPreparation'] }
+  config: Partial<Pick<GeneratedMedia, 'generationProvider' | 'providerModel' | 'videoModel' | 'videoOperation' | 'videoAspectRatio' | 'videoQuality' | 'videoDuration' | 'audioEnabled' | 'videoPromptExpansionMode' | 'h3MaxMode' | 'h3MaxOptions' | 'falSeedanceOptions' | 'magi2Mode' | 'folderId' | 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'generationCost' | 'generationStartedAt' | 'originalPrompt' | 'promptPreparation'>>,
 ): Promise<boolean> => {
   if (!supabase) return false;
   try {
@@ -1580,15 +1687,7 @@ export const createPendingVideo = async (
     const userId = session?.user?.id;
     if (!userId) return false;
 
-    // Same reasoning as createPendingImage — strip raw base64 ref data so
-    // the pending-video INSERT is a small JSONB write, not several MB.
-    const safeRefs = (config.referenceImages || []).map((ref: any) => {
-      if (ref?.data && typeof ref.data === 'string' && !ref.data.startsWith('http')) {
-        const { data, mask, ...rest } = ref;
-        return rest;
-      }
-      return withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) });
-    });
+    const safeRefs = pendingReferences(config.referenceImages);
 
     const { error } = await supabase.from('generations').insert({
       id,
@@ -1611,6 +1710,9 @@ export const createPendingVideo = async (
         videoAspectRatio: config.videoAspectRatio,
         videoQuality: config.videoQuality,
         videoDuration: config.videoDuration,
+        generationProvider: config.generationProvider, providerModel: config.providerModel,
+        falSeedanceOptions: config.falSeedanceOptions, magi2Mode: config.magi2Mode,
+        videoReferenceImageIds: config.referenceImages?.map(ref => ref.id),
         audioEnabled: config.audioEnabled,
         videoPromptExpansionMode: config.videoPromptExpansionMode,
         h3MaxMode: config.h3MaxMode,
@@ -1633,6 +1735,43 @@ export const createPendingVideo = async (
   }
 };
 
+/** Commit prepared input URLs before a paid video submission. Advance the
+ * lease as part of this write so an older heartbeat cannot erase the refs. */
+export async function savePreparedVideoReferences(
+  id: string,
+  refs: Pick<GeneratedMedia, 'referenceImages' | 'referenceVideos' | 'referenceAudios'>,
+  expectedUserId: string,
+): Promise<void> {
+  const videos = refs.referenceVideos || [];
+  const audios = refs.referenceAudios || [];
+  if (refs.referenceImages.some(ref => !isPublicHttpUrl(ref.data))
+    || videos.some(ref => !isPublicHttpUrl(ref.url)) || audios.some(ref => !isPublicHttpUrl(ref.url))) {
+    throw new Error('Some reference media could not be saved. No generation was submitted.');
+  }
+  const reference_images = pendingReferences(refs.referenceImages);
+  const referenceVideos = videos.map(ref => ({ ...ref, url: persistMediaReference(ref.url) }));
+  const referenceAudios = audios.map(ref => ({ ...ref, url: persistMediaReference(ref.url) }));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!expectedUserId || await bindMediaSession() !== expectedUserId) throw new Error('Media session changed.');
+    const { data: current, error: readError } = await supabase.from('generations').select('metadata')
+      .eq('user_id', expectedUserId).eq('id', id).eq('type', 'video').eq('status', 'pending').eq('task_id', '').maybeSingle();
+    if (readError || !current) break;
+    const previous = current.metadata?.submissionHeartbeatAt;
+    const metadata = { ...current.metadata, referenceVideos, referenceAudios,
+      submissionHeartbeatAt: Math.max(Date.now(), Number(previous || 0) + 1) };
+    let update = supabase.from('generations').update({ reference_images, metadata })
+      .eq('user_id', expectedUserId).eq('id', id).eq('type', 'video').eq('status', 'pending').eq('task_id', '');
+    update = previous == null ? update.is('metadata->submissionHeartbeatAt', null)
+      : update.eq('metadata->submissionHeartbeatAt', previous);
+    const { data, error } = await update.select('id').maybeSingle();
+    if (!error && data?.id === id) return;
+    if (error) break;
+    // A heartbeat may have won the comparison. Re-read once; don't submit
+    // if another writer progressed or removed the row.
+  }
+  throw new Error('The pending video inputs could not be saved. No generation was submitted.');
+}
+
 /**
  * Insert a placeholder image row immediately when a fal.ai image task is
  * about to be submitted. The row is updated to 'completed' or 'failed' once
@@ -1654,6 +1793,10 @@ export const createPendingImage = async (
     youtubeSource?: GeneratedMedia['youtubeSource'];
     imagePromptCategory?: GeneratedMedia['imagePromptCategory'];
     imageEditSourceId?: string;
+    imageOperation?: GeneratedMedia['imageOperation'];
+    openaiImageOptions?: GeneratedMedia['openaiImageOptions'];
+    seedreamOptions?: GeneratedMedia['seedreamOptions'];
+    generationProvider?: GeneratedMedia['generationProvider'];
   }
 ): Promise<boolean> => {
   if (!supabase) return false;
@@ -1662,20 +1805,7 @@ export const createPendingImage = async (
     const userId = session?.user?.id;
     if (!userId) return false;
 
-    // The pending row only needs to identify which refs are attached, NOT
-    // their pixel data — base64 still in memory will be uploaded via
-    // saveImage on completion. Storing inline base64 here was the cause of
-    // the "canceling statement due to statement timeout" bursts when 10
-    // brainstorm generations all tried to insert ~4 MB JSONB rows in
-    // parallel. Keep id + mimeType + role flags + any URL-style data; drop
-    // raw base64 unconditionally.
-    const safeRefs = (config.referenceImages || []).map((ref: any) => {
-      if (ref?.data && typeof ref.data === 'string' && !ref.data.startsWith('http')) {
-        const { data, mask, ...rest } = ref;
-        return rest;
-      }
-      return withoutLegacyMask({ ...ref, data: persistMediaReference(ref.data) });
-    });
+    const safeRefs = pendingReferences(config.referenceImages);
 
     const { error } = await supabase.from('generations').insert({
       id,
@@ -1692,6 +1822,8 @@ export const createPendingImage = async (
       image_model: config.imageModel || DEFAULT_IMAGE_MODEL,
       status: 'pending',
       metadata: {
+        imageOperation: config.imageOperation, openaiImageOptions: config.openaiImageOptions,
+        seedreamOptions: config.seedreamOptions, generationProvider: config.generationProvider,
         originalPrompt: config.originalPrompt,
         promptPreparation: normalizePromptPreparation(config.promptPreparation),
         youtubeSource: normalizeYouTubeSource(config.youtubeSource),
@@ -1716,7 +1848,7 @@ export const setImageTaskInfo = async (
   id: string,
   requestId: string,
   endpoint: string,
-  promptContext: Pick<GeneratedMedia, 'originalPrompt' | 'imagePromptCategory' | 'imageEditSourceId' | 'promptPreparation' | 'youtubeSource'> = {},
+  promptContext: Pick<GeneratedMedia, 'originalPrompt' | 'imagePromptCategory' | 'imageEditSourceId' | 'promptPreparation' | 'youtubeSource' | 'openaiImageOptions' | 'seedreamOptions' | 'imageOperation' | 'falQueueEndpoint'> = {},
 ): Promise<void> => {
   if (!supabase) return;
   try {
@@ -1728,7 +1860,7 @@ export const setImageTaskInfo = async (
     await supabase
       .from('generations')
       .update({
-        metadata: { ...promptContext, falRequestId: requestId, falEndpoint: endpoint },
+        metadata: { ...promptContext, generationProvider: 'fal', falRequestId: requestId, falEndpoint: endpoint },
         status: 'processing',
       })
       .eq('id', id);
@@ -1763,6 +1895,7 @@ export const updateImageStatus = async (
         console.warn('updateImageStatus: saved image details could not be read; keeping them unchanged:', error.message);
       } else {
         const merged = { ...(existing?.metadata || {}), ...updates.metadata };
+        if (merged.seedreamResult) merged.seedreamResult = canonicalSeedreamResult(merged.seedreamResult);
         if (status === 'completed') {
           delete merged.error;
           delete merged.pollingWarning;
@@ -1785,7 +1918,7 @@ export const updateVideoStatus = async (
   if (!supabase) return;
   try {
     const updateObj: any = { status };
-    if(updates?.referenceImages)updateObj.reference_images=updates.referenceImages.map(ref=>withoutLegacyMask({...ref,data:persistMediaReference(ref.data)}));
+    if (updates?.referenceImages) updateObj.reference_images = pendingReferences(updates.referenceImages);
     if (updates?.url) {
       updateObj.url = persistMediaReference(updates.url);
       const storagePath = extractStoragePathFromUrl(updates.url);
@@ -1799,6 +1932,8 @@ export const updateVideoStatus = async (
         console.warn('updateVideoStatus: saved video details could not be read; keeping them unchanged:', error.message);
       } else {
         const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
+        if (merged.falSeedanceResult?.lastFrameUrl) merged.falSeedanceResult = { ...merged.falSeedanceResult,
+          lastFrameUrl: persistMediaReference(merged.falSeedanceResult.lastFrameUrl) };
         if (status === 'completed') {
           delete merged.error;
           delete merged.pollingWarning;
@@ -1829,7 +1964,7 @@ export const deleteImage = async (media: GeneratedMedia): Promise<void> => {
     try {
       const storagePath = media.storagePath || `${userId}/${getOriginalStoragePath(media.id)}`;
       const thumbnailPath = media.thumbnailPath || `${userId}/${getThumbnailStoragePath(media.id)}`;
-      const pathsToRemove = [storagePath, thumbnailPath];
+      const pathsToRemove = [storagePath, thumbnailPath, ...extraOutputPaths(media.id, userId, storagePath, media.seedreamResult, media.falSeedanceResult?.lastFrameUrl)];
 
       // Inputs can be shared by a batch, another saved result, or the open
       // composer. Deleting an output must never delete its reference files.
@@ -2004,7 +2139,7 @@ export const clearImages = async (): Promise<void> => {
     const userId = await bindMediaSession();
     if (!userId) throw new Error('Not authenticated');
     const { data: rows, error: selectError } = await selectPagedGenerationRows(
-      userId, 'id, created_at, storage_path, thumbnail_path, url, type',
+      userId, 'id, created_at, storage_path, thumbnail_path, url, type, metadata',
     );
     if (selectError) {
       throw new Error(`DB list before clear failed: ${selectError.message}`);
@@ -2017,9 +2152,10 @@ export const clearImages = async (): Promise<void> => {
       const ids = batch.map((r: any) => r.id);
       const filenames = batch.map((row: any) => row.storage_path || extractStoragePathFromUrl(row.url) || `${userId}/${row.id}.${row.type === 'video' ? 'mp4' : ORIGINAL_EXTENSION}`);
       const thumbFilenames = batch.map((row: any) => row.thumbnail_path || `${userId}/${getThumbnailStoragePath(row.id)}`);
-      const { error: storageError } = await supabase.storage.from(MEDIA_BUCKET_NAME).remove([...filenames, ...thumbFilenames]);
-      if (storageError) {
-        console.warn("Storage clear failed (some files may already be gone):", storageError);
+      const paths = [...new Set([...filenames, ...thumbFilenames, ...batch.flatMap((row, index) => extraOutputPaths(row.id, userId, filenames[index], row.metadata?.seedreamResult, row.metadata?.falSeedanceResult?.lastFrameUrl))])];
+      for (let start = 0; start < paths.length; start += 1000) {
+        const { error: storageError } = await supabase.storage.from(MEDIA_BUCKET_NAME).remove(paths.slice(start, start + 1000));
+        if (storageError) console.warn("Storage clear failed (some files may already be gone):", storageError);
       }
 
       const { error: deleteError } = await supabase.from('generations').delete().eq('user_id', userId).in('id', ids);
@@ -2218,9 +2354,6 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
     mediaIds.add(media.id);
     storagePaths.add(media.storagePath || (media.mediaType === 'video' ? `${media.id}.mp4` : getOriginalStoragePath(media.id)));
     storagePaths.add(media.thumbnailPath || getThumbnailStoragePath(media.id));
-    for (const ref of media.referenceImages || []) {
-      storagePaths.add(`refs/${media.id}_${ref.id}.jpg`);
-    }
   }
 
   const chunk = <T,>(values: T[], size = 100): T[][] => {
@@ -2233,7 +2366,7 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
     for (const ids of chunk(Array.from(folderIds))) {
       const { data: rows, error: mediaReadError } = await supabase
         .from('generations')
-        .select('id, type, url, storage_path, thumbnail_path, reference_images')
+        .select('id, type, url, storage_path, thumbnail_path, metadata')
         .eq('user_id', userId)
         .in('folder_id', ids);
       if (mediaReadError) throw new Error(`Folder contents could not be read: ${mediaReadError.message}`);
@@ -2245,9 +2378,9 @@ export const deleteFolder = async (folderId: string, onMediaIds?: (ids: string[]
           || (row.type === 'video' ? `${row.id}.mp4` : getOriginalStoragePath(row.id));
         storagePaths.add(originalPath);
         storagePaths.add(row.thumbnail_path || getThumbnailStoragePath(row.id));
-        for (const ref of Array.isArray(row.reference_images) ? row.reference_images : []) {
-          if (ref?.id) storagePaths.add(`refs/${row.id}_${ref.id}.jpg`);
-        }
+        for (const path of extraOutputPaths(row.id, userId, originalPath, row.metadata?.seedreamResult, row.metadata?.falSeedanceResult?.lastFrameUrl)) storagePaths.add(path);
+        // Like a single-output delete, never remove input objects: legacy
+        // generations, templates and open drafts may still share them.
       }
     }
   }

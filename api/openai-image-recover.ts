@@ -28,9 +28,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(409).json({ error: 'This generation is still processing. Wait before recovering it.' });
   }
   const format = row.metadata?.openaiImageOptions?.outputFormat;
-  const preferred = format === 'jpeg' ? 'jpg' : format === 'webp' ? 'webp' : 'png';
+  const preferred = format === 'jpeg' ? 'jpg' : ['webp','svg','gif'].includes(format) ? format : 'png';
   const storage = db.storage.from('media');
-  for (const extension of new Set([preferred, 'png', 'jpg', 'webp'])) {
+  for (const extension of new Set([preferred, 'png', 'jpg', 'webp','gif','svg'])) {
     // Never trust a client or stored URL/path to choose another user's object.
     const path = `openai/${user.id}/${body.id}.${extension}`;
     let file;

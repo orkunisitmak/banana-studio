@@ -1,7 +1,7 @@
 import { decodeRaster as decode, encodeRasterPNG } from './rasterCodec.js';
 import { editRegionPixels, type ImageEditRegion } from '../../src/lib/images/imageEditRegion.js';
 import { imageSha256 } from './imageStorage.js';
-import { compositeEditPixels } from '../../src/lib/images/imageEditPixels.js';
+import { buildEditMarkupPixels, compositeEditPixels } from '../../src/lib/images/imageEditPixels.js';
 import { resizePixels } from '../../src/lib/images/resizePixels.js';
 
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -41,3 +41,12 @@ export const compositeProtectedEdit = async (
   const bytes = await encodeRasterPNG(pixels, width, height);
   return { bytes, bounds };
 };
+
+export async function buildEditMarkup(source: Awaited<ReturnType<typeof readEditSource>>, region: ImageEditRegion) {
+  const { width, height } = source.info;
+  const pixels = buildEditMarkupPixels(region, width, height);
+  for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) {
+    const bytes = await encodeRasterPNG(pixels, width, height);
+    return 'data:image/png;base64,' + bytes.toString('base64');
+  }
+}

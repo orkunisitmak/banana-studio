@@ -97,5 +97,16 @@ test('a renewal that never answers falls back to the loaded URL instead of block
 
 test('the gallery batch download passes the signed URL renewer', () => {
   const gallery = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
-  assert.match(gallery, /collectBatchDownload\(ids, images, undefined, url => refreshMediaAccessUrl\(url, false\)\)/);
+  assert.match(gallery, /collectBatchDownload\(ids, manifestMedia\.map\(entry => entry\.media\), undefined, url => refreshMediaAccessUrl\(url, false\)\)/);
+});
+
+
+test('Seedream exports every output and layer metadata without sharing signed access URLs', async () => {
+  const images = ['mock-a', 'mock-b'].map(url => ({ url }));
+  const result = await collectBatchDownload(['layers'], [{id:'layers', url:'mock-a', seedreamResult:{images, layers:images.map((image,z_index)=>({image,z_index}))}}],
+    async () => new Response(new Blob(['synthetic'], {type:'image/png'})));
+  assert.equal(result.failed, 0);
+  assert.deepEqual(result.files.map(file=>file.name), ['banana-layers/0.png','banana-layers/1.png','banana-layers/manifest.json']);
+  const manifest = JSON.parse(await result.files[2].blob.text());
+  assert.deepEqual(manifest.layers.map(layer=>layer.image.url), ['0.png','1.png']);
 });

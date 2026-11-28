@@ -37,7 +37,7 @@ const video = { id: 'video-1', url: PROVIDER_URL, prompt: 'A test video', mediaT
 
 function setup(t, download) {
   Object.assign(f, { upserts: [], uploads: [], uploadError: null, savedRow: null, readError: null, unsigned: new Set() });
-  t.mock.method(globalThis, 'fetch', async () => download());
+  t.mock.method(globalThis, 'fetch', async url => download(url));
   t.mock.method(console, 'warn', () => {});
 }
 
@@ -51,6 +51,23 @@ test('a completed video is saved with its durable storage path', async t => {
   assert.equal(f.upserts.length, 1);
   assert.equal(f.upserts[0].storage_path, 'user-1/video-1.mp4');
   assert.notEqual(f.upserts[0].url, PROVIDER_URL);
+});
+
+test('a fal MOV and optional last frame are archived without storing a provider or signed result URL', async t => {
+  const remoteFrame = 'https://provider.example/last.png';
+  setup(t, url => new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': url === remoteFrame ? 'image/png' : 'video/quicktime' } }));
+  const saved = await saveVideo({ ...video, id: 'mov-1', taskId: 'bs_fal_task', videoModel: 'seedance-2.5',
+    falSeedanceOptions: { outputFormat: 'mov', returnLastFrame: true },
+    falSeedanceResult: { seed: 0, draftId: 'draft', lastFrameUrl: remoteFrame } }, 'user-1');
+  assert.equal(saved.storagePath, 'user-1/mov-1.mov');
+  assert.deepEqual(f.uploads, ['user-1/mov-1.mov', 'user-1/mov-1_last_frame']);
+  const metadata = f.upserts[0].metadata;
+  assert.equal(metadata.generationProvider, 'fal');
+  assert.deepEqual(metadata.falSeedanceOptions, { outputFormat: 'mov', returnLastFrame: true });
+  assert.equal(metadata.falSeedanceResult.seed, 0);
+  assert.equal(metadata.falSeedanceResult.draftId, 'draft');
+  assert.match(metadata.falSeedanceResult.lastFrameUrl, /\/user-1\/mov-1_last_frame$/);
+  assert.equal(saved.falSeedanceResult.lastFrameUrl, 'https://storage.example/user-1/mov-1_last_frame?token=t');
 });
 
 for (const [name, download] of [

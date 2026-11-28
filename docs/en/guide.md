@@ -13,8 +13,8 @@ For a shared browser workspace, use a [self-hosted web deployment](deploy.md). I
 ## Make your first image
 
 1. Open **Provider keys** in the desktop app, or ask your web workspace owner to configure a provider.
-2. Add the appropriate key. GPT Image 2.5, for example, uses an OpenAI API key.
-3. Select image generation and a configured image model.
+2. Add the key for your intended route. For example, add a fal.ai key to use the default image routes.
+3. Select image generation and your model. If using an alternative such as direct OpenAI for Sunburst, select that provider in **AI settings → Provider routing**.
 4. Describe your idea: “A warm editorial illustration of a mountain cabin at sunrise, simple shapes, wide composition.”
 5. Choose aspect ratio, size, quality and image count where supported. The cost estimate is a guide, not a fixed price.
 6. Select **Generate image**. Follow the job in the gallery, then open or download the result.
@@ -39,7 +39,7 @@ In **Brainstorm**, choose **Simple** for general visual concepts or **YouTube** 
 
 Use **Enhance** when you want to develop the current idea rather than request a batch of different concepts. It prepares instructions for your selected generation model; review or edit the text before submitting. **Revert** restores the draft from before preparation.
 
-**Enhance** turns your brief into production instructions. **Brainstorm** proposes distinct concepts and can create multiple images per idea. In **AI settings**, choose Opus 5.5 through OpenRouter, GPT-6.1 Sol through OpenAI or Gemini 3.8 Flash through Google, and set the thinking/reasoning level. The initial creative setting is Opus 5.5 / Medium.
+In **AI settings**, choose Claude Opus 5.5, GPT-6.2 Sol or Gemini 4 Hydrogen and set the thinking/reasoning level. The initial creative setting is Opus 5.5 / Medium. The [provider table](models.md) lists the available routes for each.
 
 Production descriptions are prepared in English even if your draft is Turkish. Requested visible text, names and quoted dialogue keep their intended language. Review the enhanced prompt when exact wording matters.
 
@@ -87,8 +87,10 @@ Choose a video model first: supported modes, durations, sizes and inputs differ.
 
 | Family | Workflow |
 | --- | --- |
-| Seedance 2.0 / 2.5 Relaxed | Text, image and reference-based generation, plus supported edit/extend controls. Seedance 2.5 first/last-frame mode uses **two still images**, tagged as first and last frame. |
-| MiniMax H3 Max | Text to Video Max, Image to Video Max, Reference to Video Max, Extend Video Max, Lip Sync Max and Recast. |
+| Seedance 2.0 / 2.5 | Text, frames and references. Mark two still images as first and last frame to direct a transition. Seedance 2.5 Edit/Extend require fal.ai (US) or EvoLink (Relaxed). |
+| MiniMax H3 Max | Text, frames and references through fal.ai or EvoLink. Extend, Lip Sync and Recast use fal.ai. |
+| Gemini Omni 1.2 Flash | Generate from text, frames or references; edit, extend or upscale a source video on fal.ai. |
+| MAGI-2 | Use EvoLink for text, first/last frames or reference generation; reference mode also accepts audio alone. |
 
 The interface validates inputs and shows mode-specific controls. Some reference-video preprocessing also needs fal.ai. Keep the desktop app open during jobs. The hosted version has a durable queue for OpenAI image jobs; other providers use their task histories and polling. A timeout does not prove that a paid request was never accepted. Check the task/result before submitting it again.
 

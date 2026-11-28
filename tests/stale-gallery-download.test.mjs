@@ -13,14 +13,14 @@ const mediaDownload = await build({
   platform: 'node',
   logLevel: 'silent',
 });
-const { fetchMediaBlob } = await import(`data:text/javascript;base64,${Buffer.from(mediaDownload.outputFiles[0].text).toString('base64')}`);
+const { fetchMediaBlob, originalDownloadExtension } = await import(`data:text/javascript;base64,${Buffer.from(mediaDownload.outputFiles[0].text).toString('base64')}`);
 
 const source = readFileSync(new URL('../src/components/Gallery.tsx', import.meta.url), 'utf8');
 const start = source.indexOf('  const handleDownloadPNG = async');
 const end = source.indexOf('  const handleDownloadClick', start);
 assert.ok(start >= 0 && end > start);
 const compiled = transformSync(`module.exports = env => {
-  const { fetchMediaBlob, refreshMediaAccessUrl, Image, URL, document, setDownloadError, setDownloadMenuId, failDownload, setTimeout, console } = env;
+  const { fetchMediaBlob, originalDownloadExtension, refreshMediaAccessUrl, Image, URL, document, setDownloadError, setDownloadMenuId, failDownload, setTimeout, console } = env;
   ${source.slice(start, end)}
   return { handleDownloadPNG, handleDownloadJPEG };
 };`, { loader: 'ts', format: 'cjs' }).code;
@@ -35,7 +35,7 @@ const createDownloads = ({ failRefresh = false } = {}) => {
   };
   const module = { exports: {} };
   new Function('module', compiled)(module);
-  const handlers = module.exports({
+  const handlers = module.exports({ originalDownloadExtension,
     fetchMediaBlob: async url => {
       fetched.push(url);
       return fetchMediaBlob(url);

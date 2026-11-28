@@ -8,7 +8,7 @@ import { calculateAnthropicTextCost } from '../src/lib/prompts/anthropicText.ts'
 // Real api/anthropic-text-generate.ts handler and Anthropic SDK. Only auth, the spend ledger and fetch are stubbed.
 const root = fileURLToPath(new URL('..', import.meta.url));
 const stubs = {
-  auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({from:()=>({insert:()=>({abortSignal:async()=>({error:null})})})});',
+  auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({rpc:()=>({abortSignal:async()=>({data:{"claude-opus-5.5":"anthropic"}})}),from:()=>({insert:()=>({abortSignal:async()=>({error:null})})})});',
   openaiGuard: 'export const startOpenAIRequest=async()=>({id:"g1",finish:async()=>{}});',
 };
 const stubbed = new RegExp(`/(${Object.keys(stubs).join('|')})\\.js$`);
@@ -37,15 +37,15 @@ const call = async (body, reply) => {
   await handler({ method: 'POST', headers: {}, body }, res);
   return { res, requests };
 };
-const brief = (extra = {}) => ({ model: 'anthropic/claude-opus-5.5', reasoningEffort: 'high', contents: { parts: [{ text: 'a brief' }] }, usageContext: { action: 'enhance', prompt: 'p' }, ...extra });
+const brief = (extra = {}) => ({ model: 'claude-opus-5.5', reasoningEffort: 'high', contents: { parts: [{ text: 'a brief' }] }, usageContext: { action: 'enhance', prompt: 'p' }, ...extra });
 
 process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
 
-test('Opus 5.5 is served directly by Anthropic first, OpenRouter second', () => {
-  assert.deepEqual(MODEL_ROUTES['anthropic/claude-opus-5.5'], ['anthropic', 'openrouter']);
-  assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'auto', { anthropic: true }), 'anthropic');
-  assert.equal(resolveProvider('anthropic/claude-opus-5.5', 'auto', { openrouter: true }), 'openrouter');
-  assert.throws(() => resolveProvider('gpt-6.1-sol', 'anthropic', { anthropic: true }));
+test('Opus defaults to fal while explicit Anthropic and OpenRouter remain available', () => {
+  assert.equal(MODEL_ROUTES['claude-opus-5.5'][0], 'fal');
+  assert.equal(resolveProvider('claude-opus-5.5', 'anthropic', { anthropic: true }), 'anthropic');
+  assert.equal(resolveProvider('claude-opus-5.5', 'openrouter', { openrouter: true }), 'openrouter');
+  assert.throws(() => resolveProvider('gpt-6.2-sol', 'anthropic', { anthropic: true }));
 });
 
 test('sends text and images to the Messages API with effort, without a disabled thinking setting', async () => {
@@ -97,7 +97,7 @@ for (const status of [401, 429, 529]) {
 test('YouTube footage and unsupported models never reach Anthropic', async () => {
   const youtube = await call(brief({ contents: { parts: [{ fileData: { fileUri: 'https://www.youtube.com/watch?v=abcdefghijk' } }, { text: 'x' }] } }), () => sse('x'));
   assert.equal(youtube.requests.length, 0); assert.equal(youtube.res.code, 400);
-  const other = await call(brief({ model: 'gpt-6.1-sol' }), () => sse('x'));
+  const other = await call(brief({ model: 'gpt-6.2-sol' }), () => sse('x'));
   assert.equal(other.requests.length, 0); assert.equal(other.res.code, 400);
 });
 

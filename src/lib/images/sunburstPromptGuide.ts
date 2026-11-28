@@ -4,10 +4,16 @@ import { getStableImageTag } from '../references/referenceTokens.js';
 
 /** Reviewed against the GPT Image 2.5 guide. This curated policy is included in
  * every Sunburst Brainstorm request; it is not a per-generation web fetch. */
-export const SUNBURST_GUIDE_VERSION = '2026-09-24';
+export const SUNBURST_GUIDE_VERSION = '2026-10-20';
 export const SUNBURST_GUIDE_URL = 'https://developers.openai.com/api/docs/guides/image-prompting';
 export const SUNBURST_PROMPT_GUIDE = `SUNBURST PROMPTING PRINCIPLES (${SUNBURST_GUIDE_VERSION})
 Describe the intended result through its subject, useful composition, visible detail and requested medium. Use the simplest readable format that carries the requirements; no word-count target or mandatory template. Detail should change the image, not praise its quality. For people, give relevant framing, relative scale, gaze, pose and interaction. Treat camera terminology as optional appearance cues. Specify exact visible wording, placement and typography without extra copy. Assign each reference a clear purpose. In edits, distinguish the requested change from the details that must remain unchanged. Keep API settings outside the image prompt.`;
+
+/** New-image rendering guidance, including when there are no reference inputs.
+ * This is a prompt policy, not an output filter or a change to provider quality.
+ * Local edits must retain the source's existing tone and texture instead. */
+export const SUNBURST_RENDERING_RULE = `TONE AND TEXTURE
+Follow the requested medium and lighting. For photographic or live-action scenes, render a naturally exposed camera image: smooth highlight roll-off, open shadow detail, restrained local contrast, and optical detail that softens with distance. Materials have ordinary, irregular texture rather than uniformly etched microdetail. Cinematic describes framing and lighting, not an HDR or clarity treatment. Explicit visual styles and deliberate contrast in the creative brief take priority.`;
 
 /** Attachment presence never chooses editing. Only an approved area can do so. */
 export const REFERENCE_GENERATION_RULE = `REFERENCE-BASED GENERATION
@@ -16,7 +22,7 @@ For a similar or inspired scene, develop a distinct composition, viewpoint and a
 Render the requested medium and visual treatment. Do not add sharpening halos, boosted contrast or saturation, HDR processing, beauty retouching or extra texture unless requested. This is a new full-image generation, not a filtered version of the reference.`;
 
 export const buildReferenceGenerationRule = (references: ReferenceImage[]): string =>
-  references.length && !references.some(ref => ref.editRegion != null) ? REFERENCE_GENERATION_RULE : '';
+  references.length && !references.some(ref => ref.editRegion != null || ref.editScope === 'image') ? REFERENCE_GENERATION_RULE : '';
 
 /** Likeness must survive a change of medium, not prevent that change. Used for
  * new scenes; local edits keep the approved source-preservation contract. */
@@ -34,7 +40,7 @@ export const compactReferenceRoles = (references: ReferenceImage[], editableLabe
   return [buildReferenceGenerationRule(references), 'REFERENCE ROLES',
     ...groups.map(group => `${group.tag} (${JSON.stringify(group.label)}): ${group.images.map(ref => `image ${references.indexOf(ref) + 1}`).join(', ')} show the SAME SINGLE person.`),
     ...references.flatMap((ref, index) => getPersonId(ref) != null ? [] : [
-      `image ${index + 1}${editableLabels ? ` / ${getStableImageTag(ref.id)}` : ''}: ${ref.editRegion != null ? 'approved source to edit; preserve unrequested details' : ref.isVideoContext ? 'published cover for episode context only; no inferred cast or events' : ref.isDraftImage ? 'draft; use its layout only when requested' : ref.isThumbnailStyle ? 'THUMBNAIL STYLE EXAMPLE; design language only, not cast, copy or episode facts' : 'visual reference; use only its brief-assigned role'}.`,
+      `image ${index + 1}${editableLabels ? ` / ${getStableImageTag(ref.id)}` : ''}: ${ref.editRegion != null || ref.editScope === 'image' ? 'approved source to edit; preserve unrequested details' : ref.isVideoContext ? 'published cover for episode context only; no inferred cast or events' : ref.isDraftImage ? 'draft; use its layout only when requested' : ref.isThumbnailStyle ? 'THUMBNAIL STYLE EXAMPLE; design language only, not cast, copy or episode facts' : 'visual reference; use only its brief-assigned role'}.`,
     ]),
     groups.length ? `Use each identity only for its requested character; photo count is not cast size. Keep identities distinct. For new scenes, preserve likeness while following the directed expression and action; do not freeze the reference pose. ${references.some(ref => ref.editRegion != null) ? 'Explicit expression and edit-preservation requests take priority.' : 'Follow explicitly requested expressions, framing and clothing.'}` : '',
     groups.length ? mediumRule : '',

@@ -25,9 +25,9 @@ The current release is **v0.1.2** and requires **macOS 13.5 or later**. It inclu
 1. Select **Provider keys** in the top bar, or **Banana Studio → Provider API Keys…** in the Mac menu.
 2. Create a key with your chosen provider using the [provider links](models.md). The provider may require billing or model access before it accepts requests.
 3. Paste it into the matching field and select **Save**. Do not paste API keys into the generation prompt.
-4. Select the corresponding image/video model. If you use Enhance or Brainstorm, open **AI settings** and select a configured text model too.
+4. In **AI settings → Provider routing**, match the model to your saved provider. Choose a text model too if you use Enhance or Brainstorm.
 
-The initial pairing is GPT Image 2.5 + Opus 5.5 / Medium, so it needs OpenAI + Anthropic or OpenRouter. For an OpenAI-only setup, select GPT-6.1 Sol for the text model as well, if your provider account can access it. You can also skip Enhance/Brainstorm and write image prompts directly.
+On builds with the [current catalog](models.md), one fal.ai key covers image generation and creative text on their default routes. MAGI-2 requires EvoLink. To use OpenAI alone, select the OpenAI route for a Sunburst image model and GPT-6.2 Sol. You can also skip Enhance/Brainstorm and write prompts directly. Check your release notes if your installed version has different model choices.
 
 **Checkpoint:** a saved field says **Saved in Keychain** when you reopen it. Blank fields keep an existing key; the **Remove** checkbox clears only that provider's saved key. Keys are stored in macOS Keychain and are not sent to a Banana Studio cloud account.
 
@@ -65,7 +65,7 @@ Mac and Windows use the same React interface and SQLite workspace code. Native m
 | Symptom | What to check |
 | --- | --- |
 | Mac says the app cannot be opened | Download the right architecture, move it to Applications, then follow the app-specific Open Anyway flow above. |
-| A model says its provider is not configured | Add that provider's key; a Gemini key does not replace `FAL_KEY` for Nano Banana in this app. |
+| A model says its provider is not configured | Save a key for the selected provider, or explicitly select a supported provider you have. For example, a Gemini key can run Nano on Google Gemini but not on the fal.ai route. |
 | Brainstorm fails after image generation worked | The image model and text model may use different providers. Check **AI settings**. |
 | The key is saved but a request is rejected | Check provider billing, available credits, model permissions, limits and the exact error. |
 | The gallery looks different from your web account | Mac and hosted web workspaces store separate data. |

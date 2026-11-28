@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 const stubs = {
   guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
-  auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});',
+  preferences: 'export const admitProvider=async()=>"fal";',
+  auth: 'export const createUserScopedClient=()=>({});export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});',
   providerTasks: `
     export const prepareTaskRegistry=async()=>({});
     export const registerProviderTask=async()=>{
@@ -26,6 +27,7 @@ const out = await build({
   plugins: [{
     name: 'stubs',
     setup(b) {
+      b.onResolve({filter:/providerConfiguration\.js$/},()=>({path:'preferences',namespace:'stub'}));
       b.onResolve({ filter: /\/_lib\/(auth|providerTasks)\.js$/ }, args => ({
         path: args.path.includes('providerTasks') ? 'providerTasks' : 'auth',
         namespace: 'stub',
@@ -67,7 +69,7 @@ const submit = async (fetchImpl, { registerFail = false } = {}) => {
   const res = response();
   try {
     await handler(
-      { method: 'POST', body: { endpoint: 'fal-ai/nano-banana-pro', prompt: 'hi' } },
+      { method: 'POST', body: { endpoint: 'fal-ai/nano-banana-pro', prompt: 'Draw a tree' } },
       res,
     );
     res.registered = globalThis.__registered;

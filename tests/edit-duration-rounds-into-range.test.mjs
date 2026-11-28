@@ -18,9 +18,17 @@ const compiled = await build({ entryPoints: ['src/services/runwayService.ts'], a
     b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));
     b.onResolve({ filter: /^[^./]/ }, a => ({ path: import.meta.resolve(a.path), external: true }));
   } }] });
-const { validateEditSourceMetadata } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const { validateEditSourceMetadata, getNormalizedVideoDimensions } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 const message = duration => { try { validateEditSourceMetadata({ duration, width: 1280, height: 720 }, 'Source video'); } catch (e) { return e.message; } return ''; };
 const shown = text => Number(text.match(/Current duration is ([\d.]+)s/)?.[1]);
+
+test('4K edit resizing respects provider and scaler ceilings after rounding to even dimensions', () => {
+  for (const [width,height] of [[7680,4320],[2320,5800],[6000,4000]]) {
+    const size = getNormalizedVideoDimensions(width,height,'4K');
+    assert.ok(size.width * size.height <= 8295044); assert.ok(size.height <= 4320);
+    assert.equal((size.width | size.height) % 2,0);
+  }
+});
 
 test('control: a clearly too long clip reports its length', () => {
   assert.equal(shown(message(45)), 45);

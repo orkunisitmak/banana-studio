@@ -2,12 +2,19 @@ import { GoogleGenAI } from '@google/genai';
 import { OPENROUTER_MODELS, type AIProvider } from '../../src/lib/providers.js';
 import { providerImageData } from './providerMedia.js';
 import { requestCodexImage } from './codexImage.js';
+import { isOpenAIImageModel } from '../../src/lib/images/openaiImage.js';
+import { buildNanoBananaRequest, NANO_BANANA_21_MODEL, NANO_BANANA_PRO_MODEL, NANO_BANANA_21_ENDPOINT, NANO_BANANA_PRO_ENDPOINT } from '../../src/lib/images/nanoBanana21.js';
+import { falGptImageEndpoint, falGptImageInput } from './falGptImage.js';
 
-export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'codex' ? 'codex/image_gen' : provider === 'openrouter'
-  ? OPENROUTER_MODELS[model] : provider === 'fal'
-    ? model === 'gpt-image-2.5-sunburst' ? `openai/gpt-image-2.5/sunburst/${references ? 'edit' : 'text-to-image'}`
-      : `${model === 'gemini-nano-banana-2.1' ? 'google/nano-banana-2.1' : 'fal-ai/nano-banana-pro'}${references ? '/edit' : ''}`
-    : model;
+export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => {
+  if (provider === 'codex') return 'codex/image_gen';
+  if (provider === 'openrouter') return OPENROUTER_MODELS[model];
+  if (provider !== 'fal') return model;
+  if (isOpenAIImageModel(model)) return falGptImageEndpoint(model,references);
+  const endpoint = model === NANO_BANANA_21_MODEL ? NANO_BANANA_21_ENDPOINT : model === NANO_BANANA_PRO_MODEL ? NANO_BANANA_PRO_ENDPOINT : null;
+  if (!endpoint) throw new Error('Unsupported fal image model.');
+  return endpoint + (references ? '/edit' : '');
+};
 
 /** All destinations and fields are server-owned. One paid request, no provider retry. */
 export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string): Promise<Response> {
@@ -31,30 +38,34 @@ export async function requestImage(provider: AIProvider, model: string, input: R
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-OpenRouter-Title': 'Banana Studio' }, body: JSON.stringify(body) });
   }
   if (provider === 'fal') {
-    const sunburst = model === 'gpt-image-2.5-sunburst';
-    const body = sunburst ? { prompt: input.prompt, image_size: input.size === 'auto' ? 'auto' : Object.fromEntries(input.size.split('x').map(Number).map((n: number, i: number) => [i ? 'height' : 'width', n])),
-      quality: input.quality, num_images: 1, output_format: input.output_format, background: input.background, sync_mode: true,
-      ...(input.images?.length ? { image_urls: input.images.map((image: any) => image.image_url) } : {}),
-    } : { prompt: input.prompt, aspect_ratio: input.aspect_ratio, resolution: input.resolution, num_images: 1, output_format: 'png', sync_mode: true, ...(model === 'gemini-nano-banana-2.1' ? { thinking_level: 'high' } : {}), ...(input.images?.length ? { image_urls: input.images.map((image: any) => image.image_url) } : {}) };
+    const images = input.images || [];
+    const body = isOpenAIImageModel(model)
+      ? falGptImageInput(model,input.prompt,input.size,{ ...input, outputFormat: input.output_format, gifFrameCount: input.frame_count, gifFrameDurationMs: input.frame_duration_ms, complexity: input.complexity } as import('../../src/types.js').OpenAIImageOptions,images,input.markup?.image_url)
+      : { ...buildNanoBananaRequest(model,input.prompt,{aspectRatio:input.aspect_ratio,resolution:input.resolution},images.map((image: {image_url:string}) => image.image_url)).input, sync_mode:true };
     const endpoint = imageProviderModel(provider, model, !!input.images?.length);
     const response = await fetch(`https://fal.run/${endpoint}`, {
-      method: 'POST', redirect: 'error', signal, headers: { Authorization: `Key ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', redirect: 'error', signal, headers: { Authorization: 'Key ' + key, 'Content-Type': 'application/json', 'X-Fal-No-Retry':'1' }, body: JSON.stringify(body),
     });
     if (!response.ok) return response;
     const value = await response.json();
     const image = value?.images?.[0];
     let bytes: Buffer;
-    const data = typeof image?.url === 'string' && image.url.match(/^data:image\/(?:png|jpeg|webp);base64,([a-zA-Z0-9+/=]+)$/);
-    if (data) bytes = Buffer.from(data[1], 'base64');
+    const mime = input.output_format === 'svg' ? 'image/svg+xml' : 'image/' + input.output_format;
+    const prefix = 'data:' + mime + ';base64,';
+    if (typeof image?.url === 'string' && image.url.startsWith(prefix) && image.url.length <= prefix.length + 4*Math.ceil(50*1024*1024/3)) bytes = Buffer.from(image.url.slice(prefix.length), 'base64');
     else {
       const url = new URL(image?.url);
-      if (url.protocol !== 'https:' || !(url.hostname === 'fal.media' || url.hostname.endsWith('.fal.media'))) throw new Error('fal.ai returned an unsupported image location.');
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || !(url.hostname === 'fal.media' || url.hostname.endsWith('.fal.media'))) throw new Error('fal.ai returned an unsupported image location.');
       const file = await fetch(url, { redirect: 'error', signal });
-      if (!file.ok || Number(file.headers.get('content-length')) > 50 * 1024 * 1024) throw new Error('Generated image download failed.');
-      bytes = Buffer.from(await file.arrayBuffer());
+      if (!file.ok || !file.body || Number(file.headers.get('content-length')) > 50 * 1024 * 1024) throw new Error('Generated image download failed.');
+      const reader = file.body.getReader(), chunks: Uint8Array[] = [];
+      let total = 0;
+      try { for (;;) { const { done, value } = await reader.read(); if (done) break; total += value.length; if (total > 50*1024*1024) throw new Error('Generated image exceeds the output limit.'); chunks.push(value); } }
+      finally { await reader.cancel(); }
+      bytes = Buffer.concat(chunks,total);
     }
     if (bytes.length > 50 * 1024 * 1024) throw new Error('Generated image exceeds the output limit.');
-    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], output_format: input.output_format }, { headers: { 'x-request-id': response.headers.get('x-fal-request-id') || '' } });
+    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], output_format: input.output_format }, { headers: { 'x-request-id': response.headers.get('x-fal-request-id') || response.headers.get('x-request-id') || value?.request_id || '' } });
   }
   if (provider === 'gemini' && model.startsWith('gemini-')) {
     const parts: any[] = [];

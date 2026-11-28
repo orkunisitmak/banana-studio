@@ -1,9 +1,10 @@
+import { applyBrainstormTextPolicy } from '../prompts/brainstormText';
+import { resolveImageDraft } from '../images/imageDraftValidation';
 import type { BrainstormCategory, BrainstormIdea, GeneratedMedia, GenerationConfig, TextModelId } from '../../types';
 import type { OpenAIReasoningEffort } from '../prompts/openaiText';
 import type { TextTaskOptions } from '../../services/geminiClient';
-import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../images/openaiImage';
+import { getOpenAIImageOptions, getOpenAIImageSize, isOpenAIImageModel } from '../images/openaiImage';
 import { createTaskDeadline, waitForTask } from '../shared/asyncTask';
-import { validateImageGenerationReferences } from '../images/imagePrompting';
 import { createPromptPreparation } from '../prompts/promptPreparation';
 
 export interface BrainstormGenerationRequest {
@@ -25,27 +26,22 @@ interface Dependencies {
 
 /** Own the accepted settings and cards independently of the Brainstorm popover. */
 export const createBrainstormBatch = (request: BrainstormGenerationRequest, folderId: string | null, deps: Dependencies) => {
-  const settings: GenerationConfig = structuredClone({ ...request.settings, mode: 'image', imagePromptCategory: request.category, originalPrompt: undefined, promptPreparation: undefined });
+  const settings: GenerationConfig = resolveImageDraft(structuredClone({ ...request.settings, mode: 'image', imagePromptCategory: request.category, originalPrompt: undefined, promptPreparation: undefined }), true);
   const { ideaCount, textModel, reasoningEffort, thinkingLevel } = request;
-  if (!Number.isInteger(ideaCount) || ideaCount < 1 || ideaCount > 20 || !Number.isInteger(settings.count) || settings.count < 1 || settings.count > 10) {
-    throw new Error('Choose 1–20 ideas and 1–10 images per idea.');
+  if (!Number.isInteger(ideaCount) || ideaCount < 1 || ideaCount > 20) {
+    throw new Error('Choose 1–20 ideas.');
   }
   if (request.category === 'simple' || settings.youtubeSource ? !settings.prompt.trim() && !settings.referenceImages.length : !settings.referenceImages.length) {
     throw new Error('Add a concept or the required reference images first.');
-  }
-  validateImageGenerationReferences(settings);
-  if (settings.imageModel === SUNBURST_MODEL) {
-    const error = validateOpenAIImageOptions(getOpenAIImageOptions(settings.openaiImageOptions)) || validateOpenAIImageSize(getOpenAIImageSize(settings));
-    if (error) throw new Error(error);
   }
   const id = `brainstorm-${crypto.randomUUID()}`;
   const createdAt = Date.now();
   const placeholders: GeneratedMedia[] = Array.from({ length: ideaCount * settings.count }, (_, index) => ({
     id: `${id}-${index}`, url: '', prompt: settings.prompt, aspectRatio: settings.aspectRatio, resolution: settings.resolution,
     imageModel: settings.imageModel, referenceImages: settings.referenceImages, imagePromptCategory: request.category,
-    youtubeSource: settings.youtubeSource,
-    openaiImageOptions: settings.imageModel === SUNBURST_MODEL ? getOpenAIImageOptions(settings.openaiImageOptions) : undefined,
-    imageRequestedSize: settings.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(settings) : undefined,
+    youtubeSource: settings.youtubeSource, generationProvider: settings.imageProvider, imageOperation: settings.imageOperation, seedreamOptions: settings.seedreamOptions,
+    openaiImageOptions: isOpenAIImageModel(settings.imageModel) ? getOpenAIImageOptions(settings.openaiImageOptions, settings.imageModel) : undefined,
+    imageRequestedSize: isOpenAIImageModel(settings.imageModel) ? getOpenAIImageSize(settings) : undefined,
     createdAt, folderId, isLoading: true, isFavorite: false, mediaType: 'image', status: 'pending',
     imageStage: 'preparing', brainstormBatchId: id,
   }));
@@ -70,7 +66,7 @@ export const createBrainstormBatch = (request: BrainstormGenerationRequest, fold
       task.dispose();
       deps.onPrepared?.();
       await Promise.all(placeholders.map(async (placeholder, index) => {
-        const prompt = ideas[Math.floor(index / settings.count)].text;
+        const prompt = applyBrainstormTextPolicy(ideas[Math.floor(index / settings.count)].text, settings.brainstormNoText);
         const patch = { prompt, originalPrompt: settings.prompt, promptPreparation, imageStage: 'generating' as const, brainstormBatchId: undefined, status: 'processing' as const };
         deps.patch([placeholder.id], patch);
         try {

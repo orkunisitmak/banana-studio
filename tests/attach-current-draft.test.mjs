@@ -5,11 +5,12 @@ import { transformSync } from 'esbuild';
 // Runs the exact Controls attach handlers. onChange behaves like React setState:
 // a functional update sees the latest draft, so file reads that await must use one.
 const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8');
-const audio = src.slice(src.indexOf('  const processAudioFiles = async'), src.indexOf('\n  };', src.indexOf('  const handleAudioFileUpload = async')) + 5);
-const pif = src.slice(src.indexOf('  const processImageFiles = async'), src.indexOf('  // --- Upload Handlers ---'));
+const audio = src.slice(src.indexOf('  const processAudioFiles ='), src.indexOf('\n  };', src.indexOf('  const handleAudioFileUpload = async')) + 5);
+const pif = src.slice(src.indexOf('  const processImageFiles ='), src.indexOf('  // --- Upload Handlers ---'));
 const ds = src.indexOf('    // 1. Handle Desktop Files', src.indexOf('  const handleDrop = async'));
 const drop = src.slice(ds, src.indexOf('    // 2. Handle Gallery Drops', ds));
 const code = transformSync(`module.exports = env => { let { config, onChange, setAttachmentError, maxReferenceImages, maxReferenceVideos, maxReferenceAudios, isH3VideoConfig, readFileAsBase64, getMimeType, estimateBase64Size, compressImage, processVideoFiles, readAudioDuration, URL, audioInputRef, attachLimitsRef, uploadingReferenceVideos, videoUploadDraft, insertUploadDraftRef, addAttachmentError, flushSync } = env;
+  const isMagi2=false, falCaps=null, readAttachments=fn=>fn();
   ${audio}
   ${pif}
   return { processImageFiles, handleAudioFileUpload, drop: async e => { ${drop} } }; };`, { loader: 'ts', format: 'cjs' }).code;

@@ -1,7 +1,7 @@
 import { AspectRatio, GenerationConfig, ImageModelId, ReferenceImage, Resolution } from '../types';
 import { uploadBase64ToPublicUrl, refreshMediaAccessUrl } from './storageService';
 import { supabase } from './authService';
-import { NANO_BANANA_21_ENDPOINT, NANO_BANANA_21_MODEL, NANO_BANANA_2_LEGACY_MODEL } from '../lib/images/nanoBanana21';
+import { buildNanoBananaRequest } from '../lib/images/nanoBanana21';
 
 const getAuthHeaders = async (): Promise<Record<string, string>> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -57,6 +57,7 @@ export const mapAspectRatioToFalSize = (
 };
 
 const resolveImageUrl = async (img: ReferenceImage): Promise<string | null> => {
+  if (typeof img?.data !== 'string' || !img.data.trim()) return null;
   if (img.data.startsWith('http')) return refreshMediaAccessUrl(img.data);
   return uploadBase64ToPublicUrl(img.data, img.mimeType || 'image/jpeg', 'iref');
 };
@@ -140,6 +141,9 @@ export const submitFalTask = async (
   return { requestId: data.requestId, endpoint: data.endpoint || endpoint };
 };
 
+/** Only an authenticated terminal provider response, never a lookup or archive failure. */
+export class FalImageTaskFailedError extends Error {}
+
 export const pollImageTask = async (
   requestId: string,
   endpoint: string,
@@ -199,10 +203,10 @@ export const pollImageTask = async (
       return Array.isArray(data.output) ? data.output : [];
     }
     if (data.status === 'FAILED') {
-      throw new Error(data.error || 'Image generation failed');
+      throw new FalImageTaskFailedError(data.error || 'Image generation failed');
     }
     if (data.status === 'CANCELLED') {
-      throw new Error('Image generation was cancelled');
+      throw new FalImageTaskFailedError(data.error || 'Image generation was cancelled');
     }
 
     // RUNNING: derive a smooth progress estimate
@@ -320,53 +324,6 @@ export const resumeGptImage2Task = async (
   return fetchImageAsDataUrl(urls[0]);
 };
 
-// --- Nano Banana (fal.ai) ----------------------------------------------------
-
-const nanoBananaEndpointFor = (
-  imageModel: ImageModelId,
-  hasReferences: boolean,
-): string => {
-  const isPro = imageModel === 'gemini-3-pro-image-preview';
-  if (!isPro && imageModel !== NANO_BANANA_21_MODEL && imageModel !== NANO_BANANA_2_LEGACY_MODEL) throw new Error('Choose a supported Nano Banana model.');
-  const base = isPro ? 'fal-ai/nano-banana-pro' : NANO_BANANA_21_ENDPOINT;
-  return hasReferences ? `${base}/edit` : base;
-};
-
-/**
- * Build the fal `input` object for a Nano Banana request. Aspect ratio +
- * resolution are passed through directly because fal accepts the same enum
- * values our app already uses (see types.ts AspectRatio / Resolution).
- *
- * Defaults that match the rest of the app:
- *  - num_images: 1   (count is handled by the caller looping)
- *  - safety_tolerance: '6'  (least restrictive — the existing Gemini-direct
- *    flow used `responseModalities: [Modality.IMAGE]` with no safety filter,
- *    so this preserves the same permissiveness)
- *  - thinking_level: 'high' for Nano Banana 2.1 (per the user's request — Pro
- *    doesn't expose this knob)
- *  - output_format: 'png'  (matches storageService's PNG pipeline)
- */
-const buildNanoBananaInput = (
-  imageModel: ImageModelId,
-  prompt: string,
-  config: GenerationConfig,
-  imageUrls: string[],
-): Record<string, unknown> => {
-  const input: Record<string, unknown> = {
-    prompt,
-    num_images: 1,
-    aspect_ratio: config.aspectRatio,
-    resolution: config.resolution,
-    output_format: 'png',
-    safety_tolerance: '6',
-  };
-  if (imageUrls.length > 0) input.image_urls = imageUrls;
-  if (imageModel === NANO_BANANA_21_MODEL || imageModel === NANO_BANANA_2_LEGACY_MODEL) {
-    input.thinking_level = 'high';
-  }
-  return input;
-};
-
 /**
  * Submit a Nano Banana (Pro or 2.1) task to fal.ai and return the request_id +
  * endpoint WITHOUT polling. Mirrors `submitGptImage2Task` so the higher-level
@@ -383,8 +340,7 @@ export const submitNanoBananaTask = async (
   if (refs.length > 0 && imageUrls.length === 0) {
     throw new Error('No reference image URLs resolved');
   }
-  const endpoint = nanoBananaEndpointFor(imageModel, imageUrls.length > 0);
-  const input = buildNanoBananaInput(imageModel, cleanedPrompt, config, imageUrls);
+  const { endpoint, input } = buildNanoBananaRequest(imageModel, cleanedPrompt, config, imageUrls);
   return submitFalTask(endpoint, input);
 };
 

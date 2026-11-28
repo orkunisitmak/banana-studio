@@ -34,7 +34,7 @@ Brainstorm uses your brief, selected People and the roles of your references. Fo
 
 Write a short draft in your own words. **Enhance** prepares more specific instructions for the chosen image or video model: subject, composition, lighting, reference roles and, for video, motion and timing. It also works inside the area editor. Review the result, adjust it yourself or use **Revert** to restore the original draft.
 
-Production descriptions are prepared in English even from a Turkish draft; requested visible text, names and quoted dialogue keep their intended language. Select **Opus 5.5, GPT-6.1 Sol or Gemini 3.8 Flash** and the thinking level in **AI settings**. The initial creative setting is **Opus 5.5 / Medium**. Details retain the preparation model and reasoning level when recorded.
+Production descriptions are prepared in English even from a Turkish draft; requested visible text, names and quoted dialogue keep their intended language. Select **Claude Opus 5.5, GPT-6.2 Sol or Gemini 4 Hydrogen** and the thinking level in **AI settings**. The initial creative setting is **Opus 5.5 / Medium**. Details retain the preparation model and reasoning level when recorded.
 
 ## Edit an area, keep the rest
 
@@ -64,9 +64,9 @@ The video reader and creative brief use different provider routes. The [key guid
 
 ## Make video from text, images and references
 
-Use model-specific controls for duration, aspect ratio, quality and inputs. **Seedance 2.0 / 2.5 Relaxed** and **MiniMax H3 Max** provide different workflows; the interface shows the selected mode's controls. Seedance 2.5 first/last-frame mode uses two still images to direct the opening and ending.
+Choose **Seedance 2.0**, **Seedance 2.5**, **MiniMax H3 Max**, **Gemini Omni 1.2 Flash** or **MAGI-2**. The model and provider determine available modes, duration, aspect ratio and reference types. For example, mark two still images as the first and last frames to direct a Seedance 2.5 shot.
 
-MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to Video Max · Extend Video Max · Lip Sync Max · Recast**. Add image, video or audio references where supported, prepare motion instructions with Enhance, follow the job, then play or download the result.
+H3 Max on fal.ai adds Extend, Lip Sync and Recast to text/image/reference generation. Omni can edit, extend or upscale a source video. MAGI-2 on EvoLink can use audio alone in reference mode. [Compare video routes →](docs/en/models.md#video-differences)
 
 <p align="center"><a href="https://github.com/orkunisitmak/banana-studio/raw/refs/heads/main/docs/assets/video-demo.mp4"><img src="docs/assets/video-preview.gif" width="640" alt="Animated preview of a real generated video: two costumed characters emerge from plush toys inside an arcade claw machine" /></a></p>
 
@@ -83,7 +83,7 @@ MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to 
 
 | Feature | What it does |
 | --- | --- |
-| **Image generation** | GPT Image 2.5, Nano Banana Pro and Nano Banana 2.1; aspect ratio, size/custom dimensions, quality and image count where supported. |
+| **Image generation** | Nano Banana Pro / 2.1, GPT Image 2.5 / 2.6 Sunburst and Seedream 5.5. Seedream also extracts layers from a source image. |
 | **References and `@` mentions** | Upload or reuse images; assign identity, object, style or scene roles. Attaching a reference does not force an area edit. |
 | **People** | Save grouped identity photos; several photos of one person still represent one person. |
 | **Reference library and templates** | Reuse source material and saved prompt/settings combinations across projects. |
@@ -110,24 +110,11 @@ MiniMax H3 Max modes: **Text to Video Max · Image to Video Max · Reference to 
 
 ## Models and API keys
 
-An API key is a private credential that lets the app use your account with an AI provider. Add only the providers you plan to use. These are the routes implemented **in this app**, not a list of every service offering each model.
+**In the current source, one `FAL_KEY` covers the default image, creative text and video routes except MAGI-2**, which uses `EVOLINK_API_KEY`. You do not need every provider account. Desktop downloads reflect the catalog of their tagged release, not later source changes.
 
-| Model or feature | Available providers (Auto priority) | Add any matching key |
-| --- | --- | --- |
-| GPT Image 2.5 — new images and protected area edits | OpenAI → OpenRouter → fal.ai → ChatGPT plan (Codex, desktop only) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY`, or no key: `codex login` with ChatGPT |
-| Nano Banana Pro / Nano Banana 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Claude Opus 5.5 — Enhance, Brainstorm, variations and creative briefs | Anthropic → OpenRouter | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
-| GPT-6.1 Sol — text features | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
-| Gemini 3.8 Flash — text and YouTube footage analysis | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter (supported modes) | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
-| MiniMax H3 Max — text/image/reference to video, extend, lip sync and recast | fal.ai | `FAL_KEY` |
-| YouTube channel/video lookup | Google YouTube Data API v3 | `YOUTUBE_API_KEY` |
+In **AI settings → Provider routing**, pin an alternative you have a key for, select **Auto** to choose the first configured route before submission, or use **Off** to stop new work on that model. Direct OpenAI, Anthropic and Google Gemini keys, OpenRouter and desktop Codex sign-in remain options for specific models. Accepted jobs keep their original provider; an uncertain paid request is not resubmitted elsewhere.
 
-**Start with one provider:** an **OpenRouter key** can cover GPT/Nano images, Opus/GPT/Gemini text, footage analysis and supported Seedance video. A **fal.ai key** can cover GPT/Nano images, Seedance and H3 Max video; add a text provider if you want Enhance or Brainstorm. A **Gemini key** can cover Nano images and Gemini text/analysis. You do not need every key. YouTube search/metadata still needs its separate YouTube Data API key.
-
-The default creative model remains **Opus 5.5 / Medium**. Choose models, thinking and **Auto / a specific provider** in **AI settings**. Routes are selected before submission and kept with saved jobs; an uncertain paid request is never resubmitted at another service. Results show their actual provider. Outside an approved edit area, source pixels remain protected on every image route.
-
-OpenRouter Seedance currently supports text, first/last frames and image references in this app; it requires a fixed duration and aspect ratio, and Seedance 2.5 supports 480p/720p there. Use fal.ai or EvoLink for video/audio references, Edit/Extend, Auto duration or 2.5 at 1080p. **Relaxed** is specific to EvoLink. Some reference-video preprocessing also uses fal.ai. [Provider limits, key creation links and examples →](docs/en/models.md)
+YouTube lookup requires `YOUTUBE_API_KEY`. Reading the footage requires a direct `GEMINI_API_KEY`, independently of the provider used to write the creative brief. [See all 13 models, route priorities, key links and examples →](docs/en/models.md)
 
 ## How it is built
 

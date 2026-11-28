@@ -1,7 +1,7 @@
 import type { GenerationConfig, ReferenceImage, ReferenceVideo, VideoCost } from '../../types.js';
 import { H3_MAX_CAPABILITIES, resolveH3MaxMode, type H3MaxMode } from './h3Max.js';
 
-/** Published regular rates, verified 2026-10-15. No expiring/ambiguous promo is assumed.
+/** Published regular rates, reviewed 2026-11-27. No expiring/ambiguous promo is assumed.
  * https://fal.ai/models/minimax/h3-max/text-to-video
  * https://fal.ai/models/minimax/h3-max/reference-to-video
  * https://fal.ai/models/minimax/h3-max/extend-video
@@ -18,7 +18,7 @@ export const H3_MAX_OUTPUT_RATES: Record<H3MaxMode, Readonly<Record<string, numb
   extend_video: { '480P': 0.05, '768P': 0.08, '1080P': 0.16, '2K': 0.32 },
   insert_video: { '480P': 0.05, '768P': 0.06 },
   lip_sync: { '480P': 0.05, '768P': 0.08, '1080P': 0.16, '2K': 0.32 },
-  recast: { '768P': 0.30, '1080P': 0.45 },
+  recast: { '768P': 0.085, '1080P': 0.17 },
   relight: { '480P': 0.05, '768P': 0.08, '1080P': 0.16, '2K': 0.32 },
 };
 const REFERENCE_ALLOWANCE = 4096;
@@ -66,7 +66,7 @@ const generatedDuration = (config: GenerationConfig, mode: H3MaxMode): number =>
 };
 
 /** Shared token allowance across supplied R2V / Insert references and Extend audio.
- * Keyframes are excluded from the numbered R2V identity/style references.
+ * R2V keyframes are billed by output canvas size, not as numbered photo references.
  * Missing audio/video durations use their documented maximum as a budget.
  * Only R2V documents truncating counted video frames to the requested output
  * duration. Insert references guide a replacement scene; budget their full
@@ -79,10 +79,32 @@ export const estimateH3MaxReferenceTokens = (config: GenerationConfig, selectedM
   const keyframes = new Set([options.startImageId, options.endImageId, options.middleImageId].filter(Boolean));
   const images = mode === 'extend_video' ? [] : (config.referenceImages || []).filter(image => mode !== 'reference_to_video' || !keyframes.has(image.id));
   const videos = mode === 'reference_to_video' ? config.referenceVideos || [] : mode === 'insert_video' ? (config.referenceVideos || []).slice(1) : [];
-  const audios = mode === 'insert_video' ? [] : config.referenceAudios || [];
+  const audios = mode === 'insert_video' || (mode === 'reference_to_video' && options.useTargetAudio) ? [] : config.referenceAudios || [];
   const outputDuration = generatedDuration(config, mode);
+  let keyframeTokens = 0;
+  let orderedTokens = 0;
+  if (mode === 'reference_to_video') {
+    // Ordered conditions replace the reference URL arrays. They carry no
+    // decoded metadata, so apply the same published unknown-media budgets.
+    for (const condition of options.referenceConditions || []) {
+      if (condition.type === 'image') orderedTokens += estimateH3MaxImageReferenceTokens({});
+      else if (condition.type === 'video') orderedTokens += estimateH3MaxVideoReferenceTokens({}, config.videoQuality, outputDuration);
+      else if (condition.type === 'audio') orderedTokens += 15 * 80;
+    }
+    const count = [options.startImageId || options.startImageUrl, options.middleImageId || options.middleImageUrl, options.endImageId || options.endImageUrl].filter(Boolean).length;
+    if (count) {
+      const start = options.startImageId ? config.referenceImages?.find(image => image.id === options.startImageId) : undefined;
+      const [w, h] = (config.videoAspectRatio || '').split(':').map(Number);
+      const ratio = finitePositive(start?.width) && finitePositive(start?.height) ? start.width / start.height : w / h;
+      // fal snaps the canvas to its supported sizes. Budget the largest shape
+      // for unknown adaptive dimensions rather than assuming all frames are square.
+      const shape = finitePositive(ratio) ? Math.min(2.5, Math.max(ratio, 1 / ratio)) : 2.5;
+      const shortEdge = /^(480|1080)p$/i.test(config.videoQuality) ? parseInt(config.videoQuality, 10) : 768;
+      keyframeTokens = count * Math.floor(shortEdge / 32) * Math.floor(shortEdge * shape / 32);
+    }
+  }
   return images.reduce((sum, image) => sum + estimateH3MaxImageReferenceTokens(image as ReferenceImage & Dimensions), 0)
-    + videos.reduce((sum, video) => sum + estimateH3MaxVideoReferenceTokens(video as ReferenceVideo & Dimensions & { fps?: number }, config.videoQuality, mode === 'insert_video' ? 15 : outputDuration), 0)
+    + keyframeTokens + orderedTokens + videos.reduce((sum, video) => sum + estimateH3MaxVideoReferenceTokens(video as ReferenceVideo & Dimensions & { fps?: number }, config.videoQuality, mode === 'insert_video' ? 15 : outputDuration), 0)
     + audios.reduce((sum, audio) => sum + (finitePositive(audio.duration) ? audio.duration : 15) * 80, 0);
 };
 
@@ -96,6 +118,13 @@ export const estimateH3MaxCost = (config: GenerationConfig): VideoCost => {
   let duration = generatedDuration(config, mode);
   if (mode === 'lip_sync') duration = finitePositive(config.referenceAudios?.[0]?.duration) ? config.referenceAudios[0].duration! : 5;
   if (mode === 'recast' || mode === 'relight') duration = finitePositive(config.referenceVideos?.[0]?.duration) ? config.referenceVideos[0].duration! : 5;
+  if (mode === 'recast') {
+    // Actual usage counts each shot as at least 2.5s. Individual shot lengths
+    // aren't available in the composer; budget source duration and reconcile.
+    const sourceTokens = duration * 6750;
+    const inputCost = Math.max(0, sourceTokens - REFERENCE_ALLOWANCE) * 0.022 / 1000;
+    return { usd: Math.max(5, duration) * rate + inputCost, source: 'published_estimate' };
+  }
   const outputMultiplier = mode === 'lip_sync' && duration > 15 ? 1.2 : 1;
   // A verified 6.5-second Lip Sync request was billed for 7 seconds. Budget
   // whole seconds conservatively; fal's page only documents a per-second rate,

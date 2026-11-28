@@ -4,7 +4,7 @@ import { getImageById } from '../services/storageService';
 
 interface LoadedDetail { key: string; media: GeneratedMedia; indexed?: GeneratedMedia }
 
-const LIVE_MEDIA_FIELDS = ['generationProvider', 'providerModel', 'url', 'thumbnailUrl', 'storagePath', 'thumbnailPath', 'syncStatus', 'imageOutputSize', 'imageRequestedSize', 'openaiImageOptions', 'imageModel', 'resolution', 'aspectRatio', 'imageEditProtection', 'imageEditSourceId', 'promptPreparation', 'generationCost', 'generationTime', 'generationStartedAt', 'generationCompletedAt', 'error', 'taskId'] as const;
+const LIVE_MEDIA_FIELDS = ['generationProvider', 'providerModel', 'url', 'thumbnailUrl', 'storagePath', 'thumbnailPath', 'syncStatus', 'imageOutputSize', 'imageRequestedSize', 'openaiImageOptions', 'seedreamOptions', 'seedreamResult', 'imageOperation', 'imageEditMarkup', 'imageQueue', 'magi2Mode', 'falSeedanceOptions', 'falSeedanceResult', 'falQueueEndpoint', 'falEndpoint', 'h3MaxOptions', 'h3MaxMode', 'videoOutputDuration', 'imageModel', 'resolution', 'aspectRatio', 'imageEditProtection', 'imageEditSourceId', 'promptPreparation', 'generationCost', 'generationTime', 'generationStartedAt', 'generationCompletedAt', 'error', 'taskId'] as const;
 
 /** The gallery index omits large prompt/reference fields. Polling that index
  * must not replace the hydrated record and make the details panel jump. */

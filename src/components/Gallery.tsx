@@ -1,3 +1,7 @@
+import { useProviderPreferences } from './ProviderRoutingSettings';
+import { DEFAULT_SEEDREAM_OPTIONS } from '../lib/images/seedream55';
+import { SeedreamResultDetails } from './SeedreamResultDetails';
+import { isFalSeedanceModel } from '../lib/video/falSeedance25';
 import { submitOnEnter } from './submitOnEnter';
 import { PROVIDER_LABELS } from '../lib/providers';
 import { videoProviderName, brokenVideoProviderLabel, brokenVideoExpiryText } from '../lib/video/videoProviderName';
@@ -5,12 +9,12 @@ import { H3_MAX_CAPABILITIES } from '../lib/video/h3Max';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import { getPersonGroups, getPersonId } from '../lib/references/personReferences';
 import { personColor } from './PersonAssignment';
-import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, RECOVERABLE_IMAGE_MODELS, SUNBURST_MODEL } from '../lib/images/openaiImage';
+import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, RECOVERABLE_IMAGE_MODELS, isOpenAIImageModel } from '../lib/images/openaiImage';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import JSZip from 'jszip';
 import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } from '../services/photoShareService';
 import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
+import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getActiveImageModel, TEXT_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
 import { GallerySearchDialog } from './GallerySearchDialog';
 import { ImageEditComparison } from './ImageEditComparison';
@@ -35,7 +39,7 @@ import { buildFolderPreviewIndex } from './folderPreviews';
 import { describeBatchDelete } from '../lib/gallery/deleteConfirmation';
 import { groupBrainstormImages } from './galleryOrdering';
 import { LazyDialogErrorBoundary } from './LazyDialogErrorBoundary';
-import { fetchMediaBlob, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
+import { fetchMediaBlob, originalDownloadExtension, shouldOpenDownloadFallback } from '../lib/gallery/mediaDownload';
 import { galleryCardLabel, isCardActivationKey } from '../lib/gallery/cardKeyboard';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
 import { GALLERY_DRAG_TYPE, GALLERY_DRAG_ID, GALLERY_DRAG_MEDIA_IDS, getDraggedMediaIds, readGalleryDragPayload, getMediaIdsForMove, canMoveGalleryFolder, type GalleryDragPayload } from './galleryDragDrop';
@@ -700,6 +704,17 @@ const CustomVideoPlayer: React.FC<{
 };
 
 
+const VariationButton = ({ media, onGenerate }: { media: GeneratedMedia; onGenerate: (media: GeneratedMedia) => void }) => {
+  const { preferences, loading, error } = useProviderPreferences();
+  const reason = error || (loading ? 'Loading workspace model settings…' : preferences[getActiveImageModel(media.imageModel)] === 'off'
+    ? 'Enable the original image model in workspace settings to generate a variation.' : !TEXT_MODEL_OPTIONS.some(option => preferences[option.value] !== 'off')
+    ? 'Enable a text model in workspace settings to generate a variation.' : undefined);
+  return <button disabled={!!reason} onClick={() => onGenerate(media)} title={reason || 'Generate a variation of this image with a slightly different prompt'}
+    className="py-4 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors">
+    <Shuffle className="w-5 h-5" /> Variation
+  </button>;
+};
+
 const RecoverImageButton = ({ media, onRecover }: { media: GeneratedMedia; onRecover?: (image: GeneratedMedia) => Promise<void> }) => {
   const [checking, setChecking] = useState(false);
   if (!onRecover || !media.imageModel || !RECOVERABLE_IMAGE_MODELS.includes(media.imageModel)) return null;
@@ -713,6 +728,21 @@ const RecoverImageButton = ({ media, onRecover }: { media: GeneratedMedia; onRec
     <RefreshCw className={`w-3 h-3 ${checking ? 'animate-spin' : ''}`} />{checking ? 'Checking saved image…' : 'Recover saved image'}
   </button>;
 };
+
+function LastFramePreview({ source }: { source: string }) {
+  const [preview, setPreview] = useState<{ source: string; url?: string }>();
+  useEffect(() => {
+    let active = true;
+    refreshMediaAccessUrl(source, false).then(url => { if (active) setPreview({ source, url }); })
+      .catch(() => { if (active) setPreview({ source }); });
+    return () => { active = false; };
+  }, [source]);
+  return <figure><figcaption className="mb-1">Last frame</figcaption>
+    {preview?.source === source && (preview.url
+      ? <img src={preview.url} alt="Generated video’s last frame" className="max-h-64 rounded object-contain" />
+      : <span className="text-xs text-gray-400">Last frame unavailable.</span>)}
+  </figure>;
+}
 
 export const Gallery: React.FC<GalleryProps> = ({
   images,
@@ -1735,13 +1765,13 @@ export const Gallery: React.FC<GalleryProps> = ({
       // key is pinned at the click, synchronously, from the state the gallery
       // itself resets on a switch; no network lookup can race or fail here.
       const startedFor = galleryAccountRef.current;
-      const { files, failed } = await collectBatchDownload(ids, images, undefined, url => refreshMediaAccessUrl(url, false));
-      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
-      if (!files.length) return;
       // Grid records omit reference_images; the manifest needs the full row.
       // requireRemote: a record missing remotely must not be read from this browser's
       // own cache, which may hold another account's row; the index record is the fallback.
       const manifestMedia = await loadManifestMedia(ids, images, id => getImageById(id, galleryOwner?.user_id, { requireRemote: true }));
+      const { files, failed } = await collectBatchDownload(ids, manifestMedia.map(entry => entry.media), undefined, url => refreshMediaAccessUrl(url, false));
+      if (failed) setBatchDownloadError(describeBatchDownloadFailure(failed, selectedIds.size));
+      if (!files.length) return;
       const zip = new JSZip();
       for (const file of files) zip.file(file.name, file.blob);
       zip.file('manifest.json', buildBatchManifest(ids, manifestMedia, files));
@@ -1806,7 +1836,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       const blob = await fetchMediaBlob(downloadUrl);
       const blobUrl = URL.createObjectURL(blob);
 
-      const ext = media.mediaType === 'video' ? 'mp4' : blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
+      const ext = originalDownloadExtension(media, blob.type);
       const a = document.createElement('a');
       a.href = blobUrl;
       a.download = `banana-${media.id}.${ext}`;
@@ -2822,11 +2852,11 @@ export const Gallery: React.FC<GalleryProps> = ({
 
             if (media.isLoading) {
               const isVideoLoading = media.mediaType === 'video';
-              const isPreparingImage = !isVideoLoading && media.imageStage === 'preparing';
+              const isPreparingImage = !isVideoLoading && (media.imageStage === 'sending' || media.imageStage === 'preparing');
               const isQueuedImage = !isVideoLoading && media.imageStage === 'queued';
               const isSavingVideo = isVideoLoading && media.videoStage === 'saving' && !!media.url;
               const rawProgress = isPreparingImage || isQueuedImage ? undefined : isVideoLoading ? media.videoProgress : media.imageProgress;
-              const estimatedProgress = !isVideoLoading && !isPreparingImage && !isQueuedImage && media.imageModel === 'gpt-image-2.5-sunburst';
+              const estimatedProgress = !isVideoLoading && !isPreparingImage && !isQueuedImage && isOpenAIImageModel(media.imageModel) && (!media.generationProvider || media.generationProvider === 'openai');
               const pct = rawProgress != null ? Math.max(0, Math.min(100, Math.round(rawProgress * 100))) : estimatedProgress ? 0 : null;
               if (isSavingVideo) {
                 return (
@@ -2853,8 +2883,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                 );
               }
               const loadingTitle = isVideoLoading
-                ? (pct != null && pct > 0 ? 'Generating video' : 'Starting video')
-                : isPreparingImage ? 'Preparing image' : isQueuedImage ? 'Queued' : 'Generating image';
+                ? (media.videoStage === 'sending' ? 'Submitting video' : pct != null && pct > 0 ? 'Generating video' : 'Starting video')
+                : media.imageStage === 'sending' ? 'Submitting image' : isPreparingImage ? 'Preparing image' : isQueuedImage ? media.imageQueueWaitReason ? 'Waiting for provider capacity' : 'Queued' : 'Generating image';
               const showLoadingProgress = pct != null && (pct > 0 || estimatedProgress);
               return (
                 <div
@@ -2955,6 +2985,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                   </div>
                 )}
 
+                {!!media.seedreamResult?.images.length && <span className="absolute bottom-2 left-2 z-10 rounded-full bg-black/70 px-2 py-1 text-xs text-white">{media.seedreamResult.images.length} {media.seedreamResult.layers ? 'layers' : 'images'}</span>}
+
                 {/* Favorite Button Overlay */}
                 {!isReadOnly && !isSelectionMode && (
                   <button
@@ -3052,7 +3084,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRecoverBrokenVideo(media); }}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/90 hover:bg-violet-500 rounded-lg text-white text-xs font-medium transition-colors shadow-lg"
-                          title={`Retry recovery from ${videoProviderName(media.taskId, media.videoModel === 'minimax-h3')}`}
+                          title={`Retry recovery from ${videoProviderName(media.taskId, media.videoModel === 'minimax-h3', media.generationProvider)}`}
                         >
                           <RefreshCw className="w-3.5 h-3.5" /> Retry
                         </button>
@@ -3102,7 +3134,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                           <button onClick={(e) => { e.stopPropagation(); handleDownloadPNG(media); }} className={`${aspectRatio < 1 ? 'p-1.5' : 'p-2'} bg-gray-800/80 hover:bg-violet-600 rounded-lg text-white/90 hover:text-white transition-colors backdrop-blur-sm flex items-center justify-center`} title="Download Video"><Download className={aspectRatio < 1 ? 'w-3.5 h-3.5' : 'w-5 h-5'} /></button>
                         ) : downloadMenuId === media.id ? (
                           <div className={`flex gap-0.5 ${aspectRatio < 1 ? '' : ''}`}>
-                            <button onClick={(e) => { e.stopPropagation(); handleDownloadPNG(media); }} className={`flex-1 ${aspectRatio < 1 ? 'p-1 text-[8px]' : 'p-1.5 text-[10px]'} bg-violet-600 hover:bg-violet-500 rounded-l-lg text-white transition-colors backdrop-blur-sm flex items-center justify-center font-bold`} title="Download original">{media.openaiImageOptions?.outputFormat.toUpperCase() || 'PNG'}</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDownloadPNG(media); }} className={`flex-1 ${aspectRatio < 1 ? 'p-1 text-[8px]' : 'p-1.5 text-[10px]'} bg-violet-600 hover:bg-violet-500 rounded-l-lg text-white transition-colors backdrop-blur-sm flex items-center justify-center font-bold`} title="Download original">{(media.seedreamOptions?.outputFormat || media.openaiImageOptions?.outputFormat || 'png').toUpperCase()}</button>
                             <button onClick={(e) => { e.stopPropagation(); handleDownloadJPEG(media); }} className={`flex-1 ${aspectRatio < 1 ? 'p-1 text-[8px]' : 'p-1.5 text-[10px]'} bg-violet-600 hover:bg-violet-500 rounded-r-lg text-white transition-colors backdrop-blur-sm flex items-center justify-center font-bold`} title="Download JPEG">JPG</button>
                           </div>
                         ) : (
@@ -3291,7 +3323,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Provider Expanded Prompt</h4>
-                      <p className="mt-1 text-[10px] text-gray-600">Final prompt returned by fal.ai</p>
+                      <p className="mt-1 text-[10px] text-gray-600">Final prompt returned by the generation provider</p>
                     </div>
                     <button
                       onClick={() => handleCopyProviderPrompt(selectedMedia.providerExpandedPrompt || '')}
@@ -3328,7 +3360,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Ratio</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoOperation === 'edit' || selectedMedia.videoOperation === 'extend'
+                      {selectedMedia.videoOperation === 'edit' || selectedMedia.videoOperation === 'extend' || selectedMedia.videoOperation === 'upscale'
                         ? 'Source'
                         : selectedMedia.videoAspectRatio || selectedMedia.aspectRatio || '—'}
                     </span>
@@ -3357,13 +3389,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Model</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoModel === 'seedance-2.0'
-                        ? 'Seedance 2.0'
-                        : selectedMedia.videoModel === 'minimax-h3'
-                          ? selectedMedia.falEndpoint?.includes('h3-max')
-                            ? 'MiniMax H3 Max'
-                            : 'MiniMax H3'
-                          : selectedMedia.generationProvider && selectedMedia.generationProvider !== 'evolink' ? 'Seedance 2.5' : 'Seedance 2.5 Relaxed'}
+                      {selectedMedia.videoModel === 'seedance-2.5' && selectedMedia.generationProvider === 'evolink' ? 'Seedance 2.5 Relaxed' : VIDEO_MODEL_OPTIONS.find(option => option.value === selectedMedia.videoModel)?.label || selectedMedia.videoModel || '—'}
                     </span>
                   </div>
                   <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
@@ -3372,13 +3398,21 @@ export const Gallery: React.FC<GalleryProps> = ({
                       <span className="text-[10px] font-bold text-gray-500 uppercase">Action</span>
                     </div>
                     <span className="text-sm font-semibold text-white">
-                      {selectedMedia.videoOperation === 'reference_edit'
+                      {selectedMedia.generationProvider === 'evolink' && selectedMedia.videoModel === 'minimax-h3'
+                        ? selectedMedia.h3MaxMode === 'reference_to_video' ? 'Reference to Video' : selectedMedia.h3MaxMode === 'image_to_video' ? 'Image to Video' : 'Text to Video'
+                        : selectedMedia.videoModel === 'magi-2'
+                          ? selectedMedia.magi2Mode === 'image_to_video' ? 'First / last frames' : selectedMedia.magi2Mode === 'reference_to_video' ? 'Reference to Video' : 'Text to Video'
+                        : selectedMedia.generationProvider === 'fal' && isFalSeedanceModel(selectedMedia.videoModel) && selectedMedia.videoOperation !== 'edit' && selectedMedia.videoOperation !== 'extend'
+                          ? selectedMedia.falEndpoint?.endsWith('/image-to-video') ? 'First / last frames'
+                            : selectedMedia.videoOperation === 'reference_edit' || selectedMedia.falEndpoint?.endsWith('/reference-to-video') ? 'Reference to video'
+                            : selectedMedia.falEndpoint?.endsWith('/text-to-video') ? 'Text to video' : 'Generate'
+                        : selectedMedia.videoOperation === 'reference_edit'
                         ? 'Ref Edit'
                         : selectedMedia.videoOperation === 'edit'
                           ? 'Edit'
                           : selectedMedia.videoOperation === 'extend'
                             ? 'Extend'
-                            : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
+                            : selectedMedia.videoOperation === 'upscale' ? 'Upscale' : selectedMedia.h3MaxMode === 'lip_sync' ? 'Lip Sync'
                               : selectedMedia.h3MaxMode === 'recast' ? 'Recast'
                                 : selectedMedia.h3MaxMode === 'relight' ? 'Relight'
                                   : selectedMedia.h3MaxMode === 'extend_video' ? 'Extend'
@@ -3386,6 +3420,26 @@ export const Gallery: React.FC<GalleryProps> = ({
                                       : 'Generate'}
                     </span>
                   </div>
+                  {selectedMedia.videoModel === 'magi-2' && (
+                    <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
+                      <div className="mb-1 text-[10px] font-bold text-gray-500 uppercase">Generated audio</div>
+                      <span className="text-sm font-semibold text-white">{selectedMedia.audioEnabled === false ? 'Off' : 'On'}</span>
+                    </div>
+                  )}
+                  {selectedMedia.generationProvider === 'fal' && isFalSeedanceModel(selectedMedia.videoModel) && selectedMedia.falSeedanceOptions && (
+                    <div className="col-span-2 rounded-lg border border-gray-700/30 bg-gray-800/30 p-3 text-xs text-gray-300">
+                      <span className="font-semibold">Requested output: </span>
+                      {(selectedMedia.falSeedanceOptions.outputFormat || 'mp4').toUpperCase()} · {selectedMedia.falSeedanceOptions.codec || 'auto'} codec · {selectedMedia.falSeedanceOptions.bitrateMode || 'standard'} bitrate
+                      {selectedMedia.falSeedanceOptions.draft && ' · Draft preview'}{selectedMedia.falSeedanceOptions.returnLastFrame && ' · Last frame requested'}
+                    </div>
+                  )}
+                  {selectedMedia.generationProvider === 'fal' && isFalSeedanceModel(selectedMedia.videoModel) && selectedMedia.falSeedanceResult && (
+                    <div className="col-span-2 space-y-2 rounded-lg border border-gray-700/30 bg-gray-800/30 p-3 text-sm text-gray-300">
+                      {selectedMedia.falSeedanceResult.seed != null && <p>Generation seed: {selectedMedia.falSeedanceResult.seed}</p>}
+                      {selectedMedia.videoModel === 'seedance-2.5' && selectedMedia.falSeedanceResult.draftId && <p className="break-all">Draft ID (valid for 14 days): <code>{selectedMedia.falSeedanceResult.draftId}</code></p>}
+                      {selectedMedia.falSeedanceResult.lastFrameUrl && <LastFramePreview source={selectedMedia.falSeedanceResult.lastFrameUrl} />}
+                    </div>
+                  )}
                   {selectedMedia.generationCost && (
                     <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
                       <div className="flex items-center gap-2 mb-1">
@@ -3432,7 +3486,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <Scan className="w-3.5 h-3.5 text-violet-400" />
                     <span className="text-[10px] font-bold text-gray-500 uppercase">Resolution</span>
                   </div>
-                  <span className="text-sm font-semibold text-white">{selectedMedia.imageOutputSize || (selectedMedia.imageModel === SUNBURST_MODEL ? 'Unavailable' : selectedMedia.resolution)}</span>
+                  <span className="text-sm font-semibold text-white">{selectedMedia.imageOutputSize || (isOpenAIImageModel(selectedMedia.imageModel) ? 'Unavailable' : selectedMedia.resolution)}</span>
                   {selectedMedia.imageRequestedSize && (
                     <span className={`block mt-1 text-xs ${hasImageSizeMismatch(selectedMedia) ? 'text-amber-300' : 'text-gray-500'}`}>
                       Requested: {selectedMedia.imageRequestedSize}
@@ -3463,7 +3517,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                     <span className="text-[10px] font-bold text-gray-500 uppercase">{selectedMedia.generationCost?.source === 'provider_usage' ? 'Usage Cost' : 'Est. Cost'}</span>
                   </div>
                   <span className="text-sm font-semibold text-green-400">
-                    {selectedMedia.generationCost ? `$${selectedMedia.generationCost.usd.toFixed(4)}` : ['gpt-image-2.5-sunburst','gemini-nano-banana-2.1'].includes(selectedMedia.imageModel || '') || selectedMedia.generationProvider ? 'Unavailable' : `~$${estimateImageCost(
+                    {selectedMedia.generationCost ? `$${selectedMedia.generationCost.usd.toFixed(4)}` : (isOpenAIImageModel(selectedMedia.imageModel) || selectedMedia.imageModel === 'seedream-5.5' || selectedMedia.imageModel === 'gemini-nano-banana-2.1') || selectedMedia.generationProvider ? 'Unavailable' : `~$${estimateImageCost(
                       (selectedMedia.imageModel as keyof typeof IMAGE_COST_PER_GEN) || DEFAULT_IMAGE_MODEL,
                       selectedMedia.resolution,
                       1,
@@ -3481,6 +3535,20 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>}
               </div>
               )}
+
+              {selectedMedia.mediaType === 'image' && (selectedMedia.imageOperation || selectedMedia.seedreamOptions) && <div className="space-y-1 rounded-xl border border-gray-700/50 bg-gray-800/30 p-3 text-xs text-gray-400">
+                <div className="font-semibold text-gray-200">Image action: {selectedMedia.imageModel === 'seedream-5.5' && selectedMedia.seedreamOptions?.mode === 'layerize' ? 'Layerize' : selectedMedia.imageOperation === 'edit' || selectedMedia.imageModel === 'seedream-5.5' && selectedMedia.seedreamOptions?.mode === 'edit' ? 'Edit' : 'Generate'}</div>
+                {selectedMedia.imageModel === 'seedream-5.5' && selectedMedia.seedreamOptions && <>
+                  {selectedMedia.seedreamOptions.mode === 'layerize' ? <p>Requested up to {selectedMedia.seedreamOptions.maxImages ?? DEFAULT_SEEDREAM_OPTIONS.maxImages} layers · OCR {selectedMedia.seedreamOptions.enableTextRecognition ? 'on' : 'off'}</p>
+                    : <p>Requested images: {selectedMedia.seedreamOptions.numImages ?? DEFAULT_SEEDREAM_OPTIONS.numImages} · Background: {selectedMedia.seedreamOptions.background || DEFAULT_SEEDREAM_OPTIONS.background}</p>}
+                  <p>Output: {(selectedMedia.seedreamOptions.outputFormat || DEFAULT_SEEDREAM_OPTIONS.outputFormat).toUpperCase()}</p>
+                </>}
+              </div>}
+
+              {!!selectedMedia.seedreamResult?.images.length && <div key={selectedMedia.id}>
+                <SeedreamResultDetails result={selectedMedia.seedreamResult}
+                  onUseAsReference={isReadOnly ? undefined : url => onUseAsReference({ ...selectedMedia, url })} />
+              </div>}
 
               <ImageEditDetails media={selectedMedia} images={images} onOpenSource={id => { setEditingMediaId(null); setSelectedMediaId(id); }} />
 
@@ -3608,13 +3676,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               {!isReadOnly && <div className={`grid gap-3 ${onGenerateVariation && canGenerateVariation(selectedMedia) ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <button onClick={() => { onRecreate(selectedMedia); setSelectedMediaId(null); }} className="py-4 bg-lime-400 hover:bg-lime-300 text-black font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw className="w-5 h-5" /> Re-create</button>
                 {onGenerateVariation && canGenerateVariation(selectedMedia) && (
-                  <button
-                    onClick={() => { onGenerateVariation(selectedMedia); }}
-                    className="py-4 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-colors"
-                    title="Generate a variation of this image with a slightly different prompt"
-                  >
-                    <Shuffle className="w-5 h-5" /> Variation
-                  </button>
+                  <VariationButton media={selectedMedia} onGenerate={onGenerateVariation} />
                 )}
               </div>}
 
@@ -3625,7 +3687,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                   <button onClick={() => handleDownloadPNG(selectedMedia)} className="py-3 bg-gray-800 text-gray-200 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700 font-medium"><Download className="w-4 h-4" /> Download Video</button>
                 ) : downloadMenuId === selectedMedia.id ? (
                   <div className="grid grid-cols-2 gap-1.5">
-                    <button onClick={() => handleDownloadPNG(selectedMedia)} className="py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-xl flex items-center justify-center gap-1.5 transition-colors font-bold text-sm"><Download className="w-4 h-4" /> {selectedMedia.openaiImageOptions?.outputFormat.toUpperCase() || 'PNG'}</button>
+                    <button onClick={() => handleDownloadPNG(selectedMedia)} className="py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-xl flex items-center justify-center gap-1.5 transition-colors font-bold text-sm"><Download className="w-4 h-4" /> {(selectedMedia.seedreamOptions?.outputFormat || selectedMedia.openaiImageOptions?.outputFormat || 'png').toUpperCase()}</button>
                     <button onClick={() => handleDownloadJPEG(selectedMedia)} className="py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-xl flex items-center justify-center gap-1.5 transition-colors font-bold text-sm"><Download className="w-4 h-4" /> JPG</button>
                   </div>
                 ) : (

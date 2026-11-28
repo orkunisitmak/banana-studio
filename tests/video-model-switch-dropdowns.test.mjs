@@ -14,9 +14,10 @@ const { build } = req('esbuild');
 const React = req('react');
 const { renderToStaticMarkup } = req('react-dom/server');
 
-const load = async () => {
+const load = async (choices = {}) => {
   const out = await build({ entryPoints: ['src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
     plugins: [{ name: 'p', setup(b) {
+      b.onLoad({ filter:/ProviderRoutingSettings\.tsx$/ }, () => ({ contents: `export function useProviderWorkspace(model) { const available={fal:true,evolink:true}; const preferences={'seedance-2.5':'evolink','seedance-2.0':'evolink','magi-2':'evolink',...${JSON.stringify(choices)}}; return {settings:{preferences,loading:false},route:{available,provider:preferences[model] || 'fal'}}; }`, loader:'js' }));
       b.onResolve({ filter: /\/(authService|storageService)$/ }, a => ({ path: a.path, namespace: 'stub' }));
       b.onResolve({ filter: /\/ControlDropdown$/ }, () => ({ path: 'dd', namespace: 'dd' }));
       b.onLoad({ filter: /.*/, namespace: 'dd' }, () => ({ contents: 'module.exports={Dropdown:p=>{(globalThis.__dd=globalThis.__dd||{})[p.label]=p;return null}};', loader: 'js' }));
@@ -62,4 +63,27 @@ test('video model/action walks never leave a dropdown holding a value it does no
   };
   walk(base, ['start'], 4);
   assert.deepEqual(bad.slice(0, 8), [], `${bad.length} invalid states, e.g.`);
+});
+
+
+test('the five logical video models appear only once and controls follow the selected provider', async () => {
+  const fal = await load({ 'seedance-2.5': 'fal' });
+  const usa = render(fal, {...base, videoProvider:'fal'}).dd;
+  assert.deepEqual(new Set(usa.Model.options.map(option=>option.value)), new Set(['seedance-2.5','seedance-2.0','minimax-h3','gemini-omni-1.2-flash','magi-2']));
+  assert.equal(usa.Model.options.length, 5);
+  assert.equal(usa.Model.options.find(option => option.value === 'seedance-2.5').label, 'Seedance 2.5 US');
+  assert.ok(usa['Draft preview']);
+  assert.ok(usa.Quality.options.some(option=>option.value === '4K'));
+  assert.ok(usa.Duration.options.some(option=>option.value === '30'));
+  const evo = await load({ 'minimax-h3':'evolink', 'seedance-2.0':'off' });
+  const recast = render(evo, {...base, videoModel:'minimax-h3',videoProvider:'evolink',h3MaxMode:'reference_to_video'}).dd;
+  assert.deepEqual(recast['H3 Max action'].options.map(option=>option.value), ['text_to_video','image_to_video','reference_to_video']);
+  assert.ok(!recast.Model.options.some(option=>option.value==='seedance-2.0'));
+  assert.equal(recast.Model.options.find(option => option.value === 'seedance-2.5').label, 'Seedance 2.5 Relaxed');
+  const magi = render(evo,{...base, videoModel:'magi-2',videoProvider:'evolink',magi2Mode:'image_to_video',videoQuality:'1080p'}).dd;
+  assert.equal(magi['MAGI-2 action'].value,'image_to_video');
+  assert.deepEqual(magi.Quality.options.map(option=>option.value),['1080p']);
+  const omni=render(fal,{...base,videoModel:'gemini-omni-1.2-flash',videoProvider:'fal',videoOperation:'upscale',videoDuration:-1}).dd;
+  assert.equal(omni.Duration.value,'-1');
+  assert.ok(omni.Action.options.some(option=>option.value==='upscale'));
 });

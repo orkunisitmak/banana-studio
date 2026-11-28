@@ -1,16 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Ratio, Scan, Sparkles } from 'lucide-react';
+import { ArrowLeftRight, Clock, Film, FileImage, Lightbulb, Ratio, Scan, Sparkles } from 'lucide-react';
 import type { AspectRatio, GenerationConfig, OpenAIImageOptions, Resolution } from '../types';
-import { correctOpenAIImageDimensions, getImageOutputRatio, getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_QUALITY_OPTIONS, validateOpenAIImageSize } from '../lib/images/openaiImage';
+import { correctOpenAIImageDimensions, getImageOutputRatio, getOpenAIImageOptions, getOpenAIImageSize, GIF_FRAME_COUNT, GPT_IMAGE_26_COMPLEXITY_OPTIONS, GPT_IMAGE_26_OUTPUT_FORMAT_OPTIONS, isGptImage26Model, SUNBURST_QUALITY_OPTIONS, validateOpenAIImageSize } from '../lib/images/openaiImage';
+import { getImageOperation } from '../lib/images/imageOperation';
 import { Dropdown } from './ControlDropdown';
 
-/** Sunburst controls live alongside the model picker, using the same toolbar UI. */
+const GIF_FRAME_COUNT_OPTIONS = Array.from({ length: GIF_FRAME_COUNT.max - GIF_FRAME_COUNT.min + 1 }, (_, index) => {
+  const value = GIF_FRAME_COUNT.min + index;
+  return { label: `${value} frames`, value: String(value) };
+});
+// Common timings inside the documented 20–2000 ms range (10 ms steps).
+const GIF_FRAME_DURATION_OPTIONS = [50, 100, 150, 200, 300, 500, 1000, 2000].map(value => ({ label: `${value} ms`, value: String(value) }));
+
+/** GPT Image controls live alongside the model picker, using the same toolbar UI. */
 export const OpenAIImageSettings: React.FC<{
   config: GenerationConfig;
   onChange: (config: GenerationConfig) => void;
   onSizeAdjustment?: (notice: { size: string; text: string } | null) => void;
 }> = ({ config, onChange, onSizeAdjustment }) => {
-  const options = getOpenAIImageOptions(config.openaiImageOptions);
+  const options = getOpenAIImageOptions(config.openaiImageOptions, config.imageModel);
+  const is26 = isGptImage26Model(config.imageModel);
+  const isEdit = getImageOperation(config) === 'edit';
   const sizeLocked = config.referenceImages.some(ref => ref.isEditSource && ref.editRegion);
   const [draft, setDraft] = useState({ width: String(options.width), height: String(options.height) });
   const dimensionsRef = useRef<HTMLDivElement>(null);
@@ -25,17 +35,17 @@ export const OpenAIImageSettings: React.FC<{
   useEffect(() => {
     setDraft({ width: String(options.width), height: String(options.height) });
     // Old templates can also contain sizes that need correction.
-    if (!sizeLocked && options.size === 'custom' && validateOpenAIImageSize(`${options.width}x${options.height}`)) {
+    if (!sizeLocked && options.size === 'custom' && validateOpenAIImageSize(`${options.width}x${options.height}`, options.outputFormat)) {
       commitDimensions(String(options.width), String(options.height));
     }
-  }, [options.size, options.width, options.height, sizeLocked]);
+  }, [options.size, options.width, options.height, options.outputFormat, sizeLocked]);
   useEffect(() => {
     // The compact toolbar scrolls horizontally, especially on phones. Reveal
     // the fields after Custom is selected without opening the mobile keyboard.
     if (options.size === 'custom') dimensionsRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [options.size]);
   const update = (patch: Partial<OpenAIImageOptions>, configPatch: Partial<GenerationConfig> = {}) => {
-    onChange({ ...config, ...configPatch, openaiImageOptions: getOpenAIImageOptions({ ...options, ...patch }) });
+    onChange({ ...config, ...configPatch, openaiImageOptions: getOpenAIImageOptions({ ...options, ...patch }, config.imageModel) });
   };
   const selectSize = (value: string) => {
     onSizeAdjustment?.(null);
@@ -47,7 +57,7 @@ export const OpenAIImageSettings: React.FC<{
     else update({ size: 'preset' }, { resolution: value as Resolution });
   };
   const customRatio = getImageOutputRatio(`${options.width}x${options.height}`);
-  const sizeError = options.size === 'custom' ? validateOpenAIImageSize(getOpenAIImageSize(config)) : null;
+  const sizeError = options.size === 'custom' ? validateOpenAIImageSize(getOpenAIImageSize(config), options.outputFormat) : null;
   const numberField = (axis: 'width' | 'height') => (
     <label className="flex h-[42px] shrink-0 items-center gap-1 rounded-xl border border-white/[0.07] bg-[#171e28] px-2 text-xs text-gray-500" title={`${axis === 'width' ? 'Width' : 'Height'} (px)`}>
       <span>{axis === 'width' ? 'W' : 'H'}</span>
@@ -88,5 +98,21 @@ export const OpenAIImageSettings: React.FC<{
     <Dropdown label="Quality" value={options.quality}
       options={SUNBURST_QUALITY_OPTIONS}
       onSelect={(quality: OpenAIImageOptions['quality']) => update({ quality })} icon={Sparkles} compact />
+    {is26 && <>
+      {/* Complexity sets how much reasoning goes into the layout; Quality sets render fidelity. */}
+      <Dropdown label="Complexity" value={options.complexity || 'high'} options={GPT_IMAGE_26_COMPLEXITY_OPTIONS}
+        onSelect={(complexity: OpenAIImageOptions['complexity']) => update({ complexity })} icon={Lightbulb} compact />
+      <Dropdown label="Output" value={options.outputFormat}
+        options={GPT_IMAGE_26_OUTPUT_FORMAT_OPTIONS.map(option => ({ ...option, disabled: isEdit && option.value !== 'png' }))}
+        onSelect={(outputFormat: OpenAIImageOptions['outputFormat']) => update({ outputFormat })} icon={FileImage} compact />
+      {options.outputFormat === 'gif' && <>
+        <Dropdown label="Frames" value={String(options.gifFrameCount)} options={GIF_FRAME_COUNT_OPTIONS}
+          onSelect={(value: string) => update({ gifFrameCount: Number(value) })} icon={Film} compact />
+        <Dropdown label="Frame duration" value={String(options.gifFrameDurationMs)}
+          options={GIF_FRAME_DURATION_OPTIONS.some(option => option.value === String(options.gifFrameDurationMs)) ? GIF_FRAME_DURATION_OPTIONS
+            : [...GIF_FRAME_DURATION_OPTIONS, { label: `${options.gifFrameDurationMs} ms`, value: String(options.gifFrameDurationMs) }]}
+          onSelect={(value: string) => update({ gifFrameDurationMs: Number(value) })} icon={Clock} compact />
+      </>}
+    </>}
   </>;
 };

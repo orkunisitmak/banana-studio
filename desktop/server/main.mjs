@@ -17,14 +17,14 @@ import openaiEnqueue from '../../api/openai-image-enqueue.ts';
 import openaiRecover from '../../api/openai-image-recover.ts';
 import falImage from '../../api/fal-image-generate.ts';
 import falStatus from '../../api/fal-status.ts';
-import falVideo from '../../api/fal-h3-video.ts';
+import { handleFalVideo } from '../../api/fal-h3-video.ts';
 import falScale from '../../api/fal-video-scale.ts';
 import evolinkGenerate from '../../api/evolink-generate.ts';
 import evolinkStatus from '../../api/evolink-status.ts';
 import youtube from '../../api/youtube.ts';
 import youtubeStatus from '../../api/youtube-status.ts';
 import seedanceVideo from '../../api/seedance-video.ts';
-import { chooseProvider } from '../../api/_lib/providerConfiguration.ts';
+import { admitProvider } from '../../api/_lib/providerConfiguration.ts';
 import { seedanceProviderError } from '../../src/lib/video/seedanceProviders.ts';
 
 const KEY_NAMES=new Set(['OPENAI_API_KEY','OPENROUTER_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','FAL_KEY','EVOLINK_API_KEY']);
@@ -49,21 +49,40 @@ const wake=()=>{
   }
 };
 setQueueWake(wake);
-const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'anthropic-text-generate':anthropicText,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
-const prepareMedia=createMediaUploader(workspace);
-routes['seedance-video']=async(req,res)=>{
- if(req.method==='POST'){
-  try{
-   const provider=chooseProvider(req.body?.videoModel,req.body?.provider),error=seedanceProviderError(provider,req.body);
-   if(error)return res.status(400).json({error});
-   req.body=await prepareMedia(provider,{...req.body,provider});
-  }catch(error){return res.status(400).json({error:error.message});}
- }
- return seedanceVideo(req,res);
+const routes = {
+ 'openai-text-generate':openaiText, 'openrouter-text-generate':openrouterText, 'anthropic-text-generate':anthropicText,
+ 'gemini-generate':geminiGenerate, 'gemini-status':geminiStatus, 'fal-status':falStatus,
+ 'openai-image-generate':openaiImage, 'openai-image-enqueue':openaiEnqueue, 'openai-image-recover':openaiRecover,
+ 'fal-image-generate':falImage, 'evolink-status':evolinkStatus, 'youtube':youtube, 'youtube-status':youtubeStatus,
 };
-for(const [name,provider] of [['fal-image-generate','fal'],['fal-h3-video','fal'],['fal-video-scale','fal'],['evolink-generate','evolink']]){
- const original=routes[name];routes[name]=async(req,res)=>{if(req.method==='POST'){try{req.body=await prepareMedia(provider,req.body);}catch(error){return res.status(400).json({error:error.message});}}return original(req,res);};
+const prepareMedia=createMediaUploader(workspace);
+// Local references must reach only the provider selected for this model. Read
+// settings before *uploading* any bytes, not just before the paid submission.
+// Status/recovery GETs use their original task and need no new admission.
+function videoRoute(handler, { models, defaultModel, fixedProvider, uploadProvider, seedance = false }) {
+ return async (req,res) => {
+  if (req.method === 'POST') {
+   const model = models ? req.body?.videoModel ?? defaultModel : defaultModel;
+   if (models && !models.includes(model)) return res.status(400).json({error:'Unsupported video model for this route.'});
+   const provider = await admitProvider(req,res,model,fixedProvider ?? req.body?.provider);
+   if (!provider) return;
+   if (seedance) {
+    const error = seedanceProviderError(provider,req.body);
+    if (error) return res.status(400).json({error});
+   }
+   try { req.body = await prepareMedia(uploadProvider || provider,seedance ? {...req.body,provider} : req.body); }
+   catch (error) { return res.status(400).json({error:error.message}); }
+  }
+  return handler(req,res);
+ };
 }
+const seedanceModels = ['seedance-2.0','seedance-2.5'];
+routes['seedance-video'] = videoRoute(seedanceVideo,{models:seedanceModels,seedance:true});
+const prepareFalVideo = body => prepareMedia('fal',body);
+routes['fal-h3-video'] = (req,res) => handleFalVideo(req,res,prepareFalVideo);
+routes['evolink-generate'] = videoRoute(evolinkGenerate,{models:[...seedanceModels,'minimax-h3','magi-2'],defaultModel:'seedance-2.5',fixedProvider:'evolink'});
+// The scaler is a fal preprocessing step for EvoLink Seedance 2.5 edits.
+routes['fal-video-scale'] = videoRoute(falScale,{defaultModel:'seedance-2.5',fixedProvider:'evolink',uploadProvider:'fal'});
 const root=launch.webRoot || path.join(path.dirname(fileURLToPath(import.meta.url)),'web');
 const http=await startLocalServer({workspace,root,bootstrap:launch.bootstrap,routes,onWake:wake});
 process.env.SUPABASE_URL=http.origin;

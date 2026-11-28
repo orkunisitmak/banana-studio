@@ -32,7 +32,7 @@ Brainstorm; brief'ini, seçtiğin People kayıtlarını ve referansların roller
 
 Kısa fikrini kendi cümlelerinle yaz. **Enhance**, seçili görsel veya video modeline uygun daha açık talimatlar hazırlar: kişi/nesne, kompozisyon, ışık, referans rolleri; videoda hareket ve zamanlama. Alan düzenleme içinde de çalışır. Sonucu kontrol et, kendin düzenle veya **Revert** ile ilk taslağına dön.
 
-Türkçe taslaklardan da üretim açıklamaları İngilizce hazırlanır; görselde görünmesini istediğin yazılar, özel isimler ve alıntılanan diyaloglar istenen dilde kalır. **AI settings** bölümünde **Opus 5.5, GPT-6.1 Sol veya Gemini 3.8 Flash** ve düşünme seviyesini seç. Başlangıç ayarı **Opus 5.5 / Medium**. Kayıt varsa kullanılan hazırlama modeli ve düşünme seviyesi detaylarda saklanır.
+Türkçe taslaklardan da üretim açıklamaları İngilizce hazırlanır; görselde görünmesini istediğin yazılar, özel isimler ve alıntılanan diyaloglar istenen dilde kalır. **AI settings** bölümünde **Claude Opus 5.5, GPT-6.2 Sol veya Gemini 4 Hydrogen** ve düşünme seviyesini seç. Başlangıç ayarı **Opus 5.5 / Medium**. Kayıt varsa kullanılan hazırlama modeli ve düşünme seviyesi detaylarda saklanır.
 
 ## Bir alanı düzenle, geri kalanını koru
 
@@ -62,9 +62,9 @@ Videoyu okuma ve yaratıcı brief ayrı sağlayıcı akışları kullanır. Gere
 
 ## Metin, görsel ve referanslarla video üret
 
-Süre, en-boy oranı, kalite ve girdiler için modele uygun kontrolleri kullan. **Seedance 2.0 / 2.5 Relaxed** ve **MiniMax H3 Max** farklı akışlar sunar; arayüz seçili moda uygun ayarları gösterir. Seedance 2.5 first/last-frame modunda açılış ve bitişi yönlendirmek için iki durağan görsel kullanılır.
+**Seedance 2.0**, **Seedance 2.5**, **MiniMax H3 Max**, **Gemini Omni 1.2 Flash** veya **MAGI-2** seç. Modlar, süre, görüntü oranı ve referans türleri modele ve sağlayıcıya göre değişir. Örneğin Seedance 2.5 çekiminin açılışını ve bitişini yönlendirmek için iki durağan görseli ilk ve son kare olarak işaretle.
 
-MiniMax H3 Max modları: **Text to Video Max · Image to Video Max · Reference to Video Max · Extend Video Max · Lip Sync Max · Recast**. Desteklenen modlarda görsel, video veya ses referansı ekle; Enhance ile hareket talimatını hazırla, işi takip et, sonucu oynat veya indir.
+fal.ai üzerindeki H3 Max, metin/görsel/referanstan üretimin yanında Extend, Lip Sync ve Recast sunar. Omni kaynak videoyu düzenleyebilir, uzatabilir veya çözünürlüğünü yükseltebilir. EvoLink'teki MAGI-2 referans modunda yalnızca sesle de çalışır. [Video rotalarını karşılaştır →](models.md#video-farkları)
 
 <p align="center"><a href="https://github.com/orkunisitmak/banana-studio/raw/refs/heads/main/docs/assets/video-demo.mp4"><img src="../assets/video-preview.gif" width="640" alt="Gerçek üretilmiş video önizlemesi: kostümlü iki karakter oyuncak makinesindeki peluşların arasından çıkıyor" /></a></p>
 
@@ -81,7 +81,7 @@ MiniMax H3 Max modları: **Text to Video Max · Image to Video Max · Reference 
 
 | Özellik | Ne işe yarar? |
 | --- | --- |
-| **Görsel üretimi** | GPT Image 2.5, Nano Banana Pro ve Nano Banana 2.1; desteklenen modellerde oran, boyut/özel ölçü, kalite ve görsel sayısı. |
+| **Görsel üretimi** | Nano Banana Pro / 2.1, GPT Image 2.5 / 2.6 Sunburst ve Seedream 5.5. Seedream bir kaynak görselden katman da çıkarabilir. |
 | **Referanslar ve `@` etiketleri** | Görsel yükle veya yeniden kullan; kimlik, nesne, stil veya sahne rolü ver. Referans eklemek alan editini zorlamaz. |
 | **People** | Aynı kişinin kimlik fotoğraflarını grupla; birden fazla fotoğraf hâlâ tek kişiyi temsil eder. |
 | **Referans kütüphanesi ve şablonlar** | Kaynakları, kayıtlı prompt ve ayar kombinasyonlarını farklı projelerde yeniden kullan. |
@@ -108,24 +108,11 @@ MiniMax H3 Max modları: **Text to Video Max · Image to Video Max · Reference 
 
 ## Modeller ve API anahtarları
 
-API anahtarı, uygulamanın ilgili yapay zekâ servisindeki hesabını kullanmasını sağlayan özel bir erişim bilgisidir. Yalnızca kullanacağın servisleri ekle. Tablo **bu uygulamanın kullandığı bağlantıları** gösterir; modelleri sunan tüm servislerin listesi değildir.
+**Güncel kaynak kodda `FAL_KEY`, MAGI-2 dışında varsayılan görsel, yaratıcı metin ve video rotalarına yeter.** MAGI-2, `EVOLINK_API_KEY` kullanır. Her sağlayıcıda hesap açman gerekmez. İndirilen masaüstü paketinde, daha sonraki kaynak kod değişiklikleri değil, yayımlanan sürümün model listesi bulunur.
 
-| Model veya özellik | Sağlayıcılar (Auto önceliği) | Uygun anahtarlardan biri yeterli |
-| --- | --- | --- |
-| GPT Image 2.5 — yeni görsel ve korumalı alan editi | OpenAI → OpenRouter → fal.ai → ChatGPT aboneliği (Codex, yalnızca masaüstü) | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `FAL_KEY` ya da anahtarsız: ChatGPT ile `codex login` |
-| Nano Banana Pro / Nano Banana 2.1 | fal.ai → Google Gemini → OpenRouter | `FAL_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Claude Opus 5.5 — Enhance, Brainstorm, varyasyon ve yaratıcı brief | Anthropic → OpenRouter | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
-| GPT-6.1 Sol — metin özellikleri | OpenAI → OpenRouter | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
-| Gemini 3.8 Flash — metin ve YouTube videosu analizi | Google Gemini → OpenRouter | `GEMINI_API_KEY` / `OPENROUTER_API_KEY` |
-| Seedance 2.0 / 2.5 | EvoLink → fal.ai → OpenRouter (desteklenen işlemler) | `EVOLINK_API_KEY` / `FAL_KEY` / `OPENROUTER_API_KEY` |
-| MiniMax H3 Max — metin/görsel/referanstan video, uzatma, lip sync ve recast | fal.ai | `FAL_KEY` |
-| YouTube kanal/video araması | Google YouTube Data API v3 | `YOUTUBE_API_KEY` |
+**AI settings → Provider routing** bölümünde anahtarına uygun bir sağlayıcıyı sabitle, gönderimden önce yapılandırılmış ilk rotayı seçmek için **Auto** kullan veya modelde yeni işleri **Off** ile kapat. Modele göre doğrudan OpenAI, Anthropic ve Google Gemini anahtarları, OpenRouter ve masaüstünde Codex girişi de kullanılabilir. Kabul edilmiş iş kendi sağlayıcısında kalır; sonucu belirsiz ücretli istek başka servise gönderilmez.
 
-**Tek sağlayıcıyla başlayabilirsin:** **OpenRouter anahtarı** GPT/Nano görselleri, Opus/GPT/Gemini metin özellikleri, video analizi ve desteklenen Seedance işlemlerini açabilir. **fal.ai anahtarı** GPT/Nano görsel, Seedance ve H3 Max video için yeterli olabilir; Enhance/Brainstorm için ayrıca bir metin sağlayıcısı ekle. **Gemini anahtarı** Nano görsellerini ve Gemini metin/analizini açar. Bütün anahtarları girmen gerekmez. YouTube arama/bilgileri için ayrı YouTube Data API anahtarı gerekir.
-
-Varsayılan yaratıcı model **Opus 5.5 / Medium** olarak kalır. Modeli, düşünme seviyesini ve **Auto / belirli sağlayıcı** seçimini **AI settings** üzerinden yap. Sağlayıcı üretim başlamadan belirlenir ve kayıtlı işte sabitlenir; sonucu belirsiz ücretli istek başka serviste tekrarlanmaz. Sonuçlarda kullanılan sağlayıcı görünür. Onayladığın edit alanının dışındaki kaynak pikseller her görsel bağlantısında korunur.
-
-OpenRouter Seedance bu uygulamada metin, first/last frame ve görsel referanslarını destekler; sabit süre ve görüntü oranı gerekir, Seedance 2.5 için 480p/720p sunar. Video/ses referansı, Edit/Extend, Auto süre veya 2.5 ile 1080p için fal.ai/EvoLink seç. **Relaxed** yalnızca EvoLink bağlantısına aittir. Bazı video referansı ön işlemleri ayrıca fal.ai kullanır. [Sağlayıcı limitleri, anahtar bağlantıları ve örnekler →](models.md)
+YouTube araması `YOUTUBE_API_KEY` gerektirir. Görüntüleri okumak için yaratıcı brief'i yazan sağlayıcıdan bağımsız olarak doğrudan `GEMINI_API_KEY` gerekir. [13 model, rota öncelikleri, anahtar bağlantıları ve örnekler →](models.md)
 
 ## Hangi sistemlerle çalışıyor?
 

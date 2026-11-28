@@ -3,7 +3,7 @@ import { H3_MAX_MODE_OPTIONS } from '../lib/video/h3Max';
 import { H3_MAX_OUTPUT_RATES } from '../lib/video/h3MaxPricing';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Loader2, Image as ImageIcon, DollarSign, BarChart3, RefreshCw, ShieldCheck, Plus, Trash2, Mail, Settings, Video, Wand2, ExternalLink, ChevronDown } from 'lucide-react';
-import { AdminUserSummary, VideoQuality, getEvoLinkVideoPricing, isSeedance25PromoActive } from '../types';
+import { AdminUserSummary, VideoQuality, getEvoLinkVideoPricing } from '../types';
 import {
   getAdminUsageSummary,
   getAuthorizedEmails,
@@ -531,7 +531,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, onViewU
                 </div>
                 <p className="mt-3 text-[10px] leading-relaxed text-gray-500">
                   Video-reference, Edit, and Extend billing: (max total input seconds, output seconds) + output seconds.
-                  {isSeedance25PromoActive() ? ' The displayed 1080p rate includes EvoLink’s promotion through September 17, 2026 (UTC+8).' : ' The displayed 1080p rate uses EvoLink’s post-promotion 2.5× 720p multiplier.'}
                 </p>
               </div>
 

@@ -1,4 +1,13 @@
-# Desktop release procedure
+# Release procedure
+
+## Shared feature parity before packaging
+
+A green public build tests the code in this repository; it cannot detect a feature that was never ported. Before cutting a release:
+
+1. Compare **user-visible behavior**, not directory trees. For each shared change, record the model or feature, picker/settings behavior, accepted inputs, submission and recovery paths, and applicable platforms. Mark each item *ported*, *already present*, or *intentionally different* with a reason. An unexplained omission blocks release.
+2. Port only the reviewed product logic, tests and bilingual documentation onto a branch based on current **public** history. Preserve newer fixes and public-only behavior: native key vaults, local SQLite/media, configurable hosted backends, localization and supported provider alternatives. Do not merge unrelated histories, mirror a checkout, or import commit metadata, operational notes, deployment identifiers, machine paths, credentials or user content.
+3. Review the public diff and verify the public checkout independently using the [development checks](en/development.md#verify-a-change). Exercise affected desktop and hosted paths with isolated data; run the public source/history and independent secret scans. Audit any packaged artifact too. A passing check in another edition does not count.
+4. Record the public revision, check results and intentional differences in the release review. Report source parity separately from CI, packaged artifacts, actual installation and deployment. A source port does not publish a release or make a hosted change live.
 
 ## Windows community archive
 

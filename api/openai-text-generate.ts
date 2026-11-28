@@ -2,7 +2,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
 import { OPENAI_TEXT_MODEL, calculateOpenAITextCost, DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort } from '../src/lib/prompts/openaiText.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
-import { startOpenAIRequest, openAIErrorMessage } from './_lib/openaiGuard.js';
+import { startOpenAIRequest, startPaidRequest, openAIErrorMessage } from './_lib/openaiGuard.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
+import { chatContent, evoReferenceUrl, routedChatError, vendorCost } from './_lib/textRouting.js';
+import { PROVIDER_KEYS } from '../src/lib/providers.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
 
 export const config = { maxDuration: 300 };
@@ -17,9 +20,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = createTaskDeadline(15_000);
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return res.status(503).json({ error: 'OPENAI_API_KEY sunucuda tanımlı değil. GPT-6.1 Sol için OpenAI anahtarını ekle.' });
-
   let body: any;
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const usageContext = body?.usageContext;
   if (body?.model !== OPENAI_TEXT_MODEL) return res.status(400).json({ error: 'Unsupported text model' });
   const reasoningEffort = body.reasoningEffort ?? DEFAULT_OPENAI_REASONING;
-  if (!isOpenAIReasoningEffort(reasoningEffort)) return res.status(400).json({ error: 'Unsupported GPT-6.1 Sol reasoning effort.' });
+  if (!isOpenAIReasoningEffort(reasoningEffort)) return res.status(400).json({ error: 'Unsupported GPT-6.2 Sol reasoning effort.' });
   if (!Array.isArray(parts) || !parts.length || parts.length > 256 || !parts.some(part => typeof part?.text === 'string' && part.text.trim())) {
     return res.status(400).json({ error: 'Provide text and optional image references.' });
   }
@@ -42,19 +42,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (body.outputFormat != null && (body.outputFormat !== 'youtube_analysis' || usageContext.action !== 'enhance' || body.brainstormFormat != null)) return res.status(400).json({ error: 'Invalid analysis output format.' });
   const analysisFormat = body.outputFormat === 'youtube_analysis';
   if (Buffer.byteLength(JSON.stringify(parts), 'utf8') > 4_100_000) return res.status(413).json({ error: 'Reference images are too large. Use fewer or smaller images.' });
-  const content: Record<string, unknown>[] = [];
-  for (const part of parts) {
-    if (typeof part?.text === 'string' && !part.inlineData) {
-      content.push({ type: 'input_text', text: part.text });
-    } else if (part?.text == null && ['image/jpeg', 'image/png', 'image/webp'].includes(part?.inlineData?.mimeType)
-      && typeof part.inlineData.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(part.inlineData.data)) {
-      content.push({ type: 'input_image', image_url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, detail: 'auto' });
-    } else {
-      return res.status(400).json({ error: 'Unsupported reference content. Use text or JPEG, PNG, WebP images.' });
-    }
-  }
-
-  const guard = await startOpenAIRequest(req, res, user, 'text');
+  const references = chatContent(parts);
+  if (!references) return res.status(400).json({ error: 'Unsupported reference content. Use text or JPEG, PNG, WebP images.' });
+  const vendor = await admitProvider(req, res, OPENAI_TEXT_MODEL, body.provider);
+  if (!vendor) return;
+  if (vendor !== 'openai' && vendor !== 'evolink') return res.status(409).json({ error: 'This provider requires the chat endpoint.' });
+  const key = process.env[PROVIDER_KEYS[vendor]]?.trim();
+  if (!key) return res.status(503).json({ error: `Configure the ${vendor} key before generating.` });
+  const guard = vendor === 'openai' ? await startOpenAIRequest(req, res, user, 'text') : await startPaidRequest(req, res, user, 'text', vendor);
   if (!guard) return;
   let providerRequestId: string | null = null;
   let providerStatus: number | undefined;
@@ -85,14 +80,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const provider = createTaskDeadline(250_000);
   console.info(`[openai-text-generate] action=${usageContext.action} reasoning=${reasoningEffort} stage=generating`);
   try {
-    const response = await waitForTask(fetch('https://api.openai.com/v1/responses', {
+    const content = [];
+    for (const part of references) content.push(part.type === 'text' ? { type: 'input_text', text: part.text } : {
+      type: 'input_image', image_url: vendor === 'evolink' ? await evoReferenceUrl(key, part.image_url.url, provider.signal) : part.image_url.url, detail: 'auto',
+    });
+    const response = await waitForTask(fetch(vendor === 'evolink' ? 'https://direct.evolink.ai/v1/responses' : 'https://api.openai.com/v1/responses', {
       method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Client-Request-Id': guard.id },
       body: JSON.stringify({
         model: OPENAI_TEXT_MODEL, input: [{ role: 'user', content }],
         instructions: analysisFormat ? 'Prepare the requested factual episode analysis using only the verified footage observations. Do not claim to watch a video yourself or invent events, identities, prices, outcomes or timestamps. Return exactly the requested JSON object.' : 'Complete the requested prompt-writing task now using the supplied brief and references. Make reasonable creative decisions without asking follow-up questions. Return only the requested finished deliverable.'
           + (usageContext.action === 'brainstorm' ? brainstormOutputInstruction(wardrobeFormat, body.brainstormCount) : ''),
         ...(analysisFormat || usageContext.action === 'brainstorm' ? { text: { format: analysisFormat ? YOUTUBE_ANALYSIS_FORMAT : buildBrainstormOutputFormat(wardrobeFormat, body.brainstormCount) } } : {}),
-        reasoning: { effort: reasoningEffort }, max_output_tokens: 32768, store: false, safety_identifier: user.id,
+        reasoning: { effort: reasoningEffort }, max_output_tokens: 32768, store: false, ...(vendor === 'openai' && { safety_identifier: user.id }),
       }),
       signal: provider.signal,
     }), provider.signal);
@@ -102,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // it would replace the status-specific message with a generic one.
     if (!response.ok) {
       provider.dispose();
-      return fail(response.status, openAIErrorMessage(response.status, undefined, true));
+      return fail(response.status, vendor === 'openai' ? openAIErrorMessage(response.status, undefined, true) : routedChatError(vendor, response.status));
     }
     const data = await waitForTask(response.json(), provider.signal);
     provider.dispose();
@@ -118,37 +117,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error } = await waitForTask(db.from('usage_logs').insert({
         user_id: user.id, action: usageContext.action, model: OPENAI_TEXT_MODEL,
         prompt: usageContext.prompt.slice(0, 500), image_count: 0,
-        estimated_cost: calculateOpenAITextCost(data?.usage),
+        estimated_cost: vendor === 'openai' ? calculateOpenAITextCost(data?.usage) : vendorCost(data?.usage),
       }).abortSignal(accounting.signal), accounting.signal);
       usageLogged = !error;
-      if (error) console.warn('Could not record GPT-6.1 Sol text usage');
+      if (error) console.warn('Could not record GPT-6.2 Sol text usage');
     } catch {
       // A timed-out write may still commit. Do not create another charge record
       // from the browser when the database outcome is uncertain.
       usageLoggingPending = true;
-      console.warn('Could not confirm GPT-6.1 Sol text usage recording');
+      console.warn('Could not confirm GPT-6.2 Sol text usage recording');
     } finally { accounting.dispose(); }
 
-    if (data?.status !== 'completed') return fail(502, 'GPT-6.1 Sol yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
+    if (data?.status !== 'completed') return fail(502, 'GPT-6.2 Sol yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
     const output = (Array.isArray(data.output) ? data.output : [])
       .filter((item: any) => item?.type === 'message' && item.role === 'assistant')
       .flatMap((item: any) => Array.isArray(item.content) ? item.content : []);
     const refusal = output.find((item: any) => item?.type === 'refusal');
-    if (refusal) return fail(422, 'GPT-6.1 Sol bu isteği yanıtlayamadı.');
+    if (refusal) return fail(422, 'GPT-6.2 Sol bu isteği yanıtlayamadı.');
     let text = output.filter((item: any) => item?.type === 'output_text' && typeof item.text === 'string').map((item: any) => item.text).join('\n');
-    if (!text.trim()) return fail(502, 'GPT-6.1 Sol boş yanıt döndürdü. Yeniden dene.');
+    if (!text.trim()) return fail(502, 'GPT-6.2 Sol boş yanıt döndürdü. Yeniden dene.');
     if (usageContext.action === 'brainstorm') {
       // Keep the browser's existing array contract while enforcing provider-side
       // structure. A clarification or prose response must never become an idea.
       const normalized = normalizeBrainstormOutput(text, wardrobeFormat, body.brainstormCount);
       if (!normalized) {
-        return fail(502, 'GPT-6.1 Sol fikirleri beklenen biçimde döndürmedi. Yeniden dene.');
+        return fail(502, 'GPT-6.2 Sol fikirleri beklenen biçimde döndürmedi. Yeniden dene.');
       }
       // Missing wardrobe is recoverable in the client. Keep otherwise usable
       // scenes and metadata intact; do not convert objects to strings.
       text = normalized;
     }
-    const result = { text, candidates: null, usageMetadata: { openaiUsage: data.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
+    const result = { text, candidates: null, usageMetadata: { textProvider: vendor, providerCost: vendorCost(data.usage), openaiUsage: data.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
     outcome = 'completed';
     console.info(`[openai-text-generate] action=${usageContext.action} stage=completed ms=${Date.now() - started} usageLogged=${usageLogged}`);
     await guard.finish('completed', providerRequestId, providerStatus);
@@ -157,8 +156,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     return fail(timeout ? 504 : 502, timeout
-      ? 'GPT-6.1 Sol yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.'
-      : openAIErrorMessage(undefined, undefined, true));
+      ? 'GPT-6.2 Sol yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.'
+      : vendor === 'openai' ? openAIErrorMessage(undefined, undefined, true) : routedChatError(vendor));
   } finally {
     provider.dispose(); clearInterval(heartbeat); res.off?.('close', close);
     await guard.finish(outcome, providerRequestId, providerStatus);

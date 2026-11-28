@@ -36,9 +36,9 @@ Use an empty project reserved for this application. The baseline creates tables 
 
 1. Open [the baseline SQL file](../../supabase/migrations/20261019123903_banana_studio_baseline.sql). On GitHub, use **Raw** or the copy button to copy the **entire file**.
 2. In your new Supabase project, open **SQL Editor → New query**.
-3. Paste the SQL and select **Run**. Run the baseline once on the new project.
+3. Paste the SQL and select **Run**. Run the baseline once on the new project, then apply **each subsequent file** in [migrations](../../supabase/migrations/) in filename order. The later migrations include the server-side model and routing preferences. For an existing installation, apply only the migrations not already installed.
 4. In **Table Editor**, check for tables such as `profiles`, `generations`, `folders` and `authorized_emails`.
-5. In **Storage**, check that the `media` bucket exists and is **private**. Keep its policies and the table access rules from the migration.
+5. In **Storage**, confirm the `media` bucket is **private**. The [image output access migration](../../supabase/migrations/20261128121000_image_output_access.sql) grants access to server-saved results, including GIF/SVG and Seedream outputs; do not make the bucket public to work around a missing migration. Serve user media from a separate storage origin that does not receive application cookies.
 
 **Checkpoint:** SQL Editor reports success, the tables exist, and `media` is private. A CLI-based migration path is also possible for developers; do not apply both methods to the same schema without reconciling migration history.
 
@@ -67,12 +67,12 @@ An environment variable is a named setting supplied to the application by Vercel
 | `SUPABASE_PUBLISHABLE_KEY` | Your project's publishable key; a legacy `anon` key is also accepted | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase backend credential: a server secret key or legacy `service_role` key; this is the app's existing variable name | Yes, for server-owned jobs and tasks |
 | `CRON_SECRET` | A fresh random secret, preferably at least 32 characters, generated with your password manager | Yes |
-| `OPENAI_API_KEY` | OpenAI key | For GPT Image 2.5 and/or GPT-6.1 Sol |
-| `OPENROUTER_API_KEY` | OpenRouter key | For Opus 5.5, the initial creative default |
-| `ANTHROPIC_API_KEY` | Anthropic key | Runs Opus 5.5 directly; used before OpenRouter when both are set |
-| `GEMINI_API_KEY` | Google Gemini key | For Gemini text tasks and footage analysis |
-| `FAL_KEY` | fal.ai key | For Nano Banana, H3 Max and supported video preprocessing |
-| `EVOLINK_API_KEY` | EvoLink key | For Seedance |
+| `FAL_KEY` | fal.ai key | Default image, creative text and video routes except MAGI-2; some video preprocessing |
+| `EVOLINK_API_KEY` | EvoLink key | Required for MAGI-2; alternative for Seedance, H3 Max and creative text |
+| `OPENAI_API_KEY` | OpenAI key | Direct route for Sunburst images and GPT-6.2 Sol |
+| `OPENROUTER_API_KEY` | OpenRouter key | Alternative for supported images, creative text and Seedance modes |
+| `ANTHROPIC_API_KEY` | Anthropic key | Direct route for Claude Opus 5.5 |
+| `GEMINI_API_KEY` | Google Gemini key | Required for YouTube footage; direct route for Nano images and Gemini 4 Hydrogen |
 | `YOUTUBE_API_KEY` | Key from a Google Cloud project with YouTube Data API v3 enabled | For YouTube lookup |
 
 The Supabase Connect dialog and **Settings → API Keys** provide the project credentials. Keep the backend secret/service-role credential server-only. The app deliberately returns only the project origin and publishable key to its frontend. See [Supabase key types](https://supabase.com/docs/guides/getting-started/api-keys).
@@ -119,12 +119,12 @@ The script deliberately refuses its placeholder and unverified/nonexistent accou
 
 ## 8. Check the complete workspace
 
-1. Open **AI settings**. Select a text provider whose key you configured. The default is Opus 5.5 / Medium and requires Anthropic or OpenRouter.
-2. Select a configured image model. For example, choose GPT Image 2.5 with your OpenAI key.
+1. Open **AI settings**. Choose an enabled text model and provider. With `FAL_KEY` configured, Claude Opus 5.5 can use its default fal.ai route.
+2. Choose an image model and match its route to a configured key. For example, use Sunburst on fal.ai or explicitly select OpenAI if using `OPENAI_API_KEY`.
 3. Submit one test image with your own prompt. This is a real provider request and uses your provider's balance.
 4. Verify that the result finishes, stays in the gallery after refresh and can be downloaded.
 5. Check that Vercel lists the `banana-image-jobs` queue trigger and the `/api/image-job-sweep` Cron from `vercel.json`.
-6. If using YouTube, add all keys described in the [YouTube feature table](models.md#video-and-youtube), then test lookup and analysis separately.
+6. If using YouTube, configure the [lookup and footage credentials](models.md#creative-text-and-youtube-footage), then test lookup and analysis separately.
 
 Your web workspace is now usable from its URL on Windows, Mac and mobile browsers. It is independent of the standalone desktop database. As its owner, monitor provider usage, storage, backups and hosting limits.
 

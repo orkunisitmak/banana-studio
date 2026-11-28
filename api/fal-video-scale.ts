@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
 import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
@@ -52,7 +53,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return;
 
   const apiKey = process.env.FAL_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
 
   let acceptedTaskId: string | undefined;
   let guard: PaidRequest = null;
@@ -74,6 +74,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const registry = await prepareTaskRegistry(res);
       if (!registry) return;
+      // Only the EvoLink Seedance 2.5 edit path uses this paid preprocessor.
+      if (!await admitProvider(req, res, 'seedance-2.5', 'evolink', 'fal-scale')) return;
       guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
       if (!guard) return;
       const response = await fetch(`${FAL_QUEUE_BASE}/${SCALE_ENDPOINT}`, {
@@ -107,6 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ requestId: data.request_id });
     }
 
+    if (!apiKey) return res.status(500).json({ error: 'FAL_KEY not configured on server' });
     const requestId = req.query.requestId as string;
     if (!requestId) return res.status(400).json({ error: 'requestId is required' });
     if (!await requireProviderTask(req, res, 'fal', requestId)) return;

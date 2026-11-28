@@ -2,7 +2,9 @@ import { selectProvider } from './providerRouting';
 import type { GeneratedMedia, GenerationConfig } from '../types';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
-import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
+import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, isOpenAIImageModel, validateOpenAIImageOptions, validateOpenAIImageSize, getOpenAIImageOutputError } from '../lib/images/openaiImage';
+import { SEEDREAM_MODEL, getSeedreamDraftError } from '../lib/images/seedream55';
+import { getImageOperation } from '../lib/images/imageOperation';
 import { supabase, getSession } from './authService';
 import { isTransientReadError } from '../lib/shared/transientRead';
 import { getImageById, uploadBase64ToPublicUrl, refreshMediaAccessUrl } from './storageService';
@@ -120,9 +122,14 @@ export const generateOpenAIImage = async (
 ): Promise<GeneratedMedia> => {
   config = structuredClone(config);
   config.imageProvider = config.imageProvider || await selectProvider(config.imageModel);
-  validateImageGenerationReferences({ ...config, prompt });
-  const options = getOpenAIImageOptions(config.imageModel === SUNBURST_MODEL ? config.openaiImageOptions : undefined);
-  const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }));
+  if (config.referenceImages?.some(ref => typeof ref.data !== 'string' || !ref.data.trim())) throw new Error('A reference image is missing its source data. Attach it again.');
+  const imageOperation = getImageOperation(config);
+  if (config.imageModel === SEEDREAM_MODEL) {
+    const error = getSeedreamDraftError(config.seedreamOptions, prompt, config.referenceImages || []);
+    if (error) throw new Error(error);
+  } else validateImageGenerationReferences({ ...config, imageOperation, prompt });
+  const options = getOpenAIImageOptions(isOpenAIImageModel(config.imageModel) ? config.openaiImageOptions : undefined, config.imageModel);
+  const optionError = validateOpenAIImageOptions(options, config.imageModel) || validateOpenAIImageSize(getOpenAIImageSize({ ...config, openaiImageOptions: options }),options.outputFormat) || getOpenAIImageOutputError(options, imageOperation, config.referenceImages?.length || 0);
   if (optionError) throw new Error(optionError);
   const refs = getSunburstReferences(config.referenceImages || []);
   const referenceError = imageReferenceError(config.imageModel, refs);
@@ -138,6 +145,7 @@ export const generateOpenAIImage = async (
     const pending: GeneratedMedia = { id, url: '', prompt: config.prompt, originalPrompt: config.originalPrompt,
       createdAt: Date.now(), imageQueue: { version: 1, queuedAt: Date.now() }, imageStage: 'queued', status: 'pending',
       mediaType: 'image', imageModel: config.imageModel, aspectRatio: config.aspectRatio, resolution: config.resolution,
+      seedreamOptions:config.seedreamOptions,imageOperation, generationProvider:config.imageProvider,
       folderId: context?.folderId, referenceImages: refs };
     const accepted = await imageGenerationQueue.run(initialSession.user?.id || initialSession.access_token, id, async () => {
       await assertImageSession(owner);
@@ -158,6 +166,7 @@ export const generateOpenAIImage = async (
           body: JSON.stringify({ id, model: config.imageModel, provider: config.imageProvider, prompt, displayPrompt: config.prompt,
             originalPrompt: config.originalPrompt, promptPreparation: normalizePromptPreparation(config.promptPreparation), youtubeSource: config.youtubeSource,
             aspectRatio: config.aspectRatio, resolution: config.resolution, imagePromptCategory: config.imagePromptCategory,
+            imageOperation, seedreamOptions: config.imageModel === SEEDREAM_MODEL ? config.seedreamOptions : undefined,
             options, referenceImages, folderId: context?.folderId }),
         });
       } catch {

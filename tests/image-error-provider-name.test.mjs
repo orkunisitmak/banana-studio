@@ -10,7 +10,7 @@ const { build } = createRequire(root + '/package.json')('esbuild');
 const stubs = {
   auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});
 export const createServiceRoleClient=()=>({rpc:()=>({abortSignal:async()=>({data:globalThis.__ledger,error:null})})});
-export const createUserScopedClient=()=>({from:()=>({insert:async()=>({error:globalThis.__insertError||null})})});`,
+export const createUserScopedClient=req=>({rpc:()=>({abortSignal:async()=>({data:{[req.body.model]:req.body.provider},error:null})}),from:()=>({insert:async()=>({error:globalThis.__insertError||null})})});`,
 };
 const stubbed = new RegExp(`/(${Object.keys(stubs).join('|')})\\.js$`);
 const out = await build({ entryPoints: ['api/openai-image-generate.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': JSON.stringify(pkgUrl) }, banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr("+JSON.stringify(pkgUrl)+");" },

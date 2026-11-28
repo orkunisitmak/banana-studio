@@ -83,7 +83,6 @@ test('resumeOpenAIImage detaches a throwing stage observer without interrupting 
     './providerRouting': 'export const selectProvider=async()=>"openai";',
     '../lib/prompts/promptPreparation': 'export const normalizePromptPreparation=value=>value;',
     '../lib/references/referenceImages': 'export const withoutLegacyMask=value=>value;',
-    '../lib/images/openaiImage': 'export const getOpenAIImageOptions=()=>({}); export const getOpenAIImageSize=()=>"1024x1024"; export const getSunburstReferences=()=>[]; export const SUNBURST_MODEL="sunburst"; export const validateOpenAIImageOptions=()=>null; export const validateOpenAIImageSize=()=>null;',
     './authService': 'export const supabase={auth:{refreshSession:async()=>({data:{session:null}})}}; export const getSession=async()=>({access_token:"synthetic",user:{id:"owner"},expires_at:9999999999});',
     '../lib/shared/transientRead': 'export const isTransientReadError=()=>false;',
     './storageService': 'export const getImageById=async id=>globalThis.__imageObserverTestRead(id); export const uploadBase64ToPublicUrl=async()=>""; export const refreshMediaAccessUrl=async()=>"";',

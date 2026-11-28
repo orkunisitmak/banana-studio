@@ -1,22 +1,33 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import { applyCors, requireUser } from './_lib/auth.js';
-import { startPaidRequest } from './_lib/openaiGuard.js';
+import { startOpenAIRequest, startPaidRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
+import { PROVIDER_KEYS, type AIProvider } from '../src/lib/providers.js';
+import { HYDROGEN, type TextChatInput } from './_lib/textRouting.js';
+import { buildGeminiChat, generateGeminiChat } from './_lib/geminiTextChat.js';
+import { hasYouTubeFootage } from '../src/lib/prompts/youtubeFootage.js';
+import { isBrainstormCount } from './_lib/textOutputFormats.js';
 
 interface GeminiGenerateRequest {
   model: string;
   contents: unknown;
   config?: unknown;
+  provider?: AIProvider;
+  brainstormFormat?: 'wardrobe';
+  brainstormCount?: number;
+  usageContext?: { action?: string };
 }
 
-const ALLOWED_MODELS = new Set(['gemini-3.8-flash', 'gemini-3-pro-image-preview', 'gemini-nano-banana-2.1']);
-const ALLOWED_CONFIG_KEYS = new Set([
+const ALLOWED_MODELS = [HYDROGEN, 'gemini-3-pro-image-preview', 'gemini-nano-banana-2.1'];
+const HYDROGEN_CONFIG_KEYS = ['maxOutputTokens', 'stopSequences', 'responseModalities', 'responseMimeType', 'responseSchema', 'responseJsonSchema', 'systemInstruction', 'safetySettings', 'tools', 'toolConfig', 'thinkingConfig', 'mediaResolution', 'seed', 'presencePenalty', 'frequencyPenalty'];
+const ALLOWED_CONFIG_KEYS = [
   'temperature', 'topP', 'topK', 'candidateCount', 'maxOutputTokens', 'stopSequences',
   'responseModalities', 'responseMimeType', 'responseSchema', 'responseJsonSchema',
   'systemInstruction', 'safetySettings', 'tools', 'toolConfig', 'thinkingConfig',
   'imageConfig', 'mediaResolution', 'speechConfig', 'seed', 'presencePenalty', 'frequencyPenalty',
-]);
+];
 
 // Vercel's serverless functions enforce a hard ~4.5 MB request body limit
 // across all plans; `bodyParser.sizeLimit` is a Next.js-only knob and would
@@ -52,11 +63,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY not configured on server' });
-  }
-
   let body: GeminiGenerateRequest;
   try {
     body =
@@ -68,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { model, contents, config: genConfig } = body || ({} as GeminiGenerateRequest);
-  if (typeof model !== 'string' || !ALLOWED_MODELS.has(model)) {
+  if (typeof model !== 'string' || !ALLOWED_MODELS.includes(model)) {
     return res.status(400).json({ error: 'Unsupported Gemini model' });
   }
   if (contents === undefined || contents === null) {
@@ -81,13 +87,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const [key, value] of Object.entries(genConfig || {})) {
     // The SDK accepts config.httpOptions.baseUrl and sends the API key to
     // that destination. Browser input must never control SDK transport.
-    if (!ALLOWED_CONFIG_KEYS.has(key)) {
+    if (!(model === HYDROGEN ? HYDROGEN_CONFIG_KEYS : ALLOWED_CONFIG_KEYS).includes(key)) {
       return res.status(400).json({ error: `Unsupported generation config field: ${key}` });
+    }
+    if (model === HYDROGEN && key === 'responseModalities' && (!Array.isArray(value) || value.length !== 1 || value[0] !== 'TEXT')) {
+      return res.status(400).json({ error: 'Hydrogen generates text only.' });
+    }
+    if (model === HYDROGEN && key === 'thinkingConfig' && (!value || typeof value !== 'object' || Array.isArray(value)
+      || 'thinkingBudget' in value || ('thinkingLevel' in value && !['LOW', 'MEDIUM', 'HIGH', 'XHIGH'].includes(String(value.thinkingLevel))))) {
+      return res.status(400).json({ error: 'Unsupported Hydrogen thinking configuration.' });
     }
     safeConfig[key] = value;
   }
 
-  const guard = await startPaidRequest(req, res, user, model === 'gemini-3.8-flash' ? 'text' : 'image', 'Gemini');
+  const text = model === HYDROGEN;
+  const footage = text && hasYouTubeFootage(contents);
+  if ((footage || !text) && body.provider != null && body.provider !== 'gemini') {
+    return res.status(409).json({ error: 'This operation requires native Gemini.' });
+  }
+  const brainstorm = text && body.usageContext?.action === 'brainstorm';
+  const wardrobe = body.brainstormFormat === 'wardrobe';
+  if ((body.brainstormFormat != null && (!brainstorm || !wardrobe)) || (body.brainstormCount != null && (!brainstorm || !isBrainstormCount(body.brainstormCount)))) {
+    return res.status(400).json({ error: 'Invalid brainstorm format or count.' });
+  }
+  const vendor = await admitProvider(req, res, model, footage || !text ? 'gemini' : body.provider, footage ? 'youtube' : undefined);
+  if (!vendor) return;
+  if (vendor !== 'gemini' && (!text || (vendor !== 'fal' && vendor !== 'evolink' && vendor !== 'openrouter'))) {
+    return res.status(409).json({ error: 'Unsupported Gemini route.' });
+  }
+  const apiKey = process.env[PROVIDER_KEYS[vendor]]?.trim();
+  if (!apiKey) return res.status(503).json({ error: `Configure the ${vendor} key before generating.` });
+  let chat: TextChatInput | undefined;
+  if (vendor !== 'gemini') {
+    try { chat = buildGeminiChat(contents, safeConfig, brainstorm, wardrobe, body.brainstormCount); }
+    catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid chat input.' }); }
+  }
+  const guard = vendor === 'openrouter' ? await startOpenAIRequest(req, res, user, 'text', undefined, 'OpenRouter')
+    : await startPaidRequest(req, res, user, text ? 'text' : 'image', vendor);
   if (!guard) return;
 
   const startedAt = Date.now();
@@ -98,10 +134,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const streaming = String(req.headers?.accept || req.headers?.Accept || '').includes('application/x-ndjson');
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let disconnected = false;
-  const parts = (contents as any)?.parts || (Array.isArray(contents) ? contents.flatMap((item: any) => item?.parts || []) : []);
-  const kind = Array.isArray(parts) && parts.some((part: any) => part?.fileData) ? 'video' : 'content';
+  const kind = footage ? 'video' : 'content';
   const requestedThinking = (safeConfig.thinkingConfig as any)?.thinkingLevel;
-  const thinking = ['LOW', 'MEDIUM', 'HIGH'].includes(requestedThinking) ? requestedThinking : 'default';
+  const thinking = ['LOW', 'MEDIUM', 'HIGH', 'XHIGH'].includes(requestedThinking) ? requestedThinking : 'default';
   const send = (event: unknown) => {
     if (!disconnected && !res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(event)}\n`);
   };
@@ -119,11 +154,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       heartbeat = setInterval(() => send({ type: 'heartbeat' }), 10_000);
     }
     console.info(`[gemini-generate] model=${model} kind=${kind} thinking=${thinking} stage=generating`);
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await waitForTask(ai.models.generateContent({
-      model, contents,
-      config: { ...safeConfig, abortSignal: provider.signal, httpOptions: { timeout: 250_000 } },
-    } as any), provider.signal);
+    const response = vendor === 'gemini' ? await waitForTask(new GoogleGenAI({ apiKey }).models.generateContent({
+      model, contents, config: { ...safeConfig, abortSignal: provider.signal, httpOptions: { timeout: 250_000 } },
+    } as Parameters<GoogleGenAI['models']['generateContent']>[0]), provider.signal)
+      : await waitForTask(generateGeminiChat(vendor, apiKey, chat!, provider.signal, brainstorm, wardrobe, body.brainstormCount), provider.signal);
     await guard.finish('completed');
 
     // Surfaced in `vercel logs` so we can see how long each Gemini call took

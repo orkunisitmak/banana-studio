@@ -2,6 +2,7 @@
  * https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/...
  * The September prompting guide predates 1080P, target audio and editing routes.
  */
+import { exceedsCharacterLimit } from './providerTextLimits.ts';
 // Retired modes remain readable for saved metadata, billing and pending jobs.
 export type H3MaxMode = 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'extend_video' | 'insert_video' | 'lip_sync' | 'recast' | 'relight';
 export type H3MaxSelection = H3MaxMode | 'auto';
@@ -12,6 +13,8 @@ export interface H3MaxOptions {
   enablePromptExpansion: boolean;
   seed?: number;
   enableTranscription: boolean;
+  /** R2V: pin the attached recording as the soundtrack instead of using audio references. */
+  useTargetAudio?: boolean;
   enhanceRealism: boolean;
   colorMatch: boolean;
   output: 'extended' | 'continuation';
@@ -33,6 +36,8 @@ export const DEFAULT_H3_MAX_OPTIONS: H3MaxOptions = {
   enhanceRealism: false, colorMatch: true, output: 'extended', startTime: 1.625, resumeTime: 3.25,
   imageFrame: 'start',
 };
+export const usesH3MaxTargetAudio = (mode: H3MaxMode, useTargetAudio?: unknown): boolean =>
+  mode === 'text_to_video' || mode === 'image_to_video' || (mode === 'reference_to_video' && useTargetAudio === true);
 export const H3_MAX_ENDPOINTS: Record<H3MaxMode, string> = {
   text_to_video: 'minimax/h3-max/text-to-video', image_to_video: 'minimax/h3-max/image-to-video',
   reference_to_video: 'minimax/h3-max/reference-to-video', extend_video: 'minimax/h3-max/extend-video',
@@ -60,7 +65,7 @@ const none = { min: 0, max: 0 }; const one = { min: 1, max: 1 };
 export const H3_MAX_CAPABILITIES: Record<H3MaxMode, H3MaxCapability> = {
   text_to_video: { resolutions: nativeResolutions, duration: generatedDuration, aspectRatios: fixedRatios, prompt: 'required', images: none, videos: none, audios: { min: 0, max: 1 }, description: 'Prompt with optional target soundtrack.' },
   image_to_video: { resolutions: nativeResolutions, duration: generatedDuration, aspectRatios: [], prompt: 'required', images: { min: 1, max: 2 }, videos: none, audios: { min: 0, max: 1 }, description: 'Start and optional end frame, or an end frame alone; optional target soundtrack. The frame determines the canvas.' },
-  reference_to_video: { resolutions: nativeResolutions, duration: generatedDuration, aspectRatios: ['adaptive', ...fixedRatios], prompt: 'required', images: { min: 0, max: 9 }, videos: { min: 0, max: 3 }, audios: { min: 0, max: 3 }, description: 'Up to 12 reference images, videos and audio clips together; optional start, middle and end keyframes.' },
+  reference_to_video: { resolutions: nativeResolutions, duration: generatedDuration, aspectRatios: ['adaptive', ...fixedRatios], prompt: 'required', images: { min: 0, max: 9 }, videos: { min: 0, max: 3 }, audios: { min: 0, max: 3 }, description: 'Up to 12 reference images, videos and audio clips; optional keyframes. Use audio as a reference or pin one track as the soundtrack.' },
   extend_video: { resolutions: [...nativeResolutions, '2K'], duration: { min: 0.71, max: 15, default: 5 }, aspectRatios: ['auto', ...fixedRatios], prompt: 'required', images: none, videos: one, audios: { min: 0, max: 3 }, description: 'Continue a source video with optional audio references. Return the full extended video or continuation.' },
   insert_video: { resolutions: ['480P', '768P'], duration: { min: 5, max: 13, default: 5 }, aspectRatios: [], prompt: 'optional', images: { min: 0, max: 9 }, videos: { min: 1, max: 4 }, audios: none, description: 'First video is the source; up to three additional videos guide the inserted scene between start and resume times.' },
   lip_sync: { resolutions: [...nativeResolutions, '2K'], duration: null, aspectRatios: [], prompt: 'unsupported', images: one, videos: none, audios: one, description: 'Animate one image to one supplied audio track (5 seconds to 15 minutes). Duration follows the audio.' },
@@ -81,7 +86,7 @@ export const resolveH3MaxMode = (selection: unknown, counts: { images: number; v
 };
 
 export interface H3MaxMediaMetadata { duration?: number | null; width?: number; height?: number; size?: number; shotCount?: number; maxShotDuration?: number }
-export interface H3MaxMediaSet { images?: H3MaxMediaMetadata[]; videos?: H3MaxMediaMetadata[]; audios?: H3MaxMediaMetadata[] }
+export interface H3MaxMediaSet { images?: H3MaxMediaMetadata[]; videos?: H3MaxMediaMetadata[]; audios?: H3MaxMediaMetadata[]; startFrame?: Pick<H3MaxMediaMetadata, 'width' | 'height'> }
 const finiteNumber = (value: unknown, label: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`);
   return value;
@@ -99,10 +104,11 @@ const validateTimedReferences = (media: H3MaxMediaMetadata[], label: string) => 
 /** Uses decoded file metadata when available. Provider still validates the actual uploaded media. */
 export const validateH3MaxMediaMetadata = (mode: H3MaxMode, media: H3MaxMediaSet, options: Partial<H3MaxOptions> = {}): void => {
   const videos = media.videos || []; const audios = media.audios || [];
-  if (mode === 'reference_to_video') { validateTimedReferences(videos, 'Reference video'); validateTimedReferences(audios, 'Reference audio'); }
-  if (mode === 'extend_video') validateTimedReferences(audios, 'Reference audio');
+  const targetAudio = usesH3MaxTargetAudio(mode, options.useTargetAudio);
+  if (mode === 'reference_to_video') validateTimedReferences(videos, 'Reference video');
+  if ((mode === 'reference_to_video' && !targetAudio) || mode === 'extend_video') validateTimedReferences(audios, 'Reference audio');
   if (mode === 'insert_video') validateTimedReferences(videos.slice(1), 'Reference video');
-  if (mode === 'text_to_video' || mode === 'image_to_video') for (const audio of audios) {
+  if (targetAudio) for (const audio of audios) {
     if (audio.duration != null && audio.duration < 2) throw new Error('Target audio must be at least 2 seconds long');
     if (audio.size != null && audio.size > 15 * 1024 * 1024) throw new Error('Target audio must not exceed 15 MB');
   }
@@ -162,12 +168,14 @@ export const buildH3MaxInput = (body: H3MaxRequestBody): { mode: H3MaxMode; endp
   validateCount(imageUrls.length, capability.images, 'images', mode); validateCount(videoUrls.length, capability.videos, 'videos', mode); validateCount(audioUrls.length, capability.audios, 'audio clips', mode);
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) throw new Error('MiniMax H3 Max options must be an object');
   const options = (body.options || {}) as Record<string, unknown>;
+  const targetAudio = usesH3MaxTargetAudio(mode, mode === 'reference_to_video' && optionBoolean(options, 'useTargetAudio', false));
+  const referenceAudioUrls = targetAudio ? [] : audioUrls;
   if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') throw new Error('Prompt must be text');
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
   const maxPrompt = mode === 'recast' ? 2000 : 50_000;
   if (capability.prompt === 'required' && !prompt) throw new Error('Prompt is required for this MiniMax H3 Max mode');
   if (capability.prompt === 'unsupported' && prompt) throw new Error(`${modeLabel(mode)} uses supplied media and does not accept a text prompt`);
-  if (prompt.length > maxPrompt) throw new Error(`Prompt must not exceed ${maxPrompt.toLocaleString('en-US')} characters`);
+  if (exceedsCharacterLimit(prompt, maxPrompt)) throw new Error(`Prompt must not exceed ${maxPrompt.toLocaleString('en-US')} characters`);
   const resolution = String(body.resolution || (mode === 'recast' ? '1080P' : '768P')).toUpperCase();
   if (!capability.resolutions.includes(resolution)) throw new Error(`MiniMax H3 Max ${mode} resolution must be ${capability.resolutions.join(', ')}`);
   const input: Record<string, unknown> = { resolution: mode === 'insert_video' ? resolution.toLowerCase() : resolution };
@@ -187,7 +195,9 @@ export const buildH3MaxInput = (body: H3MaxRequestBody): { mode: H3MaxMode; endp
   }
   if (options.seed !== undefined && options.seed !== null) {
     const seed = finiteNumber(options.seed, 'Seed');
-    if (!Number.isInteger(seed) || seed < 0 || seed > 2_147_483_647) throw new Error('Seed must be an integer between 0 and 2147483647');
+    if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer');
+    if (mode === 'lip_sync' && (seed < 0 || seed > 2_147_483_647)) throw new Error('Lip Sync seed must be between 0 and 2147483647');
+    if (mode === 'recast' && seed < 0) throw new Error('Recast seed must be non-negative');
     input.seed = seed;
   }
   if (['text_to_video', 'image_to_video', 'reference_to_video'].includes(mode)) {
@@ -196,32 +206,35 @@ export const buildH3MaxInput = (body: H3MaxRequestBody): { mode: H3MaxMode; endp
     input.prompt_expansion_mode = expansion;
     input.sync_mode = false; // Queue results remain durable downloadable URLs.
   }
-  if (mode === 'text_to_video' || mode === 'image_to_video') {
-    if (audioUrls[0]) { if (duration! < 2) throw new Error('Generation duration must be at least 2 seconds with target audio'); input.target_audio_url = audioUrls[0]; }
-    if (mode === 'image_to_video') {
-      const imageFrame = options.imageFrame ?? 'start';
-      if (imageFrame !== 'start' && imageFrame !== 'end') throw new Error('Image frame must be start or end');
-      if (imageFrame === 'end') {
-        if (imageUrls.length !== 1) throw new Error('End-only keyframe mode requires exactly one image');
-        input.end_image_url = imageUrls[0];
-      } else { input.image_url = imageUrls[0]; if (imageUrls[1]) input.end_image_url = imageUrls[1]; }
-    }
+  if (targetAudio && audioUrls.length) {
+    if (audioUrls.length !== 1) throw new Error('Use exactly one target soundtrack, without reference audio');
+    if (duration! < 2) throw new Error('Generation duration must be at least 2 seconds with target audio');
+    input.target_audio_url = audioUrls[0];
+  }
+  if (mode === 'image_to_video') {
+    const imageFrame = options.imageFrame ?? 'start';
+    if (imageFrame !== 'start' && imageFrame !== 'end') throw new Error('Image frame must be start or end');
+    if (imageFrame === 'end') {
+      if (imageUrls.length !== 1) throw new Error('End-only keyframe mode requires exactly one image');
+      input.end_image_url = imageUrls[0];
+    } else { input.image_url = imageUrls[0]; if (imageUrls[1]) input.end_image_url = imageUrls[1]; }
   }
   if (mode === 'reference_to_video') {
-    if (imageUrls.length + videoUrls.length + audioUrls.length > 12) throw new Error('Reference images, videos and audio must add up to at most 12 files');
+    if (imageUrls.length + videoUrls.length + referenceAudioUrls.length > 12) throw new Error('Reference images, videos and audio must add up to at most 12 files');
     if (options.referenceConditions !== undefined) {
-      if (imageUrls.length || videoUrls.length || audioUrls.length) throw new Error('Ordered reference conditions cannot be combined with reference URL arrays');
+      if (imageUrls.length || videoUrls.length || referenceAudioUrls.length) throw new Error('Ordered reference conditions cannot be combined with reference URL arrays');
       if (!Array.isArray(options.referenceConditions) || options.referenceConditions.length > 12) throw new Error('Ordered reference conditions must contain at most 12 files');
       const conditions = options.referenceConditions.map((entry: any) => {
         if (!entry || !['image', 'video', 'audio'].includes(entry.type)) throw new Error('Invalid ordered reference modality');
         return { type: entry.type, url: publicUrl(entry.url, 'Ordered reference URL') };
       });
       for (const [type, max] of [['image', 9], ['video', 3], ['audio', 3]] as const) if (conditions.filter(entry => entry.type === type).length > max) throw new Error(`Too many ordered ${type} references`);
+      if (input.target_audio_url && conditions.some(entry => entry.type === 'audio')) throw new Error('A target soundtrack cannot be combined with reference audio');
       input.reference_conditions = conditions;
     } else {
       if (imageUrls.length) input.reference_image_urls = imageUrls;
       if (videoUrls.length) input.reference_video_urls = videoUrls;
-      if (audioUrls.length) input.reference_audio_urls = audioUrls;
+      if (referenceAudioUrls.length) input.reference_audio_urls = referenceAudioUrls;
     }
     for (const [key, field] of [['startImageUrl', 'image_url'], ['endImageUrl', 'end_image_url'], ['middleImageUrl', 'middle_image_url']] as const) if (options[key]) input[field] = publicUrl(options[key], key);
     if (options.middleImageUrl || options.middleFrameTime !== undefined) {

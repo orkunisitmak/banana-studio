@@ -1,16 +1,20 @@
 import { PROVIDER_LABELS, type AIProvider } from '../providers';
 
-/** The service that holds a video's media, from its task id (H3 always runs on fal.ai). */
-export const videoProviderName = (taskId: string | undefined, isH3 = false): string =>
-  isH3 || taskId?.startsWith('bs_fal_') ? 'fal.ai' : taskId?.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+/** Encoded task identity wins over a mutable provider preference. Legacy raw
+ * IDs predate provider selection: H3 used fal; Seedance used EvoLink. */
+export const videoTaskProvider = (taskId?: string, saved?: AIProvider, legacyH3 = false): AIProvider | undefined =>
+  taskId?.startsWith('bs_fal_') ? 'fal' : taskId?.startsWith('bs_openrouter_') ? 'openrouter'
+    : taskId?.startsWith('bs_evolink_') ? 'evolink' : saved ?? (legacyH3 ? 'fal' : taskId ? 'evolink' : undefined);
+
+export const videoProviderName = (taskId?: string, legacyH3 = false, savedProvider?: AIProvider): string =>
+  PROVIDER_LABELS[videoTaskProvider(taskId, savedProvider, legacyH3) ?? 'evolink'];
 
 type BrokenVideoMedia = { mediaType?: string; taskId?: string; videoModel?: string; generationProvider?: AIProvider };
 
-/** The provider a broken video's row can name. H3 is always fal.ai, so it needs no task id; a saved provider covers a row whose
- * task id was never written. Null when the row says nothing, so no provider is made up. */
+/** Null when the row gives us no evidence of a provider. */
 const brokenVideoProviderName = (media: BrokenVideoMedia): string | null => {
-  if (media.taskId || media.videoModel === 'minimax-h3') return videoProviderName(media.taskId, media.videoModel === 'minimax-h3');
-  return media.generationProvider ? PROVIDER_LABELS[media.generationProvider] : null;
+  if (media.taskId || media.generationProvider || media.videoModel === 'minimax-h3') return videoProviderName(media.taskId, media.videoModel === 'minimax-h3', media.generationProvider);
+  return null;
 };
 
 /** The line a broken video card shows, so the provider is readable without hovering. */

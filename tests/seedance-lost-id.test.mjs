@@ -24,6 +24,10 @@ const compiled = await build({
   absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
   plugins: [{ name: 'stubs', setup(b) {
+    b.onResolve({ filter: /providerConfiguration\.js$/ }, () => ({ path: 'admission', namespace: 'video-provider' }));
+    b.onLoad({ filter: /.*/, namespace: 'video-provider' }, () => ({ contents: 'export const admitProvider=async (_req,_res,_model,provider)=>provider;export const providerKey=()=>"testing";' }));
+    b.onResolve({ filter: /seedanceUsage\.js$/ }, () => ({ path: 'billing', namespace: 'seedance-billing' }));
+    b.onLoad({ filter: /.*/, namespace: 'seedance-billing' }, () => ({ contents: 'export const recordSeedanceUsage=async()=>{};export const seedanceActualCost=async()=>0.42;' }));
     b.onResolve({ filter: /\/_lib\/(auth|providerTasks|imageStorage)\.js$/ }, args => ({
       path: args.path.includes('providerTasks') ? 'providerTasks' : args.path.includes('imageStorage') ? 'imageStorage' : 'auth',
       namespace: 'stub',

@@ -40,7 +40,7 @@ The local server binds a random loopback port and uses a one-time bootstrap plus
 | `scripts/`, `tests/` | Build, package, signature verification, privacy audits and tests |
 | `docs/en/`, `docs/tr/`, `docs/assets/` | Bilingual documentation and original demo artwork |
 
-`runwayService.ts` is a historical filename: current video routes use Seedance through EvoLink/fal.ai/OpenRouter and H3 Max through fal.ai, not a Runway API key. Current choices live in [types.ts](../../src/types.ts); routing and allowlists are the source of truth behind [the provider table](models.md).
+`runwayService.ts` is a historical filename, not a requirement for a Runway account. The [route registry](../../src/lib/providers.ts) maps each logical model to its supported providers; [the model guide](models.md) explains which key and modes to use.
 
 ## Prerequisites and first checks
 
@@ -70,7 +70,7 @@ vercel dev
 
 Confirm which project/environment you linked before pulling or changing configuration. Use Development credentials separate from production. `.env.local` is ignored and must remain private. Configure the development callback/origin in Google and Supabase for the actual local URL. Hosted Queues/Cron still need deployed verification; a local preview is not proof that scheduled delivery works.
 
-`npm run dev` starts Vite's frontend only. It does not replace Functions, OAuth, background jobs or storage. An unconfigured frontend intentionally displays the setup screen. Server keys must never be exposed using `VITE_*` or bundled into browser code.
+For interactive development, `npm run dev` starts Vite with an adapter for user-facing API routes. It reads server-only development settings from this checkout and uses the hosted routes' authentication; without configuration the UI shows setup. Vite does not emulate the queue worker or scheduled recovery. Test those against a separate hosted development deployment. Never expose server keys through `VITE_*` or bundle them into browser code.
 
 For schema changes, use Supabase's migration workflow against your own disposable project. If you used the browser SQL Editor installation, reconcile migration history before a later CLI push; applying the baseline again is not an upgrade. [Supabase CLI documentation](https://supabase.com/docs/reference/cli/introduction).
 
@@ -116,6 +116,12 @@ Before publishing a bundle, also run `node scripts/audit-distribution.mjs '.buil
 Update the model types/options, UI capability validation, service routing and backend model/field allowlists together. Add the matching native key field if a new provider is needed. Preserve explicit reference roles, the boundary between generation and manual area edits, and server-only credentials. A new arbitrary upstream URL must not become a key-bearing proxy.
 
 Update both language guides and model tables. Check error/retry behavior and task persistence with synthetic tests before making a bounded real provider call on your own account.
+
+## Porting a shared change
+
+Start from the current public branch. Compare the feature at its boundaries (controls, validation, requests, saved jobs and results); do not replace files just because their names match. Keep one picker entry per logical model and recover accepted work through its recorded provider, not today's routing preference. Preserve local SQLite/key vaults, configurable hosted services, translations and supported public routes.
+
+For each affected path, record what was ported, already present or intentionally different and why. Follow the [release parity checklist](../RELEASING.md#shared-feature-parity-before-packaging): only reviewed code, synthetic tests and public documentation belong in the change. Verify this checkout independently; never import another repository's history, configuration or user data.
 
 ## Contribute and distribute
 

@@ -1,11 +1,11 @@
-import { getOpenAIImageOptions, SUNBURST_MODEL } from '../lib/images/openaiImage';
+import { getOpenAIImageOptions, isOpenAIImageModel } from '../lib/images/openaiImage';
 import type { AspectRatio, GeneratedMedia, GenerationConfig, ImageModelId, ReferenceImage } from '../types';
 import type { ImageEditRegion } from '../lib/images/imageEditRegion';
 
 const RATIOS: AspectRatio[] = ['1:1', '3:4', '4:3', '9:16', '16:9'];
 
 /** The approved source occupies one provider input slot. */
-export const getGalleryEditReferenceLimit = (model: ImageModelId): number => model === SUNBURST_MODEL ? 15 : 13;
+export const getGalleryEditReferenceLimit = (model: ImageModelId): number => isOpenAIImageModel(model) ? 15 : 13;
 
 export const readGalleryEditReference = (file: File): Promise<ReferenceImage> => {
   const extension = file.name?.split('.').pop()?.toLowerCase();
@@ -68,14 +68,14 @@ export const buildGalleryImageEditConfig = (
   region: ImageEditRegion,
   references: ReferenceImage[] = [],
 ): GenerationConfig => ({
-  mode: 'image', prompt, count,
+  mode: 'image', imageOperation: 'edit', prompt, count,
   imageModel,
   aspectRatio: getSourceAspectRatio(canvas.width, canvas.height),
   resolution: image.resolution || '2K',
-  openaiImageOptions: { ...getOpenAIImageOptions(image.openaiImageOptions), size: 'custom', width: canvas.width, height: canvas.height, outputFormat: 'png' },
+  openaiImageOptions: { ...getOpenAIImageOptions(image.openaiImageOptions, imageModel), size: 'custom', width: canvas.width, height: canvas.height, outputFormat: 'png' },
   imagePromptCategory: image.imagePromptCategory,
   // Additional images are donors, never a second source or a second mask.
-  referenceImages: [getEditSource(image, region), ...references.map(({ isEditSource, editRegion, isVideoContext, isFirstFrame, isLastFrame, ...reference }) => reference)],
+  referenceImages: [getEditSource(image, region), ...references.map(({ isEditSource, editScope, editRegion, isVideoContext, isFirstFrame, isLastFrame, ...reference }) => reference)],
   referenceVideos: [], referenceAudios: [],
   videoModel: 'seedance-2.5', videoOperation: 'generate', videoAspectRatio: '16:9', videoQuality: '720p',
   videoDuration: 5, audioEnabled: false, videoPromptExpansionMode: 'disabled',

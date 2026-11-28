@@ -1,8 +1,11 @@
+import { BrainstormTextToggle } from './BrainstormTextToggle';
 import { brainstormSummary } from '../lib/brainstorm/brainstormLabels';
 import { submitOnEnter } from './submitOnEnter';
-import { getReferenceImageLimit } from '../lib/images/imageReferences';
-import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
-import { seedanceProviderError } from '../lib/video/seedanceProviders';
+import { getReferenceImageLimit, imageReferenceError, toggleWholeImageEditSource } from '../lib/images/imageReferences';
+import { useProviderWorkspace } from './ProviderRoutingSettings';
+import { resolveImageDraft } from '../lib/images/imageDraftValidation';
+import { videoDraftError } from '../lib/video/videoDraftValidation';
+import { resolveProvider, PROVIDER_LABELS } from '../lib/providers';
 import { SavedReferenceImages } from './SavedReferenceImages';
 import { getClipboardImages } from '../lib/references/clipboardImages';
 import { displayReferencePrompt, storeReferencePrompt } from '../lib/references/dynamicReferences';
@@ -14,40 +17,52 @@ import { getImageCostPreview, type ImageCostSample } from '../lib/images/imageCo
 import { Dropdown } from './ControlDropdown';
 import { ImageCountControl, PROMPT_PANEL_CLASS, PROMPT_INPUT_CLASS, PROMPT_TEXTAREA_CLASS, PROMPT_TOOLBAR_CLASS, PROMPT_SETTINGS_CLASS, PROMPT_ACTIONS_CLASS, PROMPT_REVERT_CLASS, promptResizeClass, promptEnhanceClass, promptGenerateClass } from './PromptComposerUI';
 import { OpenAIImageSettings } from './OpenAIImageSettings';
-import { H3MaxDuration, H3MaxSettings, getH3MaxImageLabel, getH3MaxInputError, getH3MaxUIState } from './H3MaxSettings';
+import { H3MaxDuration, H3MaxSettings, getH3MaxImageLabel, getH3MaxUIState } from './H3MaxSettings';
 import { estimateH3MaxCost } from '../lib/video/h3MaxPricing';
 import { hydrateH3MaxReferenceDimensions, isH3ReferenceDimensionKnown } from '../lib/video/h3MaxReferenceMetadata';
 import { H3_MAX_MODE_OPTIONS, type H3MaxSelection } from '../lib/video/h3Max';
 import { normalizeH3MaxDraft, removeH3MaxReferenceImages, setH3MaxImageRole, type H3MaxImageRole } from '../lib/video/h3MaxConfig';
 import { ImageReferenceSummary } from './ImageReferenceSummary';
 import { ImageEditArea } from './ImageEditArea';
-import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
+import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, isOpenAIImageModel, getOpenAIImageOutputError, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle } from 'lucide-react';
-import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
+import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
 import { enhancePrompt, enhanceVideoPrompt } from '../services/geminiService';
 import { compressImage, refreshMediaAccessUrl, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
 import { YouTubeChannelRef } from './YouTubeChannelRef';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
-import { getTextModelLabel } from '../types';
+import { getTextModelLabel, TEXT_MODEL_OPTIONS } from '../types';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
 import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
-import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
+import { updateImageDraftPrompt, getSunburstEditIntent, supportsWholeImageEdit } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
 import { MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB } from '../lib/references/mediaUploadLimits';
 import { useUnloadWarning } from '../lib/shared/unloadWarning';
-import { assignSeedanceFrames, getSeedanceFrameError } from '../lib/video/seedanceFrames';
+import { assignSeedanceFrames } from '../lib/video/seedanceFrames';
 import { getYouTubeDraftKey, prepareYouTubeBrainstormDraft, type YouTubeBrainstormPreparation } from '../lib/youtube/youtubeBrainstorm';
 
+import { SeedreamSettings } from './SeedreamSettings';
+import { DEFAULT_SEEDREAM_OPTIONS, getSeedreamDraftError, SEEDREAM_MODEL, type SeedreamOptions } from '../lib/images/seedream55';
+import { EVO_H3_MODEL } from '../lib/video/evoH3Max';
+import { EVO_H3_ACTIONS, EvoH3MaxSettings, getEvoH3Limits, selectEvoH3Max } from './EvoH3MaxSettings';
+import { MAGI2_LIMITS, MAGI2_MODEL } from '../lib/video/magi2';
+import { MAGI2_CLIP_MIME, getMagi2Images, getMagi2Limits } from '../lib/video/magi2Config';
+import { MAGI2_ACTIONS, Magi2Settings, selectMagi2 } from './Magi2Settings';
+import { estimateOmniCost, getOmniDurationOptions, getOmniFrames, getOmniMode, normalizeOmniDuration, OMNI_ASPECT_RATIOS, OMNI_LIMITS, OMNI_MODEL, OMNI_OPERATIONS, OMNI_QUALITIES, OMNI_UPSCALE_QUALITIES } from '../lib/video/omniFlash';
+import { clearImageEditSelection, getImageOperation, IMAGE_EDIT_SOURCE_REQUIRED, IMAGE_OPERATION_OPTIONS, resolveImageOperation, setImageOperation } from '../lib/images/imageOperation';
+import { isSeedanceModel, isSeedanceQuality, SEEDANCE_LIMITS, SEEDANCE_QUALITIES, SEEDANCE_DURATION_OPTIONS, seedanceDraftDuration, seedanceMode } from '../lib/video/seedance';
+import { FAL_SEEDANCE_20_MODEL, FAL_SEEDANCE_MODEL, FAL_SEEDANCE_QUALITIES, estimateFalSeedance20Usd, falSeedanceLimits, isFalSeedanceMime, isFalSeedanceModel } from '../lib/video/falSeedance25';
+import type { FalSeedanceOptions } from '../types';
 interface ControlsProps {
   config: GenerationConfig;
   imageCostHistory?: ImageCostSample[];
   onChange: React.Dispatch<React.SetStateAction<GenerationConfig>>;
   onGenerate: () => void;
-  onBrainstormGenerate?: (request: BrainstormGenerationRequest) => void;
+  onBrainstormGenerate?: (request: BrainstormGenerationRequest) => void | Promise<void>;
   isBrainstormPreparing?: boolean;
   isDraftLoading?: boolean;
   promptLoadVersion?: number;
@@ -60,6 +75,22 @@ interface ControlsProps {
   onSelectTemplate: (template: Template) => void;
 }
 
+const falSeedanceQualities = FAL_SEEDANCE_QUALITIES.map(value => ({ label: value, value }));
+const falDurations = (max: number) => [
+  { label: `Auto (4–${max}s)`, value: '-1' },
+  ...Array.from({ length: max - 3 }, (_, i) => ({ label: `${max - i}s`, value: String(max - i) })),
+];
+const falSeedanceDurations = falDurations(falSeedanceLimits(FAL_SEEDANCE_MODEL).outputSeconds);
+const falSeedance20Durations = falDurations(falSeedanceLimits(FAL_SEEDANCE_20_MODEL).outputSeconds);
+const falSeedanceActions = [
+  { label: 'Generate', value: 'generate' }, { label: 'Reference to video', value: 'reference_edit' },
+  { label: 'Edit source video', value: 'edit' }, { label: 'Extend source video', value: 'extend' },
+];
+const falSeedance20Actions = falSeedanceActions.filter(({ value }) => value === 'generate' || value === 'reference_edit');
+
+const seedreamActions = [
+  { label: 'Text to image', value: 'text-to-image' }, { label: 'Edit images', value: 'edit' }, { label: 'Layerize', value: 'layerize' },
+];
 const isH3MetadataOnlyUpdate = (before: GenerationConfig, after: GenerationConfig): boolean => {
   const { referenceImages: beforeImages, referenceVideos: beforeVideos, ...beforeDraft } = before;
   const { referenceImages: afterImages, referenceVideos: afterVideos, ...afterDraft } = after;
@@ -81,6 +112,10 @@ const getMimeType = (file: File | Blob, name?: string): string => {
         case 'jpg': 
         case 'jpeg': return 'image/jpeg';
         case 'webp': return 'image/webp';
+        case 'bmp': return 'image/bmp';
+        case 'gif': return 'image/gif';
+        case 'tif':
+        case 'tiff': return 'image/tiff';
         case 'heic': return 'image/heic';
         case 'heif': return 'image/heif';
         case 'mp4': return 'video/mp4';
@@ -395,14 +430,42 @@ export const Controls: React.FC<ControlsProps> = ({
   const [enhanceModelLabel, setEnhanceModelLabel] = useState('');
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [readingMagi2References, setReadingMagi2References] = useState(0);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   useEffect(() => { setAttachmentError(null); }, [config.mode, config.imageModel, config.videoModel, config.videoOperation, config.h3MaxMode]);
   const [sizeAdjustment, setSizeAdjustment] = useState<{ size: string; text: string } | null>(null);
   useEffect(() => {
     setGenerationError(null);
-  }, [config.prompt, config.originalPrompt, config.referenceImages, config.imageModel, config.mode, config.videoModel, config.videoOperation, config.h3MaxMode]);
+  }, [config.prompt, config.originalPrompt, config.referenceImages, config.imageModel, config.seedreamOptions, config.mode, config.videoModel, config.videoProvider, config.videoOperation, config.h3MaxMode, config.magi2Mode]);
   const latestConfigRef = useRef(config);
   latestConfigRef.current = config;
+  const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
+  const selectedModel = config.mode === 'video' ? selectedVideoModel : config.imageModel;
+  const { settings, route: providerRoute } = useProviderWorkspace(selectedModel);
+  const enabled = (model: string) => !settings.loading && !settings.error && settings.preferences[model] !== 'off';
+  const imageModelOptions = IMAGE_MODEL_OPTIONS.filter(option => enabled(option.value));
+  const videoModelOptions = VIDEO_MODEL_OPTIONS.filter(option => enabled(option.value)).map(option => {
+    if (option.value !== 'seedance-2.5') return option;
+    let provider = option.value === selectedModel ? providerRoute.provider : undefined;
+    if (!provider) {
+      try { provider = resolveProvider(option.value, settings.preferences[option.value], providerRoute.available); } catch { /* No route is currently available. */ }
+    }
+    return provider === 'evolink' || provider === 'fal' ? { ...option, label: provider === 'fal' ? 'Seedance 2.5 US' : 'Seedance 2.5 Relaxed' } : option;
+  });
+  const modelOptions = config.mode === 'video' ? videoModelOptions : imageModelOptions;
+  const modelAvailable = enabled(selectedModel) && !!providerRoute.provider && !providerRoute.error;
+  const textAvailable = TEXT_MODEL_OPTIONS.some(option => enabled(option.value));
+  const routeMessage = settings.error || (settings.loading ? 'Loading workspace model settings…' : !modelOptions.length
+    ? `No ${config.mode} models enabled. Enable one in workspace settings.` : !enabled(selectedModel)
+    ? 'The saved model is disabled. Choose an enabled model.' : providerRoute.error || (!providerRoute.provider ? 'Checking provider route…' : undefined));
+  const latestSubmission = useRef({ preferences: settings.preferences, isDraftLoading });
+  latestSubmission.current = { preferences: settings.preferences, isDraftLoading };
+  const checkTextSubmission = (model: string, allowDimensionUpdates = false) => {
+    if (latestSubmission.current.isDraftLoading || latestSubmission.current.preferences !== settings.preferences || !enabled(model))
+      throw new Error('Workspace settings changed. Review enabled models before submitting.');
+    if (latestConfigRef.current !== config && !(allowDimensionUpdates && isH3MetadataOnlyUpdate(config, latestConfigRef.current)))
+      throw new Error('The draft changed. Review the current prompt and settings before submitting.');
+  };
   const h3DimensionAttemptsRef = useRef(new Map<string, string>());
   const h3DimensionsMountedRef = useRef(true);
   useEffect(() => {
@@ -425,7 +488,7 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [promptLoadVersion, isMinimized]);
   const [isDragging, setIsDragging] = useState(false);
   const insertSourceUploadRef = useRef<{ draft: object } | null>(null);
-  const insertDraftKeyFor = (draftConfig: GenerationConfig) => JSON.stringify([promptLoadVersion, draftConfig.mode, draftConfig.videoModel, draftConfig.videoOperation, draftConfig.h3MaxMode]);
+  const insertDraftKeyFor = (draftConfig: GenerationConfig) => JSON.stringify([promptLoadVersion, draftConfig.mode, draftConfig.videoModel, draftConfig.videoProvider, draftConfig.magi2Mode, draftConfig.videoOperation, draftConfig.h3MaxMode]);
   const insertDraftKey = insertDraftKeyFor(config);
   const insertUploadDraftRef = useRef({ key: insertDraftKey, token: {} });
   const videoUploadDraft = insertUploadDraftRef.current.key === insertDraftKey ? insertUploadDraftRef.current.token : {};
@@ -560,7 +623,18 @@ export const Controls: React.FC<ControlsProps> = ({
     onChange(key === 'prompt' ? { ...updateImageDraftPrompt(config, value), promptPreparation: undefined } : { ...config, [key]: value });
   };
 
-  const isH3VideoConfig = config.mode === 'video' && config.videoModel === 'minimax-h3';
+  const isH3VideoConfig = config.mode === 'video' && config.videoModel === 'minimax-h3' && providerRoute.provider === 'fal';
+  const isEvoH3 = config.mode === 'video' && config.videoModel === EVO_H3_MODEL && providerRoute.provider === 'evolink';
+  const isMagi2 = config.mode === 'video' && config.videoModel === MAGI2_MODEL;
+  const magi2Mode = config.magi2Mode ?? 'text_only';
+  const magi2Limits = isMagi2 ? getMagi2Limits(magi2Mode) : undefined;
+  const displayedImages = isMagi2 ? getMagi2Images(config) : config.referenceImages;
+  const evoH3Mode = config.h3MaxMode === 'image_to_video' || config.h3MaxMode === 'reference_to_video' ? config.h3MaxMode : 'text_to_video';
+  const evoLimits = isEvoH3 ? getEvoH3Limits(config) : undefined;
+  const orderedMedia = isEvoH3 || isMagi2;
+  const orderedFrames = isEvoH3 && evoH3Mode === 'image_to_video' || isMagi2 && magi2Mode === 'image_to_video';
+  const orderedImageLabel = (index: number) => orderedFrames && index < 2
+    ? index === 0 ? 'First frame' : 'Last frame' : `Image ${index + 1}`;
   const h3State = getH3MaxUIState(config);
   const h3UsesImageFrames = isH3VideoConfig && h3State.mode === 'image_to_video';
   const h3PromptSupported = !isH3VideoConfig || (h3State.available && h3State.capabilities.prompt !== 'unsupported');
@@ -610,27 +684,40 @@ export const Controls: React.FC<ControlsProps> = ({
   // Older saved image templates can predate video/audio reference arrays.
   const currentReferenceVideos = config.referenceVideos || [];
   const currentReferenceAudios = config.referenceAudios || [];
-  // Seedance 2.5 accepts up to 30 images, 10 videos and 10 audio clips. Edit
-  // and Extend have one source video; keeping that constraint in the picker
-  // prevents a request that the provider cannot interpret unambiguously.
-  const maxReferenceVideos = isH3VideoConfig ? (h3State.available ? h3State.capabilities.videos.max : 0) : config.videoModel === 'seedance-2.5'
-    ? (config.videoOperation === 'edit' || config.videoOperation === 'extend' ? 1 : 10)
-    : 3;
-  const maxReferenceAudios = isH3VideoConfig ? (h3State.available ? h3State.capabilities.audios.max : 0) : config.videoModel === 'seedance-2.5' ? 10 : 3;
-  const maxReferenceImages = getReferenceImageLimit(config);
+  const isFalSeedance = config.mode === 'video' && providerRoute.provider === 'fal' && isFalSeedanceModel(config.videoModel);
+  const isFalSeedance20 = isFalSeedance && config.videoModel === FAL_SEEDANCE_20_MODEL;
+  const supportsSeedanceFrames = config.videoModel === 'seedance-2.5' || isFalSeedance;
+  const falCaps = isFalSeedance && isFalSeedanceModel(config.videoModel) ? falSeedanceLimits(config.videoModel) : undefined;
+  const falMode = isFalSeedance ? seedanceMode(config.referenceImages, currentReferenceVideos, currentReferenceAudios, config.videoOperation) : undefined;
+  const falOptions = config.falSeedanceOptions || {};
+  const updateFalOptions = (patch: FalSeedanceOptions) => onChange(current => ({
+    ...current, falSeedanceOptions: { ...current.falSeedanceOptions, ...patch },
+    ...(patch.draft ? { videoQuality: '480p' as const } : {}),
+  }));
+  const seedanceLimits = falCaps ?? (isSeedanceModel(config.videoModel) ? SEEDANCE_LIMITS[config.videoModel] : undefined);
+  const isOmniVideoConfig = config.mode === 'video' && config.videoModel === OMNI_MODEL;
+  const omniGenerates = isOmniVideoConfig && (config.videoOperation || 'generate') === 'generate';
+  // Omni Generate takes up to 3 reference videos; Edit, Extend and Upscale take one source. No audio files.
+  const openRouterVideo = config.mode === 'video' && isSeedanceModel(config.videoModel) && providerRoute.provider === 'openrouter';
+  const maxReferenceVideos = openRouterVideo ? 0 : isH3VideoConfig ? (h3State.available ? h3State.capabilities.videos.max : 0)
+    : magi2Limits ? magi2Limits.videos
+    : evoLimits ? evoLimits.videos
+    : isOmniVideoConfig ? omniGenerates ? OMNI_LIMITS.referenceVideos : 1
+    : falMode === 'image_to_video' ? 0
+    : (config.videoOperation === 'edit' || config.videoOperation === 'extend') && !isFalSeedance ? 1 : seedanceLimits?.videos ?? 3;
+  const maxReferenceAudios = openRouterVideo ? 0 : magi2Limits ? magi2Limits.audios : evoLimits ? evoLimits.audios : isH3VideoConfig ? (h3State.available ? h3State.capabilities.audios.max : 0) : isOmniVideoConfig || falMode === 'image_to_video' ? 0 : seedanceLimits?.audios ?? 3;
+  const isSeedream = config.mode === 'image' && config.imageModel === SEEDREAM_MODEL;
+  const seedream = { ...DEFAULT_SEEDREAM_OPTIONS, ...config.seedreamOptions };
+  const isLayerize = isSeedream && seedream.mode === 'layerize';
+  const maxReferenceImages = getReferenceImageLimit({ ...config, videoProvider: config.mode === 'video' ? providerRoute.provider : config.videoProvider });
+
   // Attachments finish after awaits; they use the limits of the latest committed draft.
   const attachLimitsRef = useRef({ images: maxReferenceImages, audios: maxReferenceAudios, videos: maxReferenceVideos, config });
   useLayoutEffect(() => { attachLimitsRef.current = { images: maxReferenceImages, audios: maxReferenceAudios, videos: maxReferenceVideos, config }; });
   const hasStaleEnhancedPrompt = h3PromptSupported && isEnhancedPromptStale(config);
 
-  const formatVideoModel = (model?: VideoModelId) => model === 'seedance-2.0'
-    ? 'Seedance 2.0'
-    : model === 'seedance-2.5'
-      ? 'Seedance 2.5 Relaxed'
-      : model === 'minimax-h3'
-        ? 'MiniMax H3 Max'
-        : 'Video';
-  const formatVideoOperation = (operation?: VideoPromptIntent) => operation === 'reference_edit'
+  const formatVideoModel = (model?: VideoModelId) => VIDEO_MODEL_OPTIONS.find(option => option.value === model)?.label || 'Video';
+  const formatVideoOperation = (operation?: VideoPromptIntent) => operation === 'upscale' ? 'Upscale' : operation === 'reference_edit'
     ? 'Ref Edit'
     : operation === 'edit'
       ? 'Edit'
@@ -643,26 +730,80 @@ export const Controls: React.FC<ControlsProps> = ({
     ? config.enhancedForVideoModel === 'minimax-h3' && config.enhancedForH3MaxMode ? H3_MAX_MODE_OPTIONS.find(option => option.value === config.enhancedForH3MaxMode)?.label || 'MiniMax H3 Max' : `${formatVideoModel(config.enhancedForVideoModel)} · ${formatVideoOperation(config.enhancedForVideoOperation)}`
     : IMAGE_MODEL_OPTIONS.find(model => model.value === config.enhancedForImageModel)?.label || 'Image';
   const currentPromptTargetLabel = config.mode === 'video'
-    ? isH3VideoConfig ? H3_MAX_MODE_OPTIONS.find(option => option.value === h3State.mode)?.label || 'MiniMax H3 Max' : `${formatVideoModel(config.videoModel)} · ${formatVideoOperation(getVideoPromptIntent(config))}`
+    ? isMagi2 ? `MAGI-2 · ${MAGI2_ACTIONS.find(option => option.value === magi2Mode)?.label}` : isEvoH3 ? `EvoLink · ${EVO_H3_ACTIONS.find(option => option.value === evoH3Mode)?.label}` : isH3VideoConfig ? H3_MAX_MODE_OPTIONS.find(option => option.value === h3State.mode)?.label || 'MiniMax H3 Max' : `${formatVideoModel(config.videoModel)} · ${formatVideoOperation(getVideoPromptIntent(config))}`
     : IMAGE_MODEL_OPTIONS.find(model => model.value === config.imageModel)?.label || 'Image';
   const hasEnhanceInput = h3PromptSupported && (config.prompt.trim().length > 0
     || config.referenceImages.length > 0
     || (config.mode === 'video' && ((config.referenceVideos?.length || 0) > 0 || (config.referenceAudios?.length || 0) > 0)));
 
   const updateVideoModel = (videoModel: VideoModelId) => {
+    if (!enabled(videoModel)) return;
+    let videoProvider;
+    try { videoProvider = resolveProvider(videoModel, settings.preferences[videoModel], providerRoute.available); } catch { /* Keep enabled models selectable even before their key is added. */ }
+    const config = { ...latestConfigRef.current, videoProvider };
+    if (videoProvider === 'openrouter' && isSeedanceModel(videoModel)) {
+      onChange({ ...config, videoModel, videoOperation: 'generate', videoAspectRatio: config.videoAspectRatio === 'adaptive' ? '16:9' : config.videoAspectRatio,
+        videoQuality: config.videoQuality === '480p' || (videoModel === 'seedance-2.0' && config.videoQuality === '1080p') ? config.videoQuality : '720p',
+        videoDuration: Math.max(4, Math.min(Math.round(config.videoDuration || 5), videoModel === 'seedance-2.5' ? 30 : 15)) as VideoDuration });
+      return;
+    }
+    if (videoModel === MAGI2_MODEL) {
+      onChange(selectMagi2(config));
+      return;
+    }
+    if (videoModel === EVO_H3_MODEL && videoProvider === 'evolink') {
+      onChange(selectEvoH3Max(config));
+      return;
+    }
+    if (videoModel === OMNI_MODEL) {
+      // Omni keeps Edit/Extend/Upscale and maps Seedance Ref Edit to Edit;
+      // Continue has no Omni equivalent and becomes Generate.
+      const operation = config.videoOperation === 'reference_edit' ? 'edit' : config.videoOperation || 'generate';
+      const videoOperation: VideoOperation = OMNI_OPERATIONS.some(option => option.value === operation) ? operation : 'generate';
+      const qualities = videoOperation === 'upscale' ? OMNI_UPSCALE_QUALITIES : OMNI_QUALITIES;
+      onChange({
+        ...config,
+        videoModel,
+        ...(isEvoH3 ? { h3MaxMode: undefined, h3MaxOptions: undefined } : {}),
+        videoOperation,
+        referenceVideos: currentReferenceVideos.map(video => ({ ...video, isContinuation: false })),
+        videoDuration: normalizeOmniDuration(getOmniMode({ ...config, videoOperation }), !!getOmniFrames(config.referenceImages).end, Number(config.videoDuration)) as VideoDuration,
+        videoQuality: qualities.includes(config.videoQuality) ? config.videoQuality : qualities.includes('720p') ? '720p' : qualities[0],
+        videoAspectRatio: videoOperation !== 'generate' ? 'adaptive'
+          : OMNI_ASPECT_RATIOS.includes(config.videoAspectRatio as typeof OMNI_ASPECT_RATIOS[number]) ? config.videoAspectRatio : '16:9',
+      });
+      return;
+    }
+    if (videoProvider === 'fal' && isFalSeedanceModel(videoModel)) {
+      const standard20 = videoModel === FAL_SEEDANCE_20_MODEL;
+      const continuation = currentReferenceVideos.find(video => video.isContinuation);
+      const operation = getVideoPromptIntent(config);
+      const videoOperation = standard20
+        ? operation === 'edit' || operation === 'reference_edit' ? 'reference_edit' : 'generate'
+        : operation === 'continue' ? 'extend' : operation === 'upscale' ? 'generate' : operation;
+      const videos = continuation
+        ? [{ ...continuation, isContinuation: false }, ...currentReferenceVideos.filter(video => video !== continuation)]
+        : currentReferenceVideos;
+      const mode = seedanceMode(config.referenceImages, videos, currentReferenceAudios, videoOperation);
+      const seconds = config.videoDuration;
+      onChange({ ...config, videoModel, videoOperation, referenceVideos: videos, h3MaxMode: undefined, h3MaxOptions: undefined,
+        falSeedanceOptions: standard20 ? { bitrateMode: falOptions.bitrateMode, codec: falOptions.codec, returnLastFrame: falOptions.returnLastFrame } : config.falSeedanceOptions,
+        videoQuality: !standard20 && falOptions.draft ? '480p' : FAL_SEEDANCE_QUALITIES.some(value => value === config.videoQuality) ? config.videoQuality : '720p',
+        videoDuration: mode === 'video_edit' || seconds === -1 || !Number.isFinite(seconds) ? -1 : Math.max(4, Math.min(falSeedanceLimits(videoModel).outputSeconds, Math.round(seconds))),
+        videoAspectRatio: !standard20 && (mode === 'image_to_video' || mode === 'video_edit' || mode === 'video_extend') ? 'adaptive' : config.videoAspectRatio,
+      });
+      return;
+    }
     const isH3 = videoModel === 'minimax-h3';
     const isH3MaxQuality = config.videoQuality === '480p' || config.videoQuality === '768p';
-    const isSeedanceQuality = config.videoQuality === '480p' || config.videoQuality === '720p' || config.videoQuality === '1080p';
     const targetH3Duration = h3State.capabilities.duration;
-    const normalizedDuration = config.videoDuration === -1 || !Number.isFinite(config.videoDuration)
+    const h3Duration = config.videoDuration === -1 || !Number.isFinite(config.videoDuration)
       ? targetH3Duration?.default || 5
-      : isH3
-        ? Math.max(targetH3Duration?.min || .92, Math.min(targetH3Duration?.max || 15, config.videoDuration))
-        : Math.max(4, Math.min(videoModel === 'seedance-2.5' ? 30 : 15, Math.round(config.videoDuration)));
+      : Math.max(targetH3Duration?.min || .92, Math.min(targetH3Duration?.max || 15, config.videoDuration));
     const nextOperation: VideoOperation = videoModel === 'seedance-2.5'
       ? config.videoOperation === 'reference_edit'
-        ? 'edit'
-        : (config.videoOperation || 'generate')
+        ? isFalSeedance ? 'generate' : 'edit'
+        : config.videoOperation === 'upscale' ? 'generate' : (config.videoOperation || 'generate')
       : videoModel === 'seedance-2.0'
         ? config.videoOperation === 'edit' || config.videoOperation === 'reference_edit'
           ? 'reference_edit'
@@ -671,11 +812,12 @@ export const Controls: React.FC<ControlsProps> = ({
     const nextConfig: GenerationConfig = {
       ...config,
       videoModel,
+      ...(isEvoH3 ? { h3MaxMode: undefined, h3MaxOptions: undefined } : {}),
       videoOperation: nextOperation,
-      videoDuration: videoModel === 'seedance-2.5' && (nextOperation === 'edit' || config.videoDuration === -1) ? -1 : normalizedDuration,
+      videoDuration: isSeedanceModel(videoModel) ? seedanceDraftDuration(videoModel, nextOperation, config.videoDuration) : h3Duration,
       videoQuality: isH3
         ? isH3MaxQuality ? config.videoQuality : '768p'
-        : isSeedanceQuality ? config.videoQuality : '720p',
+        : isSeedanceQuality(config.videoQuality) ? config.videoQuality : '720p',
       videoAspectRatio: isH3
         ? config.referenceImages.length > 0 ? 'adaptive' : config.videoAspectRatio === 'adaptive' ? '16:9' : config.videoAspectRatio
         : nextOperation === 'edit' || nextOperation === 'extend' ? 'adaptive' : config.videoAspectRatio,
@@ -698,16 +840,40 @@ export const Controls: React.FC<ControlsProps> = ({
     const continuationId = intent === 'continue'
       ? currentReferenceVideos.find(video => video.isContinuation)?.id || currentReferenceVideos[0]?.id
       : undefined;
+    if (config.videoModel === OMNI_MODEL) {
+      const qualities = videoOperation === 'upscale' ? OMNI_UPSCALE_QUALITIES : OMNI_QUALITIES;
+      setGenerationError(null);
+      onChange({
+        ...config,
+        videoOperation,
+        videoAspectRatio: videoOperation === 'generate'
+          ? OMNI_ASPECT_RATIOS.includes(config.videoAspectRatio as typeof OMNI_ASPECT_RATIOS[number]) ? config.videoAspectRatio : '16:9'
+          : 'adaptive',
+        videoDuration: normalizeOmniDuration(getOmniMode({ ...config, videoOperation }), !!getOmniFrames(config.referenceImages).end, Number(config.videoDuration)) as VideoDuration,
+        videoQuality: qualities.includes(config.videoQuality) ? config.videoQuality : qualities.includes('720p') ? '720p' : qualities[0],
+      });
+      return;
+    }
     onChange({
       ...config,
       videoOperation,
+      ...(isFalSeedance && videoOperation !== 'generate' && config.referenceImages.some(image => image.isFirstFrame || image.isLastFrame)
+        ? { referenceImages: config.referenceImages.map(image => ({ ...image, isFirstFrame: false, isLastFrame: false })) } : {}),
       referenceVideos: currentReferenceVideos.map(video => ({ ...video, isContinuation: video.id === continuationId })),
       videoAspectRatio: videoOperation === 'edit' || videoOperation === 'extend' ? 'adaptive' : config.videoAspectRatio,
       videoDuration: videoOperation === 'edit' ? -1 : config.videoDuration,
     });
   };
 
-  const processImageFiles = async (files: (File | Blob)[]) => {
+  const readAttachments = async (read: () => Promise<void>) => {
+    if (!isMagi2) return read();
+    setReadingMagi2References(count => count + 1);
+    try { await read(); }
+    catch (error) { addAttachmentError(error instanceof Error ? error.message : 'Could not read the selected attachment.'); }
+    finally { setReadingMagi2References(count => count - 1); }
+  };
+
+  const processImageFiles = (files: (File | Blob)[]) => readAttachments(async () => {
       setAttachmentError(null);
       const MAX_IMAGES = maxReferenceImages;
       const MAX_SIZE_BYTES = 1024 * 1024; // 1MB threshold for compression
@@ -745,6 +911,14 @@ export const Controls: React.FC<ControlsProps> = ({
       for (const file of filesToProcess) {
           const name = (file as File).name;
           let mimeType = kinds[files.indexOf(file)];
+          if (isMagi2 && (!getMimeType(file, (file as File).name).startsWith('image/') || !file.size || file.size >= MAGI2_LIMITS.imageMaxMB * 1024 ** 2)) {
+            addAttachmentError(`MAGI-2 needs a non-empty image under ${MAGI2_LIMITS.imageMaxMB} MB.`);
+            continue;
+          }
+          if (falCaps && (!isFalSeedanceMime('images', getMimeType(file, (file as File).name)) || file.size > falCaps.imageMB * 1024 ** 2)) {
+            addAttachmentError(`Choose a supported reference image up to ${falCaps.imageMB} MB.`);
+            continue;
+          }
           let data = await readFileAsBase64(file, mimeType);
 
           // Keep image-edit sources intact, including imports made before the
@@ -752,7 +926,7 @@ export const Controls: React.FC<ControlsProps> = ({
           // storage URLs; text Enhance/Brainstorm resize their own request copies.
           // Video references retain the existing import-size optimization.
           const estimatedSize = estimateBase64Size(data);
-          if (config.mode !== 'image' && estimatedSize > MAX_SIZE_BYTES) {
+          if (config.mode !== 'image' && !isMagi2 && estimatedSize > MAX_SIZE_BYTES) {
             try {
               data = await compressImage(data, 1536, 0.85);
               mimeType = 'image/jpeg';
@@ -783,7 +957,7 @@ export const Controls: React.FC<ControlsProps> = ({
         }));
         if (dropped) setAttachmentError(`Limit reached: ${attachLimitsRef.current.images} ${attachLimitsRef.current.images === 1 ? 'image' : 'images'} max.`);
       }
-  };
+  });
 
   // --- Upload Handlers ---
   const handleRefImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -796,6 +970,22 @@ export const Controls: React.FC<ControlsProps> = ({
   const processVideoFiles = async (files: File[], switchToVideo = false) => {
     if (files.length === 0 || videoUploadDraft !== insertUploadDraftRef.current.token) return;
     setAttachmentError(null);
+    if (isMagi2 && files.some(file => !MAGI2_CLIP_MIME.video.test(getMimeType(file, file.name)) || file.size > MAGI2_LIMITS.videoMaxMB * 1024 ** 2)) {
+      addAttachmentError(`Choose MP4 or MOV videos up to ${MAGI2_LIMITS.videoMaxMB} MB each.`);
+      return;
+    }
+    if (seedanceLimits && files.some(file => file.size > seedanceLimits.videoMB * 1024 * 1024)) {
+      setAttachmentError(`Seedance reference videos must be ${seedanceLimits.videoMB} MB or smaller.`);
+      return;
+    }
+    if (isFalSeedance20 && falCaps && currentReferenceVideos.reduce((total, video) => total + (video.size || 0), 0) + files.reduce((total, file) => total + file.size, 0) >= falCaps.videoMB * 1024 ** 2) {
+      setAttachmentError(`Reference videos together must be under ${falCaps.videoMB} MB.`);
+      return;
+    }
+    if (isEvoH3 && files.some(file => file.size > 50 * 1024 * 1024)) {
+      setAttachmentError('EvoLink H3 Max reference videos must be 50 MB or smaller.');
+      return;
+    }
     const isInsert = isH3VideoConfig && h3State.mode === 'insert_video';
     const draft = videoUploadDraft;
     const sourceId = isInsert ? currentReferenceVideos[0]?.id : undefined;
@@ -899,11 +1089,19 @@ export const Controls: React.FC<ControlsProps> = ({
     if (picked.length > room) addAttachmentError(`Limit reached: ${MAX_VIDEOS} ${MAX_VIDEOS === 1 ? 'video' : 'videos'} max.`);
   };
 
-  const processAudioFiles = async (files: File[], switchToVideo = false) => {
+  const processAudioFiles = (files: File[], switchToVideo = false) => readAttachments(async () => {
     const MAX_AUDIOS = maxReferenceAudios;
     const room = Math.max(0, MAX_AUDIOS - (config.referenceAudios?.length || 0));
     if (files.length > room) addAttachmentError(`Limit reached: ${MAX_AUDIOS} ${MAX_AUDIOS === 1 ? 'audio clip' : 'audio clips'} max.`);
     const toAdd = files.slice(0, room);
+    if (isMagi2 && toAdd.some(file => !MAGI2_CLIP_MIME.audio.test(getMimeType(file, file.name)) || !file.size || file.size > MAGI2_LIMITS.audioMaxMB * 1024 ** 2)) {
+      addAttachmentError(`Choose non-empty MP3 or WAV clips up to ${MAGI2_LIMITS.audioMaxMB} MB each.`);
+      return;
+    }
+    if (falCaps && toAdd.some(file => !isFalSeedanceMime('audios', getMimeType(file, file.name)) || file.size > falCaps.audioMB * 1024 ** 2)) {
+      addAttachmentError(`Choose MP3 or WAV audio files up to ${falCaps.audioMB} MB.`);
+      return;
+    }
     if (toAdd.length === 0) return;
     const newRefs = await Promise.all(toAdd.map(async file => {
       const url = URL.createObjectURL(file);
@@ -931,7 +1129,7 @@ export const Controls: React.FC<ControlsProps> = ({
     // Cut clips never reached the draft: release their object URLs and report them.
     cut.forEach(ref => URL.revokeObjectURL(ref.url));
     if (cut.length) addAttachmentError(`Limit reached: ${attachLimitsRef.current.audios} ${attachLimitsRef.current.audios === 1 ? 'audio clip' : 'audio clips'} max.`);
-  };
+  });
 
   const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -947,14 +1145,16 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const handleEnhance = async () => {
     if (isDraftLoading) return;
-    if (isEnhancing || hasStaleEnhancedPrompt || !hasEnhanceInput) return;
+    if (!modelAvailable || !textAvailable || isEnhancing || hasStaleEnhancedPrompt || !hasEnhanceInput || readingMagi2References) return;
     const originalPrompt = preEnhancePrompt ?? config.prompt;
     const enhancementTarget = getPromptEnhancementTarget(config);
     setEnhanceError(null);
     setEnhanceStage('preparing');
     setIsEnhancing(true);
     try {
-      const textOptions = { ...await resolveTextModelPreferences(), onStage: setEnhanceStage };
+      if (config.mode === 'image') resolveImageDraft(config, true);
+      const textOptions = { ...await resolveTextModelPreferences(config.mode === 'video' ? 'video_enhance' : 'enhance'), onStage: setEnhanceStage };
+      checkTextSubmission(textOptions.model, isH3VideoConfig);
       setEnhanceModelLabel(getTextModelLabel(textOptions.model));
       let enhanced: string;
       if (config.mode === 'video') {
@@ -976,7 +1176,8 @@ export const Controls: React.FC<ControlsProps> = ({
           config.referenceVideos || [],
           config.referenceAudios || [],
           textOptions,
-          isH3VideoConfig ? { mode: h3State.mode, options: config.h3MaxOptions } : undefined,
+          isEvoH3 ? { mode: evoH3Mode } : isH3VideoConfig ? { mode: h3State.mode, options: config.h3MaxOptions } : undefined,
+          isMagi2 ? { mode: magi2Mode, audioEnabled: config.audioEnabled } : undefined,
         );
       } else {
         enhanced = await enhancePrompt(config.prompt, config.referenceImages, config, textOptions);
@@ -1220,24 +1421,66 @@ export const Controls: React.FC<ControlsProps> = ({
     setIsBrainstormPanelOpen(!isBrainstormPanelOpen);
   };
 
-  const sunburstError = config.imageModel === SUNBURST_MODEL && config.mode === 'image' && (
-    validateOpenAIImageOptions(getOpenAIImageOptions(config.openaiImageOptions))
-    || validateOpenAIImageSize(getOpenAIImageSize(config))
-    || (config.referenceImages.length > 16 ? 'Sunburst accepts up to 16 reference images.' : null)
+  const imageOperation = getImageOperation(config);
+  const updateSeedream = (patch: Partial<SeedreamOptions>) => onChange(current => {
+    const options = { ...DEFAULT_SEEDREAM_OPTIONS, ...current.seedreamOptions, ...patch };
+    // A native edit uses every attached image in order, not a protected mask.
+    // Only an explicit action change clears a previous model's edit selection.
+    if (patch.mode && patch.mode !== 'layerize' && options.background === 'transparent') options.outputFormat = 'png';
+    return resolveImageOperation({ ...current, seedreamOptions: options,
+      referenceImages: patch.mode ? clearImageEditSelection(current.referenceImages) : current.referenceImages });
+  });
+  const updateImageModel = (imageModel: GenerationConfig['imageModel']) => {
+    if (!enabled(imageModel)) return;
+    if (imageModel !== SEEDREAM_MODEL) { updateConfig('imageModel', imageModel); return; }
+    onChange(current => {
+      const options: SeedreamOptions = { ...DEFAULT_SEEDREAM_OPTIONS, ...current.seedreamOptions,
+        mode: current.seedreamOptions?.mode ?? (getImageOperation(current) === 'edit' || current.referenceImages.length ? 'edit' : 'text-to-image') };
+      return resolveImageOperation({ ...current, imageModel, seedreamOptions: options });
+    });
+  };
+  const openaiImageOptions = getOpenAIImageOptions(config.openaiImageOptions, config.imageModel);
+  const sunburstError = isOpenAIImageModel(config.imageModel) && config.mode === 'image' && (
+    validateOpenAIImageOptions(openaiImageOptions, config.imageModel)
+    || validateOpenAIImageSize(getOpenAIImageSize(config), openaiImageOptions.outputFormat)
+    || (config.referenceImages.length > 16 ? 'GPT Image accepts up to 16 reference images.' : null)
+    || getOpenAIImageOutputError(openaiImageOptions, imageOperation, getSunburstReferences(config.referenceImages).length)
   );
+  // Edit is chosen only by the Action control (or by drawing an area); prompt words never select it.
+  const imageEditError = isSeedream || config.mode !== 'image' || imageOperation !== 'edit' ? null : (() => {
+    try {
+      const resolved = resolveImageOperation(config);
+      return resolved.referenceImages.some(ref => ref.editScope === 'image') && !supportsWholeImageEdit(config.imageModel)
+        ? 'Draw an Edit area on the source image, or choose GPT Image 2.6 or Nano Banana 2.1 to edit the whole image.' : null;
+    } catch (error) {
+      return error instanceof Error ? error.message : IMAGE_EDIT_SOURCE_REQUIRED;
+    }
+  })();
+  const updateImageOperation = (next: GenerationConfig['imageOperation']) => {
+    if (next !== 'generate' && next !== 'edit') return;
+    setGenerationError(null);
+    onChange(current => {
+      const updated = setImageOperation(current, next);
+      // Edits always save PNG; GIF and SVG are new-image outputs.
+      return next === 'edit' && isOpenAIImageModel(updated.imageModel) && getOpenAIImageOptions(updated.openaiImageOptions, updated.imageModel).outputFormat !== 'png'
+        ? { ...updated, openaiImageOptions: { ...getOpenAIImageOptions(updated.openaiImageOptions, updated.imageModel), outputFormat: 'png' } } : updated;
+    });
+  };
+  const isBrainstormActive = config.mode === 'image' && isBrainstormPanelOpen && !isMinimized;
+  // Brainstorm writes the actual per-idea prompts; an image-only concept is valid there.
+  const referenceError = config.mode === 'image' ? imageReferenceError(config.imageModel, config.referenceImages) : null;
+  const seedreamError = isSeedream ? getSeedreamDraftError(config.seedreamOptions, config.prompt, config.referenceImages, isBrainstormActive) : null;
   const hasBrainstormInput = brainstormCategory === 'simple' || config.youtubeSource
     ? Boolean(config.prompt.trim() || config.referenceImages.length) : config.referenceImages.length > 0;
-  // Like Generate: a Re-create's saved references must finish loading first.
-  const isBrainstormActive = config.mode === 'image' && isBrainstormPanelOpen && !isMinimized;
-
   const handleBrainstorm = async () => {
     if (!canBrainstormGenerate || brainstormSubmitRef.current || !onBrainstormGenerate) return;
     brainstormSubmitRef.current = true;
     setBrainstormError(null);
     try {
-      const pendingPreferences = resolveTextModelPreferences();
+      const pendingPreferences = resolveTextModelPreferences('brainstorm');
       const preferences = pendingPreferences instanceof Promise ? await pendingPreferences : pendingPreferences;
-      onBrainstormGenerate({ settings: config, category: brainstormCategory, ideaCount: brainstormIdeaCount,
+      checkTextSubmission(preferences.model);
+      await onBrainstormGenerate({ settings: resolveImageDraft(config, true), category: brainstormCategory, ideaCount: brainstormIdeaCount,
         textModel: preferences.model, reasoningEffort: preferences.reasoningEffort, thinkingLevel: preferences.thinkingLevel });
     } catch (error) {
       setBrainstormError(error instanceof Error ? error.message : 'Could not start Brainstorm.');
@@ -1692,23 +1935,15 @@ export const Controls: React.FC<ControlsProps> = ({
 
   const handleGenerate = () => {
     if (isDraftLoading) return;
-    if (isBrainstormActive) return;
+    if (!canGenerate) return;
     setGenerationError(null);
     if (config.mode === 'image') {
       try {
-        validateImageGenerationReferences(config);
+        resolveImageDraft(config);
       } catch (error) {
         setGenerationError(error instanceof Error ? error.message : 'Check the attached references.');
         return;
       }
-    }
-    if (config.mode === 'video' && config.videoModel === 'seedance-2.5' && !config.referenceVideos?.some(video => video.isContinuation)) {
-      const error = getSeedanceFrameError(config.referenceImages, config.referenceVideos?.length || 0, config.referenceAudios?.length || 0, config.videoOperation);
-      if (error) { setGenerationError(error); return; }
-    }
-    if (isH3VideoConfig) {
-      const error = getH3MaxInputError(config);
-      if (error) { setGenerationError(error); return; }
     }
     onGenerate();
   };
@@ -1968,20 +2203,18 @@ export const Controls: React.FC<ControlsProps> = ({
 
   // --- Render Helpers ---
 
-  const imageModelOptions = IMAGE_MODEL_OPTIONS;
-  const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
-  const providerRoute = useProviderRoute(config.mode === 'video' ? selectedVideoModel : config.imageModel);
+
   const selectedVideoOperation = config.videoOperation || 'generate';
   const selectedVideoIntent = getVideoPromptIntent(config);
-  const videoModelOptions = VIDEO_MODEL_OPTIONS.map(option => option.value === 'seedance-2.5' && providerRoute.provider !== 'evolink' ? { ...option, label: 'Seedance 2.5' } : option);
+
   const isH3ImageToVideo = h3UsesImageFrames && config.referenceImages.length > 0;
-  const isSeedance25FrameToVideo = selectedVideoModel === 'seedance-2.5'
+  const sourceFrameRatio = supportsSeedanceFrames && !isFalSeedance20 && providerRoute.provider !== 'openrouter'
     && selectedVideoOperation === 'generate'
     && config.referenceImages.length > 0
     && config.referenceImages.every(image => image.isFirstFrame || image.isLastFrame)
     && currentReferenceVideos.length === 0
     && (config.referenceAudios?.length || 0) === 0;
-  const usesSourceFrameAspectRatio = isH3ImageToVideo || (isH3VideoConfig && h3State.mode === 'reference_to_video' && !!config.h3MaxOptions?.startImageId) || (isSeedance25FrameToVideo && providerRoute.provider !== 'openrouter');
+  const usesSourceFrameAspectRatio = isH3ImageToVideo || (isH3VideoConfig && h3State.mode === 'reference_to_video' && !!config.h3MaxOptions?.startImageId) || sourceFrameRatio;
   const hasSeedanceFrameRoles = config.referenceImages.some(image => image.isFirstFrame || image.isLastFrame);
   const canAssignSeedanceFrames = config.referenceImages.length > 0 && config.referenceImages.length <= 2
     && currentReferenceVideos.length === 0 && currentReferenceAudios.length === 0
@@ -1993,10 +2226,13 @@ export const Controls: React.FC<ControlsProps> = ({
       referenceImages: input === 'frames'
         ? assignSeedanceFrames(current.referenceImages)
         : current.referenceImages.map(image => ({ ...image, isFirstFrame: false, isLastFrame: false })),
-      videoAspectRatio: input === 'frames' && providerRoute.provider !== 'openrouter' ? 'adaptive' : current.videoAspectRatio,
+      videoAspectRatio: input === 'frames' && !isFalSeedance20 && providerRoute.provider !== 'openrouter' ? 'adaptive' : current.videoAspectRatio,
     }));
   };
-  const videoOperationOptions = (selectedVideoModel === 'seedance-2.0'
+  const omniMode = getOmniMode(config);
+  const videoOperationOptions = selectedVideoModel === OMNI_MODEL ? OMNI_OPERATIONS
+    : isFalSeedance20 ? falSeedance20Actions : isFalSeedance ? falSeedanceActions
+    : (selectedVideoModel === 'seedance-2.0'
     ? [
         { label: 'Generate', value: 'generate' },
         { label: 'Ref Edit', value: 'reference_edit' },
@@ -2012,51 +2248,74 @@ export const Controls: React.FC<ControlsProps> = ({
   const resolutionOptions = [ { label: '1K', value: '1K' }, { label: '2K', value: '2K' }, { label: '4K', value: '4K' } ];
   const videoAspectRatioOptions = usesSourceFrameAspectRatio
     ? [{ label: 'Source frame', value: 'adaptive' }]
+    : selectedVideoModel === OMNI_MODEL
+      ? selectedVideoOperation === 'generate' ? OMNI_ASPECT_RATIOS.map(value => ({ label: value, value })) : [{ label: 'Source', value: 'adaptive' }]
     : selectedVideoModel === 'minimax-h3'
       ? h3State.capabilities.aspectRatios.map(value => ({ label: value === 'adaptive' || value === 'auto' ? 'Source / adaptive' : value, value: value === 'auto' ? 'adaptive' : value }))
       : selectedVideoOperation === 'generate' || selectedVideoOperation === 'reference_edit'
         ? VIDEO_ASPECT_RATIO_OPTIONS.filter(o => providerRoute.provider !== 'openrouter' || o.value !== 'adaptive').map(o => ({ label: o.label, value: o.value }))
         : [{ label: 'Source', value: 'adaptive' }];
-  const videoQualityOptions = selectedVideoModel === 'minimax-h3'
+  const videoQualityOptions = selectedVideoModel === OMNI_MODEL
+    ? (selectedVideoOperation === 'upscale' ? OMNI_UPSCALE_QUALITIES : OMNI_QUALITIES).map(value => ({ label: value, value }))
+    : selectedVideoModel === 'minimax-h3'
     ? h3State.capabilities.resolutions.map(value => ({ label: value, value: value.toLowerCase() === '2k' ? '2K' : value.toLowerCase() }))
-    : VIDEO_QUALITY_OPTIONS.filter(o => o.value === '480p' || o.value === '720p' || o.value === '1080p' && !(providerRoute.provider === 'openrouter' && selectedVideoModel === 'seedance-2.5')).map(o => ({ label: o.label, value: o.value }));
-  const videoDurationOptions = selectedVideoOperation === 'edit'
-    ? [{ label: 'Auto (source)', value: '-1' }]
-    : [
-        ...(selectedVideoModel === 'seedance-2.5' && providerRoute.provider !== 'openrouter' ? [{ label: 'Auto', value: '-1' }] : []),
-        ...VIDEO_DURATION_OPTIONS
-          .filter(o => (selectedVideoModel === 'seedance-2.5' || o.value <= 15)
-            && (selectedVideoModel !== 'minimax-h3' || o.value >= 5))
-          .map(o => ({ label: o.label, value: String(o.value) })),
-      ];
+    : isFalSeedance ? !isFalSeedance20 && falOptions.draft ? [{ label: '480p (draft)', value: '480p' }] : falSeedanceQualities
+    : SEEDANCE_QUALITIES.filter(value => providerRoute.provider !== 'openrouter' || value !== '4K' && (value !== '1080p' || selectedVideoModel !== 'seedance-2.5')).map(value => ({ label: value, value }));
+  const videoDurationOptions = selectedVideoModel === OMNI_MODEL
+    ? omniMode === 'edit' || omniMode === 'upscale'
+      ? [{ label: 'Auto (source)', value: '-1' }]
+      : getOmniDurationOptions(omniMode, !!getOmniFrames(config.referenceImages).end).map(value => ({ label: omniMode === 'extend' ? `+${value}s` : `${value}s`, value: String(value) }))
+    : selectedVideoOperation === 'edit' ? [{ label: 'Auto (source)', value: '-1' }]
+    : isFalSeedance20 ? falSeedance20Durations : isFalSeedance ? falSeedanceDurations
+    : isSeedanceModel(selectedVideoModel) ? SEEDANCE_DURATION_OPTIONS[selectedVideoModel].filter(o => providerRoute.provider !== 'openrouter' || o.value !== '-1') : [];
   const isVideoMode = config.mode === 'video';
 
   useEffect(() => {
-    const usesH3Max = config.mode === 'video'
-      && selectedVideoModel === 'minimax-h3';
-    if (!usesH3Max) return;
+    if (!isH3VideoConfig || config.videoProvider !== 'fal' || isDraftLoading) return;
     onChange(current => current.mode === 'video' && current.videoModel === 'minimax-h3'
       ? normalizeH3MaxDraft(current) : current);
-  }, [config.mode, config.h3MaxMode, config.h3MaxOptions, config.referenceImages, config.referenceAudios?.length, config.videoAspectRatio, config.videoQuality, config.videoDuration, selectedVideoModel, onChange]);
+  }, [config.mode, config.h3MaxMode, config.h3MaxOptions, config.referenceImages, config.referenceAudios?.length, config.videoAspectRatio, config.videoQuality, config.videoDuration, selectedVideoModel, isH3VideoConfig, config.videoProvider, isDraftLoading, onChange]);
 
   useEffect(() => {
-    // Seedance 2.5's image-to-video endpoint derives framing from its input
-    // images. Do not persist a fixed ratio the provider cannot honor. Video
-    // Continue keeps fixed ratios because they control last-frame adaptation.
-    if (config.mode === 'video' && providerRoute.provider !== 'openrouter' && isSeedance25FrameToVideo && config.videoAspectRatio !== 'adaptive') {
-      onChange({ ...config, videoAspectRatio: 'adaptive' });
-    }
-  }, [config, isSeedance25FrameToVideo, providerRoute.provider, onChange]);
+    // Adding an end frame lowers Omni's limit to 10 s; keep the draft valid.
+    if (!isOmniVideoConfig || isDraftLoading) return;
+    const duration = normalizeOmniDuration(omniMode, !!getOmniFrames(config.referenceImages).end, Number(config.videoDuration));
+    if (duration !== Number(config.videoDuration)) onChange(current => ({ ...current, videoDuration: duration as VideoDuration }));
+  }, [isDraftLoading, isOmniVideoConfig, omniMode, config.referenceImages, config.videoDuration, onChange]);
 
-  const requiresSourceVideo = isVideoMode && selectedVideoModel !== 'minimax-h3' && selectedVideoOperation !== 'generate';
-  const h3InputError = isH3VideoConfig ? getH3MaxInputError(config) : null;
-  const isSunburst = config.imageModel === SUNBURST_MODEL;
-  const routeInputError = providerRoute.error || (config.mode === 'video' && selectedVideoModel !== 'minimax-h3' && providerRoute.provider ? seedanceProviderError(providerRoute.provider, { videoModel: selectedVideoModel, mode: selectedVideoOperation === 'edit' ? 'video_edit' : selectedVideoOperation === 'extend' ? 'video_extend' : hasSeedanceFrameRoles ? 'image_to_video' : config.referenceImages.length || currentReferenceVideos.length || currentReferenceAudios.length ? 'reference_to_video' : 'text_to_video', duration: selectedVideoOperation === 'edit' ? -1 : config.videoDuration, quality: config.videoQuality, aspectRatio: config.videoAspectRatio, imageUrls: config.referenceImages.map(() => ''), videoUrls: currentReferenceVideos.map(() => ''), audioUrls: currentReferenceAudios.map(() => ''), referenceEditMode: selectedVideoOperation === 'reference_edit' }) : undefined);
-  // Like Generate: a route that cannot run would bill the Brainstorm text request and then fail every image.
-  const canBrainstormGenerate = config.mode === 'image' && !routeInputError && !isDraftLoading && Boolean(onBrainstormGenerate && !sunburstError && hasBrainstormInput);
-  const canGenerate = !routeInputError && !isDraftLoading && (isVideoMode
-    ? uploadingReferenceVideos === 0 && !hasStaleEnhancedPrompt && (isH3VideoConfig ? !h3InputError : config.prompt.trim().length > 0 && (!requiresSourceVideo || (config.referenceVideos?.length || 0) > 0))
-    : uploadingReferenceVideos === 0 && !isBrainstormActive && !sunburstError && !hasStaleEnhancedPrompt && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
+  useEffect(() => {
+    // Restored drafts, as well as picker changes, must reflect the settings the endpoint actually honors.
+    if (isDraftLoading || config.videoProvider !== providerRoute.provider) return;
+    const evoSourceAction = providerRoute.provider === 'evolink' && config.videoModel === 'seedance-2.5' && (config.videoOperation === 'edit' || config.videoOperation === 'extend');
+    const sourceRatio = config.mode === 'video' && (sourceFrameRatio || evoSourceAction || falMode === 'video_edit' || falMode === 'video_extend');
+    const videoAspectRatio = sourceRatio ? 'adaptive' : config.videoAspectRatio;
+    const videoDuration = falMode === 'video_edit' || (evoSourceAction && config.videoOperation === 'edit') ? -1 : config.videoDuration;
+    const videoQuality = isFalSeedance && !isFalSeedance20 && falOptions.draft ? '480p' : config.videoQuality;
+    if (videoAspectRatio !== config.videoAspectRatio || videoDuration !== config.videoDuration || videoQuality !== config.videoQuality)
+      onChange({ ...config, videoAspectRatio, videoDuration, videoQuality });
+  }, [config, isDraftLoading, providerRoute.provider, sourceFrameRatio, falMode, isFalSeedance, isFalSeedance20, falOptions.draft, onChange]);
+
+  // Only reconcile the composer; a gallery job always retains its original route.
+  useEffect(() => {
+    if (isDraftLoading || settings.loading || settings.error) return;
+    if (!enabled(selectedModel)) {
+      if (isVideoMode && videoModelOptions.length) updateVideoModel(videoModelOptions[0].value);
+      if (!isVideoMode && imageModelOptions.length) updateImageModel(imageModelOptions[0].value);
+    } else if (isVideoMode && providerRoute.provider && !providerRoute.error && config.videoProvider !== providerRoute.provider) {
+      // Binding a legacy or restored draft to its first route must not clear its mode, frames, or options.
+      if (!config.videoProvider && (config.videoModel === MAGI2_MODEL || config.videoModel === OMNI_MODEL || !videoDraftError({ ...config, videoProvider: providerRoute.provider })))
+        onChange(current => ({ ...current, videoProvider: providerRoute.provider }));
+      else updateVideoModel(selectedVideoModel);
+    }
+  }, [config, selectedModel, settings.preferences, settings.loading, settings.error, providerRoute.provider, providerRoute.error, isDraftLoading]);
+
+  const isSunburst = isOpenAIImageModel(config.imageModel);
+  const routeInputError = routeMessage || (isVideoMode && config.videoProvider !== providerRoute.provider ? 'Updating video route…' : null);
+  const videoInputError = isVideoMode ? videoDraftError({ ...config, videoProvider: providerRoute.provider }) : null;
+  const canBrainstormGenerate = config.mode === 'image' && modelAvailable && textAvailable && !isDraftLoading && Boolean(onBrainstormGenerate && !referenceError && !seedreamError && !sunburstError && !imageEditError && hasBrainstormInput);
+  const canGenerate = !routeInputError && !isDraftLoading && !uploadingReferenceVideos && !hasStaleEnhancedPrompt && (isVideoMode
+    ? !videoInputError && !readingMagi2References
+    : !isBrainstormActive && !referenceError && !seedreamError && !sunburstError && !imageEditError && (config.prompt.trim().length > 0 || (!isSunburst && config.referenceImages.length > 0)));
 
   if (isMinimized) {
     return (
@@ -2079,36 +2338,43 @@ export const Controls: React.FC<ControlsProps> = ({
     );
   }
 
-  const modelInputError = routeInputError || h3InputError || sunburstError || (
-    isH3VideoConfig ? null : isVideoMode
-      ? requiresSourceVideo && !(config.referenceVideos?.length)
-        ? 'Add a source video for this action.'
-        : !config.prompt.trim() ? 'Enter a prompt to generate a video.' : null
-      : !isBrainstormActive && !config.prompt.trim() && (isSunburst || !config.referenceImages.length)
-        ? isSunburst ? 'Enter a prompt to generate an image.' : 'Enter a prompt or add a reference image.'
-        : null
-  );
-  const modelInputHint = isH3VideoConfig ? ({
+  const modelInputError = routeInputError || referenceError || videoInputError || imageEditError || sunburstError || seedreamError || (!isVideoMode && !isBrainstormActive && !config.prompt.trim() && (isSunburst || !config.referenceImages.length) ? 'Enter a prompt to generate an image.' : null);
+  const modelInputHint = isLayerize
+    ? 'Layerize separates one image into a base and PNG layers. Leave the prompt empty for automatic separation, or target elements with normalized <bbox>left top right bottom</bbox> tags.'
+    : isSeedream && seedream.mode === 'edit' ? 'All attached images are sent in order. Identify sources in your instructions (for example, “replace the object in Figure 1 with the one in Figure 2”).'
+    : isMagi2 ? magi2Mode === 'reference_to_video'
+      ? 'Add up to 10 images, 5 MP4/MOV videos and 5 MP3/WAV clips. Any one type is enough. Each clip must be 2–30s; video and audio each have a 30s total.'
+      : magi2Mode === 'image_to_video' ? 'Add a first frame and, optionally, a last frame. Auto matches the first frame; other ratios center-crop it.'
+      : 'Describe the scene and motion in up to 15,000 characters. To attach media, choose Image to Video or Reference to Video.'
+    : isEvoH3 ? evoH3Mode === 'reference_to_video'
+      ? 'Refer to attachments as Image 1, Video 1 and Audio 1. Add an image or video; audio cannot be used alone. Up to 12 assets total.'
+      : evoH3Mode === 'image_to_video' ? 'The first image sets the first frame and canvas. Add a second image for the last frame.' : undefined
+    : isH3VideoConfig ? ({
     reference_to_video: 'Click an image to choose First, Middle or Last Frame. Other images, videos and audio stay as references.',
     insert_video: 'Click a video to choose the source. Set Start and Resume in the bar below.',
     image_to_video: 'Click an image to choose First or Last Frame.',
     relight: 'Relight uses the source video and lighting-sphere image. Text prompts are not used.',
     lip_sync: 'Lip Sync uses the target image and audio clip. Text prompts are not used.',
   } as Partial<Record<typeof h3State.mode, string>>)[h3State.mode]
-    : isVideoMode && selectedVideoModel === 'seedance-2.5' && selectedVideoOperation === 'generate' && config.referenceImages.length > 0
+    : falMode === 'video_extend' ? 'With one source video, Extend accepts up to 120s and uses its last 30.2s. The source sets the canvas.'
+    : falMode === 'video_edit' ? 'Edit modifies the source video. The provider sets the output duration and canvas automatically.'
+    : isVideoMode && supportsSeedanceFrames && selectedVideoOperation === 'generate' && config.referenceImages.length > 0
       ? hasSeedanceFrameRoles
         ? 'First / last frames use a start image and an optional end image. Use matching crops; different ratios crop the last frame to the first.'
         : 'References guide the content. For a start-to-end transition, choose First / last frames with one or two images.'
       : undefined;
-  const customSizeHint = !isVideoMode && isSunburst && getOpenAIImageOptions(config.openaiImageOptions).size === 'custom'
+  const customSizeHint = !isSeedream && !isVideoMode && imageOperation === 'edit' && !imageEditError && !config.referenceImages.some(ref => ref.editRegion)
+    ? 'Whole-image edit. Use Edit area to preserve everything outside a selection.'
+    : !isVideoMode && isSunburst && getOpenAIImageOptions(config.openaiImageOptions, config.imageModel).size === 'custom'
     ? sizeAdjustment?.size === getOpenAIImageSize(config) ? sizeAdjustment.text
       : config.referenceImages.some(ref => ref.isEditSource && ref.editRegion) ? 'Only the masked area changes.' : 'Sizes auto-adjust when you finish editing.'
     : undefined;
   const hasComposerMessages = true; // Provider selection remains visible even when there are no validation messages.
-  const imageCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, config.count, imageCostHistory);
+  const imageCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, isSeedream ? 1 : config.count, imageCostHistory);
   const imageCostLabel = imageCostPreview.label;
-  const brainstormImageCount = brainstormIdeaCount * config.count;
-  const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, brainstormImageCount, imageCostHistory);
+  const imagesPerIdea = isSeedream ? isLayerize ? seedream.maxImages : seedream.numImages : config.count;
+  const brainstormImageCount = brainstormIdeaCount * imagesPerIdea;
+  const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, isSeedream ? brainstormIdeaCount : brainstormImageCount, imageCostHistory);
   // While jobs run the button keeps its lime surface so another generation can be
   // queued, so busy-state labels must stay dark there and only turn light on the
   // disabled gray surface.
@@ -2120,7 +2386,7 @@ export const Controls: React.FC<ControlsProps> = ({
     || (config.referenceVideos?.length || 0) > 0
     || (config.referenceAudios?.length || 0) > 0;
   const personGroups = getPersonGroups(config.referenceImages, config.personGroups);
-  const brainstormInputImages = config.imageModel === SUNBURST_MODEL ? getSunburstReferences(config.referenceImages) : config.referenceImages;
+  const brainstormInputImages = isOpenAIImageModel(config.imageModel) ? getSunburstReferences(config.referenceImages) : config.referenceImages;
   const isKeyframeMode = isVideoMode && (
     isH3VideoConfig ? h3UsesImageFrames && config.referenceImages.length > 0
     : config.referenceImages.some(img => img.isFirstFrame || img.isLastFrame)
@@ -2134,7 +2400,7 @@ export const Controls: React.FC<ControlsProps> = ({
     ? config.referenceVideos[0].duration!
     : 0;
   const videoCost = isVideoMode
-    ? selectedVideoModel === 'minimax-h3' ? estimateH3MaxCost(config) : providerRoute.provider !== 'evolink' ? null : estimateVideoCost(
+    ? isOmniVideoConfig ? estimateOmniCost(config) : isH3VideoConfig ? estimateH3MaxCost(config) : (selectedVideoModel !== MAGI2_MODEL && !isSeedanceModel(selectedVideoModel)) || providerRoute.provider !== 'evolink' || isEvoH3 ? null : estimateVideoCost(
         selectedVideoModel,
         config.videoQuality,
         selectedVideoOperation === 'edit' ? -1 : config.videoDuration,
@@ -2146,15 +2412,17 @@ export const Controls: React.FC<ControlsProps> = ({
         undefined,
       )
     : null;
+  const videoUsd = isFalSeedance20 ? estimateFalSeedance20Usd(config) : videoCost?.usd;
+  const videoCostLabel = videoUsd != null ? `$${videoUsd.toFixed(2)}${isOmniVideoConfig && selectedVideoOperation !== 'upscale' ? ' + tokens' : ''}` : null;
   const videoActionLabel = isH3VideoConfig
     ? h3State.mode === 'lip_sync' ? 'Lip Sync' : h3State.mode === 'recast' ? 'Recast' : h3State.mode === 'relight' ? 'Relight' : h3State.mode === 'extend_video' ? 'Extend' : h3State.mode === 'insert_video' ? 'Insert' : 'Generate'
     : selectedVideoOperation === 'edit'
     ? 'Edit'
     : selectedVideoOperation === 'reference_edit'
-      ? 'Ref Edit'
+      ? isFalSeedance ? 'Generate from references' : 'Ref Edit'
       : selectedVideoOperation === 'extend'
         ? 'Extend'
-        : getVideoPromptIntent(config) === 'continue' ? 'Continue' : 'Generate';
+        : selectedVideoOperation === 'upscale' ? 'Upscale' : getVideoPromptIntent(config) === 'continue' ? 'Continue' : 'Generate';
 
   return (
     <div 
@@ -2174,9 +2442,9 @@ export const Controls: React.FC<ControlsProps> = ({
             const ratio = (value: string) => Number(value.split(':')[0]) / Number(value.split(':')[1]);
             return Math.abs(ratio(a) - canvas.width / canvas.height) - Math.abs(ratio(b) - canvas.width / canvas.height);
           })[0];
-          const next = { ...config, aspectRatio, referenceImages: config.referenceImages.map(ref => ({ ...ref,
-            isEditSource: ref.id === editAreaSourceId, editRegion: ref.id === editAreaSourceId ? region : undefined })),
-            openaiImageOptions: { ...getOpenAIImageOptions(config.openaiImageOptions), size: 'custom' as const, width: canvas.width, height: canvas.height } };
+          const next: GenerationConfig = { ...config, imageOperation: 'edit', aspectRatio, referenceImages: config.referenceImages.map(ref => ({ ...ref,
+            isEditSource: ref.id === editAreaSourceId, editScope: undefined, editRegion: ref.id === editAreaSourceId ? region : undefined })),
+            openaiImageOptions: { ...getOpenAIImageOptions(config.openaiImageOptions, config.imageModel), outputFormat: 'png', size: 'custom' as const, width: canvas.width, height: canvas.height } };
           if (config.enhancedForImageContextKey && !isEnhancedPromptStale(config)) {
             try {
               const previousEdit = getSunburstEditIntent(config.prompt, config.referenceImages, config);
@@ -2287,21 +2555,21 @@ export const Controls: React.FC<ControlsProps> = ({
                     )}
                 </div>
 
-                <input ref={refInputRef} type="file" className="hidden" accept="image/*" multiple onChange={handleRefImageUpload} />
+                <input ref={refInputRef} type="file" className="hidden" accept={isFalSeedance ? '.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.gif,.heic,.heif' : isEvoH3 ? 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif' : 'image/*'} multiple={!isLayerize} onChange={handleRefImageUpload} />
                 <button onClick={() => refInputRef.current?.click()} aria-label="Add reference images" disabled={maxReferenceImages === 0} title={maxReferenceImages === 0 ? 'This action does not accept image inputs' : `Add images (max ${maxReferenceImages})`} className="w-12 h-12 rounded-lg border border-dashed border-gray-700 bg-gray-800/30 hover:bg-gray-800 hover:border-gray-500 text-gray-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 flex flex-col items-center justify-center gap-0.5 transition-all shrink-0">
                     <ImagePlus className="w-4 h-4" />
                     <span className="text-[8px] font-bold uppercase">Ref</span>
                 </button>
 
                 {isVideoMode && maxReferenceVideos > 0 && (<>
-                  <input ref={videoInputRef} type="file" className="hidden" accept={isH3VideoConfig ? 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm' : 'video/*,.mp4,.mov'} multiple onChange={handleVideoFileUpload} />
+                  <input ref={videoInputRef} type="file" className="hidden" accept={isMagi2 || isEvoH3 || isFalSeedance ? 'video/mp4,video/quicktime,.mp4,.mov' : isH3VideoConfig ? 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm' : 'video/*,.mp4,.mov'} multiple onChange={handleVideoFileUpload} />
                   <button onClick={() => videoInputRef.current?.click()} aria-label="Add video input" className="w-12 h-12 rounded-lg border border-dashed border-purple-700 bg-purple-900/10 hover:bg-purple-900/30 hover:border-purple-500 text-purple-400 hover:text-purple-200 flex flex-col items-center justify-center gap-0.5 transition-all shrink-0" title={`Add video (max ${maxReferenceVideos}, ${isH3VideoConfig && h3State.mode === 'extend_video' ? 50 : MAX_VIDEO_UPLOAD_MB} MB each)`}>
                     <Film className="w-4 h-4" />
                     <span className="text-[8px] font-bold uppercase">Vid</span>
                   </button>
                 </>)}
                 {isVideoMode && maxReferenceAudios > 0 && (<>
-                  <input ref={audioInputRef} type="file" className="hidden" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.aif,.aiff" multiple onChange={handleAudioFileUpload} />
+                  <input ref={audioInputRef} type="file" className="hidden" accept={isMagi2 || isEvoH3 || isFalSeedance ? 'audio/mpeg,audio/wav,.mp3,.wav' : 'audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.aif,.aiff'} multiple onChange={handleAudioFileUpload} />
                   <button onClick={() => audioInputRef.current?.click()} aria-label="Add audio input" className="w-12 h-12 rounded-lg border border-dashed border-green-700 bg-green-900/10 hover:bg-green-900/30 hover:border-green-500 text-green-400 hover:text-green-200 flex flex-col items-center justify-center gap-0.5 transition-all shrink-0" title={`Add audio (max ${maxReferenceAudios})`}>
                     <Music className="w-4 h-4" />
                     <span className="text-[8px] font-bold uppercase">Aud</span>
@@ -2311,11 +2579,12 @@ export const Controls: React.FC<ControlsProps> = ({
                 {/* YouTube Channel Ref - hidden in video mode */}
                 {!isVideoMode && (
                 <YouTubeChannelRef
+                  analysisDisabledReason={isDraftLoading ? 'Wait for the saved draft to finish loading.' : !enabled('gemini-4-hydrogen') ? 'Enable Gemini 4 Hydrogen in workspace settings to analyze videos.' : null}
+                  brainstormNoText={config.brainstormNoText} onBrainstormNoTextChange={value => onChange(current => ({ ...current, brainstormNoText: value }))}
                   onAddReferences={(images) => {
                     // Downloads may finish after the user changes resolution or model.
                     onChange(current => {
-                      const limit = current.mode === 'video' && current.videoModel === 'minimax-h3' ? getH3MaxUIState(current).imageLimit
-                        : current.mode === 'video' && current.videoModel === 'seedance-2.0' ? 9 : current.imageModel === SUNBURST_MODEL ? 16 : 14;
+                      const limit = getReferenceImageLimit(current);
                       const refs = current.referenceImages || [];
                       return { ...current, referenceImages: [...refs, ...images.slice(0, Math.max(0, limit - refs.length))] };
                     });
@@ -2328,7 +2597,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 />
                 )}
 
-                {config.referenceImages.map((img, index) => (
+                {displayedImages.map((img, index) => (
                     <div
                         key={img.id}
                         draggable
@@ -2343,7 +2612,7 @@ export const Controls: React.FC<ControlsProps> = ({
                               : (getPersonId(img) ? 'border-current' : 'border-gray-700')
                         } ${draggedRefId === img.id ? 'opacity-50 scale-95' : ''} ${activeRefPopover?.kind === 'image' && activeRefPopover.id === img.id ? 'ring-2 ring-violet-500' : ''}`}
                         style={!isH3VideoConfig && getPersonId(img) ? { borderColor: personColor(getPersonId(img)!) } : undefined}
-                        title={isH3VideoConfig
+                        title={orderedMedia ? orderedImageLabel(index) : isH3VideoConfig
                           ? `${getH3MaxImageLabel(config, img.id)} — click for actions`
                           : `${img.isFirstFrame ? 'First frame' : img.isLastFrame ? 'Last frame' : 'Reference'} ${index + 1} — click for actions; drag to insert ${getPersonId(img) ? getPersonTag(getPersonId(img)!) : `@REF_IMAGE_${index + 1}`}`}
                     >
@@ -2363,6 +2632,7 @@ export const Controls: React.FC<ControlsProps> = ({
                         {isVideoMode && !isH3VideoConfig && (img.isFirstFrame || img.isLastFrame) && (
                           <span className={`pointer-events-none absolute bottom-0 left-0 rounded-tr px-1 text-[8px] font-bold text-black ${img.isFirstFrame ? 'bg-amber-500' : 'bg-cyan-500'}`}>{img.isFirstFrame ? 'FIRST' : 'LAST'}</span>
                         )}
+                        {orderedMedia && <span className="absolute bottom-0 left-0 rounded-tr bg-violet-500 px-1 text-[8px] font-bold text-white">{orderedImageLabel(index)}</span>}
                         {isH3VideoConfig && <span className="pointer-events-none absolute bottom-0 left-0 rounded-tr bg-violet-500 px-1 text-[8px] font-bold text-white">{getH3MaxImageLabel(config, img.id)}</span>}
                         {!isH3VideoConfig && getPersonId(img) && (
                           <div className="absolute top-0 left-0 max-w-full truncate rounded-br px-1 py-0.5 text-[7px] font-bold text-black pointer-events-none" style={{ backgroundColor: personColor(getPersonId(img)!) }}>
@@ -2401,11 +2671,11 @@ export const Controls: React.FC<ControlsProps> = ({
                         key={aud.id}
                         onClick={(e) => openRefPopover('audio', aud.id, e)}
                         className={`relative w-12 h-12 rounded-lg bg-green-900/20 overflow-hidden group shrink-0 shadow-lg border-2 border-green-500 flex items-center justify-center cursor-pointer ${activeRefPopover?.kind === 'audio' && activeRefPopover.id === aud.id ? 'ring-2 ring-violet-500' : ''}`}
-                        title={`${isH3VideoConfig && (h3State.mode === 'lip_sync' || h3State.mode === 'text_to_video' || h3State.mode === 'image_to_video') ? 'Target soundtrack' : aud.name || `Audio ${index + 1}`} — click for actions`}
+                        title={`${isH3VideoConfig && (h3State.targetSoundtrack) ? 'Target soundtrack' : aud.name || `Audio ${index + 1}`} — click for actions`}
                     >
                         <Music className="w-5 h-5 text-green-400" />
                         <div className="absolute top-0 left-0 bg-green-500 text-black px-1 py-0.5 text-[6px] font-bold uppercase rounded-br pointer-events-none">
-                          {isH3VideoConfig ? h3State.mode === 'lip_sync' || h3State.mode === 'text_to_video' || h3State.mode === 'image_to_video' ? 'TARGET' : `Audio ${index + 1}` : 'Aud'}
+                          {isH3VideoConfig ? h3State.targetSoundtrack ? 'TARGET' : `Audio ${index + 1}` : 'Aud'}
                         </div>
                     </div>
                 ))}
@@ -2420,11 +2690,21 @@ export const Controls: React.FC<ControlsProps> = ({
                 const anyPersonTag = config.referenceImages.some(r => getPersonId(r) != null);
                 const person = personGroups.find(group => group.id === getPersonId(img));
                 const items: RefActionItem[] = [];
-                if (!isVideoMode && !getPersonId(img) && !img.isVideoContext) {
+                if (isSeedream) {
+                  items.push({ id: 'seedream-edit', icon: Pencil, label: img.editRegion ? 'Edit images without a mask' : 'Edit attached images', tone: 'lime',
+                    active: seedream.mode === 'edit' && !img.editRegion, onClick: () => { updateSeedream({ mode: 'edit' }); closeRefPopover(); } });
+                } else if (!isVideoMode && !getPersonId(img) && !img.isVideoContext) {
+                  if (supportsWholeImageEdit(config.imageModel)) items.push({ id: 'editImage', icon: Pencil, label: 'Edit whole image', tone: 'lime', active: img.editScope === 'image',
+                    onClick: () => { onChange(current => toggleWholeImageEditSource(current, img.id)); closeRefPopover(); setGenerationError(null); } });
                   items.push({ id: 'editArea', icon: Scan, label: img.editRegion ? 'Change edit area' : 'Edit area', tone: 'lime', active: !!img.editRegion,
                     onClick: () => { setEditAreaSourceId(img.id); closeRefPopover(); } });
                 }
-                if (isVideoMode && !isH3VideoConfig && selectedVideoOperation === 'generate') {
+                if (orderedFrames && displayedImages.length === 2) {
+                  items.push({ id: 'swapFrames', icon: RefreshCw, label: 'Swap first and last frames', tone: 'cyan',
+                    onClick: () => { const reversed = [displayedImages[1], displayedImages[0]];
+                      onChange({ ...config, referenceImages: isMagi2 ? reversed.map(image => ({ ...image, isFirstFrame: false, isLastFrame: false })) : reversed }); closeRefPopover(); } });
+                }
+                if (isVideoMode && !isH3VideoConfig && !orderedMedia && selectedVideoOperation === 'generate') {
                   items.push({
                     id: 'firstFrame',
                     icon: Rewind,
@@ -2476,7 +2756,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 const vid = (config.referenceVideos || []).find(v => v.id === activeRefPopover.id);
                 if (!vid) return null;
                 const items: RefActionItem[] = [
-                  ...(!isH3VideoConfig ? [{
+                  ...(!isH3VideoConfig && !orderedMedia && !isOmniVideoConfig && !isFalSeedance ? [{
                     id: 'continue',
                     icon: SkipForward,
                     label: 'Continue',
@@ -2706,7 +2986,8 @@ export const Controls: React.FC<ControlsProps> = ({
         </div>
 
         {hasComposerMessages && <div role="region" aria-label="Generation messages" data-testid="generation-messages" className="space-y-2 px-1">
-          <ProviderRouteControl model={config.mode === 'video' ? selectedVideoModel : config.imageModel} compact showError={false} />
+          {modelAvailable && providerRoute.provider && <span className="text-xs text-gray-400">Provider · {PROVIDER_LABELS[providerRoute.provider]}</span>}
+          {!settings.loading && !settings.error && !textAvailable && <span role="status" className="text-xs text-amber-300">Enable a text model in workspace settings to use Enhance and Brainstorm.</span>}
           {modelInputError && <p role={sunburstError ? 'alert' : 'status'} className="px-1 text-xs leading-5 text-amber-300">{modelInputError}</p>}
           {generationError && generationError !== modelInputError && <p role="alert" className="px-1 text-xs leading-5 text-red-400">{generationError}</p>}
           {attachmentError && <div role="alert" className="flex items-start justify-between gap-3 px-1 text-xs leading-5 text-red-400"><span className="whitespace-pre-line">{attachmentError}</span><button type="button" aria-label="Dismiss attachment message" onClick={() => setAttachmentError(null)} className="shrink-0 rounded p-1 text-gray-400 hover:text-white"><X className="h-3.5 w-3.5" /></button></div>}
@@ -2859,8 +3140,8 @@ export const Controls: React.FC<ControlsProps> = ({
                                              <span className="flex-1 min-w-0">
                                                  <span className="text-sm font-medium text-gray-200 group-hover:text-white block truncate">{t.name}</span>
                                                  <span className="flex items-center gap-2 mt-0.5">
-                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoQuality || '720p' : t.config.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
-                                                   {(t.config.mode === 'video' || t.config.imageModel !== SUNBURST_MODEL) && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoAspectRatio || t.config.aspectRatio || '—' : t.config.aspectRatio}</span>}
+                                                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoQuality || '720p' : isOpenAIImageModel(t.config.imageModel) ? getOpenAIImageSize(t.config) : t.config.resolution}</span>
+                                                   {(t.config.mode === 'video' || !isOpenAIImageModel(t.config.imageModel)) && <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">{t.config.mode === 'video' ? t.config.videoAspectRatio || t.config.aspectRatio || '—' : t.config.aspectRatio}</span>}
                                                  </span>
                                              </span>
                                              </button>
@@ -3017,11 +3298,13 @@ export const Controls: React.FC<ControlsProps> = ({
                               </details>
                             </div>;
                           })()}
+                          <BrainstormTextToggle noText={config.brainstormNoText} onChange={value => onChange(current => ({ ...current, brainstormNoText: value }))} />
+
                           <ImageReferenceSummary references={brainstormInputImages} />
-                          <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, config.count, brainstormImageCount)}</p>
+                          <p className="text-xs text-gray-400">{brainstormSummary(brainstormIdeaCount, imagesPerIdea, brainstormImageCount)}</p>
                           <button onClick={handleBrainstorm} aria-label="Generate brainstorm images"
                             disabled={!canBrainstormGenerate}
-                            title={routeInputError || brainstormCostPreview.description}
+                            title={routeInputError || (!textAvailable ? 'Enable a text model in workspace settings to brainstorm.' : brainstormCostPreview.description)}
                             className="w-full rounded-xl bg-gradient-to-r from-lime-400 to-emerald-400 px-3 py-3 text-sm font-bold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:from-gray-800 disabled:to-gray-800 disabled:text-gray-500">
                             <span className="flex items-center justify-center gap-2"><Play className="h-4 w-4 shrink-0" />Brainstorm &amp; generate {brainstormImageCount}</span>
                             <span className="mt-1 block text-xs font-medium">{brainstormCostPreview.label}</span>
@@ -3059,7 +3342,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     className={`px-2.5 h-full flex items-center gap-1 text-xs font-semibold transition-colors ${
                       isVideoMode ? 'rounded-lg bg-violet-600 text-white shadow-sm' : 'rounded-lg text-gray-400 hover:bg-white/[0.05] hover:text-white'
                     }`}
-                    title={`Video Generation (${selectedVideoModel === 'seedance-2.0' ? 'Seedance 2.0' : selectedVideoModel === 'seedance-2.5' ? providerRoute.provider === 'evolink' ? 'Seedance 2.5 Relaxed' : 'Seedance 2.5' : 'MiniMax H3 Max'})`}
+                    title={`Video Generation (${formatVideoModel(selectedVideoModel)})`}
                     aria-label="Video generation"
                     aria-pressed={isVideoMode}
                   >
@@ -3067,34 +3350,54 @@ export const Controls: React.FC<ControlsProps> = ({
                   </button>
                 </div>
 
-                {isVideoMode ? (
+                {!modelOptions.length ? <span role="status" className="text-xs text-gray-400">{routeMessage}</span> : isVideoMode ? (
                   <>
                     <Dropdown label="Model" value={selectedVideoModel} options={videoModelOptions} onSelect={(val: VideoModelId) => updateVideoModel(val)} icon={Video} compact />
                     {isH3VideoConfig && <Dropdown label="H3 Max action" value={h3State.available ? h3State.mode : 'Choose action'} options={H3_MAX_MODE_OPTIONS} onSelect={updateH3Mode} icon={Film} compact />}
-                    {(selectedVideoModel === 'seedance-2.0' || selectedVideoModel === 'seedance-2.5') && (
+                    {(selectedVideoModel === 'seedance-2.0' || supportsSeedanceFrames || selectedVideoModel === OMNI_MODEL) && (
                       <Dropdown label="Action" value={selectedVideoIntent} options={videoOperationOptions} onSelect={(val: VideoPromptIntent) => updateVideoOperation(val)} icon={Film} compact />
                     )}
-                    {selectedVideoModel === 'seedance-2.5' && selectedVideoOperation === 'generate' && config.referenceImages.length > 0 && (
+                    {supportsSeedanceFrames && selectedVideoOperation === 'generate' && config.referenceImages.length > 0 && (
                       <Dropdown label="Video input" value={hasSeedanceFrameRoles ? 'frames' : 'references'} options={[
                         { label: 'References', value: 'references' },
                         { label: 'First / last frames', value: 'frames', disabled: !canAssignSeedanceFrames },
                       ]} onSelect={updateSeedanceInput} icon={ImageIcon} compact />
                     )}
+                    {isMagi2 ? <Magi2Settings config={config} onChange={onChange} /> : isEvoH3 ? <EvoH3MaxSettings config={config} onChange={onChange} /> : <>
                     {(!isH3VideoConfig || videoAspectRatioOptions.length > 0) && <Dropdown label="Ratio" value={usesSourceFrameAspectRatio ? 'adaptive' : config.videoAspectRatio} options={videoAspectRatioOptions} onSelect={(val: VideoAspectRatio) => updateConfig('videoAspectRatio', val)} icon={Ratio} compact />}
                     <Dropdown label="Quality" value={config.videoQuality} options={videoQualityOptions} onSelect={(val: VideoQuality) => updateConfig('videoQuality', val)} icon={Scan} compact />
                     {isH3VideoConfig ? <>
                       <H3MaxDuration config={config} onChange={onChange} />
                       <H3MaxSettings config={config} onChange={onChange} />
                     </> : <Dropdown label="Duration" value={String(config.videoDuration)} options={videoDurationOptions} onSelect={(val: string) => updateConfig('videoDuration', Number(val) as VideoDuration)} icon={Clock} compact />}
+                    {falMode && <>
+                      <Dropdown label="Audio" value={config.audioEnabled === false ? 'off' : 'on'} options={[{ label: 'Generate audio', value: 'on' }, { label: 'Silent video', value: 'off' }]} onSelect={value => updateConfig('audioEnabled', value === 'on')} icon={Volume2} compact />
+                      {!isFalSeedance20 && <Dropdown label="Draft preview" value={falOptions.draft ? 'draft' : 'full'} options={[{ label: 'Full render', value: 'full' }, { label: 'Draft (480p)', value: 'draft' }]} onSelect={value => updateFalOptions({ draft: value === 'draft' })} compact />}
+                      <Dropdown label="Bitrate" value={falOptions.bitrateMode || 'standard'} options={[{ label: 'Standard bitrate', value: 'standard' }, { label: 'High bitrate', value: 'high' }]} onSelect={bitrateMode => updateFalOptions({ bitrateMode })} compact />
+                      <Dropdown label="Codec" value={falOptions.codec || 'auto'} options={[{ label: 'Auto codec', value: 'auto' }, { label: 'H.264', value: 'H264' }, { label: 'H.265', value: 'H265' }]} onSelect={codec => updateFalOptions({ codec })} compact />
+                      {!isFalSeedance20 && <Dropdown label="Output format" value={falOptions.outputFormat || 'mp4'} options={[{ label: 'MP4', value: 'mp4' }, { label: 'MOV', value: 'mov' }]} onSelect={outputFormat => updateFalOptions({ outputFormat })} compact />}
+                      <Dropdown label="Return last frame" value={falOptions.returnLastFrame ? 'on' : 'off'} options={[{ label: 'Video only', value: 'off' }, { label: 'Video + last frame', value: 'on' }]} onSelect={value => updateFalOptions({ returnLastFrame: value === 'on' })} compact />
+                      {!isFalSeedance20 && falMode === 'reference_to_video' && <Dropdown label="Reference task" value={falOptions.task || 'reference'} options={[{ label: 'Guide with references', value: 'reference' }, { label: 'Auto task', value: 'auto' }]} onSelect={task => updateFalOptions({ task })} compact />}
+                      {!isFalSeedance20 && falMode !== 'text_only' && falMode !== 'image_to_video' && <label className="flex shrink-0 items-center gap-1 rounded-xl bg-[#171e28] px-2 text-xs text-gray-300">Seed
+                        <input aria-label="Seed" type="number" step="1" placeholder="Random" value={falOptions.seed ?? ''} onChange={e => updateFalOptions({ seed: e.target.value === '' ? undefined : Number(e.target.value) })} className="w-[9ch] rounded bg-black/25 px-1 py-1 text-white" />
+                      </label>}
+                    </>}
+                    </>}
                   </>
                 ) : (
                   <>
-                    <Dropdown label="Model" value={config.imageModel} options={imageModelOptions} onSelect={(val) => updateConfig('imageModel', val)} icon={ImageIcon} compact />
+                    <Dropdown label="Model" value={config.imageModel} options={imageModelOptions} onSelect={updateImageModel} icon={ImageIcon} compact />
+                    {isSeedream ? <>
+                      <Dropdown label="Action" value={seedream.mode} options={seedreamActions} onSelect={(mode: SeedreamOptions['mode']) => updateSeedream({ mode })} icon={Sparkles} compact />
+                      <SeedreamSettings options={seedream} onChange={updateSeedream} />
+                    </> : <>
+                    <Dropdown label="Action" value={imageOperation} options={IMAGE_OPERATION_OPTIONS} onSelect={updateImageOperation} icon={imageOperation === 'edit' ? Pencil : Sparkles} compact />
                     {isSunburst ? <OpenAIImageSettings config={config} onChange={onChange} onSizeAdjustment={setSizeAdjustment} /> : <>
                       <Dropdown label="Aspect Ratio" value={config.aspectRatio} options={aspectRatioOptions} onSelect={(val) => updateConfig('aspectRatio', val)} icon={Ratio} compact />
                       <Dropdown label="Resolution" value={config.resolution} options={resolutionOptions} onSelect={(val) => updateConfig('resolution', val)} icon={Scan} compact />
                     </>}
                     <ImageCountControl count={config.count} onChange={value => updateConfig('count', value)} />
+                    </>}
                   </>
                 )}
             </div>
@@ -3115,7 +3418,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 )}
                 <button
                     onClick={handleEnhance}
-                    disabled={isDraftLoading || isEnhancing || !hasEnhanceInput || hasStaleEnhancedPrompt}
+                    disabled={!modelAvailable || !textAvailable || isDraftLoading || isEnhancing || !hasEnhanceInput || hasStaleEnhancedPrompt || !!readingMagi2References}
                     aria-label="Enhance prompt"
                     className={promptEnhanceClass(isEnhancing, hasStaleEnhancedPrompt)}
                     title={isEnhancing
@@ -3170,9 +3473,7 @@ export const Controls: React.FC<ControlsProps> = ({
                             {/* Cost of the NEXT queued generation if the user clicks again */}
                             {canGenerate && (
                               <span className="whitespace-nowrap text-[10px] font-medium text-black/70">
-                                +{isVideoMode && videoCost
-                                  ? `$${videoCost.usd.toFixed(2)}`
-                                  : isVideoMode ? 'Provider usage-based' : imageCostLabel}
+                                {isVideoMode ? videoCostLabel ? `+${videoCostLabel}` : 'Provider usage-based' : `+${imageCostLabel}`}
                               </span>
                             )}
                           </>
@@ -3186,7 +3487,7 @@ export const Controls: React.FC<ControlsProps> = ({
                               </span>
                               {!hasStaleEnhancedPrompt && (
                                 <span className="whitespace-nowrap text-[10px] font-medium opacity-80">
-                                  {isVideoMode ? videoCost ? `~$${videoCost.usd.toFixed(2)}` : 'Provider usage-based' : imageCostLabel}
+                                  {isVideoMode ? videoCostLabel ? `~${videoCostLabel}` : 'Provider usage-based' : imageCostLabel}
                                 </span>
                               )}
                           </>

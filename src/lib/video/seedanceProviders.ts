@@ -1,3 +1,4 @@
+import { getMultilineQuotedPromptPattern } from '../references/referenceTokens.ts';
 import type { AIProvider } from '../providers.js';
 
 export type SeedanceRequest = { videoModel: string; mode: string; prompt?: string; duration: number; quality: string; aspectRatio: string;
@@ -10,12 +11,14 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
   if (!['text_to_video','image_to_video','reference_to_video','video_edit','video_extend'].includes(routeMode(body.mode))) return 'Unsupported video operation.';
   if (body.mode.startsWith('video_') && !newer) return 'Video editing and extension require Seedance 2.5.';
   const counts = [body.imageUrls?.length || 0, body.videoUrls?.length || 0, body.audioUrls?.length || 0];
+  if (routeMode(body.mode) === 'text_to_video' && counts.some(Boolean)) return 'Text-to-video does not accept references.';
   if (counts.some((n, i) => n > (body.mode === 'image_to_video' ? [2,0,0] : newer ? [30,10,10] : [9,3,3])[i]) || counts.reduce((a,b) => a+b,0) > (newer ? 50 : 12)) return 'Too many references for this video mode.';
   if (body.mode === 'image_to_video' && !counts[0]) return 'Choose a first frame.';
-  if (body.mode === 'reference_to_video' && !counts[0] && !counts[1]) return 'References mode needs an image or video.';
+  if (body.mode === 'reference_to_video' && !counts[0] && !counts[1] && (!newer || !counts[2])) return 'References mode needs an image or video.';
   if (body.mode.startsWith('video_') && !counts[1]) return 'This operation needs a source video.';
-  if (!Number.isInteger(body.duration) || !(body.duration === -1 && newer) && (body.duration < 4 || body.duration > (newer ? 30 : 15))) return 'Choose a supported video duration.';
-  if (!['480p','720p','1080p'].includes(body.quality)) return 'Unsupported video resolution.';
+  const auto = body.duration === -1 && (newer || provider === 'fal');
+  if (!Number.isInteger(body.duration) || (!auto && (body.duration < 4 || body.duration > (newer ? 30 : 15)))) return 'Choose a supported video duration.';
+  if (!['480p','720p','1080p','4K'].includes(body.quality) || provider === 'openrouter' && body.quality === '4K') return 'Unsupported video resolution.';
   if (!['adaptive','16:9','9:16','1:1','4:3','3:4','21:9'].includes(body.aspectRatio)) return 'Unsupported video aspect ratio.';
   if (provider === 'openrouter') {
     if (body.mode.startsWith('video_') || counts[1] || counts[2] || body.referenceEditMode) return 'OpenRouter supports text, first/last frames and image references here. Choose fal.ai or EvoLink in AI settings for video/audio references, Edit or Extend.';
@@ -25,32 +28,16 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
     if (counts[0] > 9) return 'Use up to 9 image references with this OpenRouter route.';
   }
 }
-// This module is loaded by Node as .ts (tests) and compiled for api/, and no one import specifier resolves in both.
-// So it has no runtime imports: the pattern below is a copy of getQuotedPromptPattern in ../references/referenceTokens.ts.
-const quotedPromptPattern = (): RegExp => /"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{M}\p{N}_])'(?:[^'\n]|(?<=[\p{L}\p{M}\p{N}_])'(?=[\p{L}\p{M}\p{N}_]))*'(?![\p{L}\p{M}\p{N}_])/gu;
 const referenceAliases = (text: string) => text.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
 // Quoted visible copy is literal, even when it looks like a reference.
-const referencePrompt = (prompt = '') => {
+export const referencePrompt = (prompt = '') => {
   let end = 0, result = '';
-  for (const match of prompt.matchAll(quotedPromptPattern())) {
+  for (const match of prompt.matchAll(getMultilineQuotedPromptPattern())) {
     result += referenceAliases(prompt.slice(end, match.index)) + match[0];
     end = match.index! + match[0].length;
   }
   return result + referenceAliases(prompt.slice(end));
 };
-export function falSeedanceInput(body: SeedanceRequest) {
-  const prompt = referencePrompt(body.prompt);
-  const input: Record<string, unknown> = { prompt, resolution: body.quality, duration: body.duration === -1 ? 'auto' : String(body.duration),
-    aspect_ratio: body.aspectRatio === 'adaptive' || body.mode === 'image_to_video' && body.videoModel === 'seedance-2.5' ? 'auto' : body.aspectRatio, generate_audio: body.generateAudio !== false };
-  if (body.mode === 'image_to_video') { input.image_url = body.imageUrls?.[0]; if (body.imageUrls?.[1]) input.end_image_url = body.imageUrls[1]; }
-  if (['reference_to_video','video_edit','video_extend'].includes(body.mode)) {
-    input.image_urls = body.imageUrls || []; input.video_urls = body.videoUrls || []; input.audio_urls = body.audioUrls || [];
-    if (body.mode === 'video_edit') { input.task = 'editing'; input.aspect_ratio = 'auto'; input.duration = 'auto'; }
-    if (body.mode === 'video_extend') { input.task = 'extension'; input.aspect_ratio = 'auto'; }
-  }
-  const mode = body.mode.startsWith('video_') ? 'reference-to-video' : routeMode(body.mode).replaceAll('_','-');
-  return { endpoint: `bytedance/${body.videoModel}/${mode}`, input };
-}
 export function openRouterSeedanceInput(body: SeedanceRequest) {
   return { model: `bytedance/${body.videoModel}`, prompt: referencePrompt(body.prompt), duration: body.duration, resolution: body.quality,
     ...(body.aspectRatio !== 'adaptive' ? { aspect_ratio: body.aspectRatio } : {}), generate_audio: body.generateAudio !== false,

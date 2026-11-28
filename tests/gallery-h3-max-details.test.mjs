@@ -53,3 +53,9 @@ test('a plain H3 Max generate video and a Seedance Edit video are unchanged', ()
   assert.deepEqual(details(h3('t', 'text_to_video')), { action: 'Generate', duration: '5s' });
   assert.deepEqual(details(video('s', { videoModel: 'seedance-2.5', videoOperation: 'edit', videoDuration: -1 })), { action: 'Edit', duration: 'Auto' });
 });
+
+test('gallery details distinguish fal and EvoLink actions on the same logical model', () => {
+  assert.equal(details(h3('evo', 'image_to_video', { generationProvider: 'evolink' })).action, 'Image to Video');
+  assert.equal(details(video('us', { videoModel: 'seedance-2.5', generationProvider: 'fal', videoOperation: 'generate', falEndpoint: 'bytedance/seedance-2.5/us/image-to-video' })).action, 'First / last frames');
+  assert.equal(details(video('magi', { videoModel: 'magi-2', generationProvider: 'evolink', magi2Mode: 'reference_to_video' })).action, 'Reference to Video');
+});

@@ -18,6 +18,8 @@ const load = async entry => {
     entryPoints: [entry], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
+    b.onResolve({ filter: /providerConfiguration\.js$/ }, () => ({ path: 'admission', namespace: 'video-provider' }));
+    b.onLoad({ filter: /.*/, namespace: 'video-provider' }, () => ({ contents: 'export const admitProvider=async (_req,_res,_model,provider)=>provider;export const providerKey=()=>"testing";' }));
       b.onResolve({ filter: /(^|\/)auth\.js$/ }, () => ({ path: 'auth', namespace: 'stub' }));
       b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));
@@ -29,15 +31,15 @@ const load = async entry => {
 const post = await load('api/evolink-generate.ts');
 const poll = await load('api/evolink-status.ts');
 
-const response = () => { const res = { statusCode: 0, status(c) { res.statusCode = c; return res; }, json(b) { res.body = b; return res; }, end() { return res; }, setHeader() {} }; return res; };
+const response = () => { const res = { headers:{}, statusCode: 0, status(c) { res.statusCode = c; return res; }, json(b) { res.body = b; return res; }, end() { return res; }, setHeader(name,value) { res.headers[name] = value; } }; return res; };
 const reply = body => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 // ghost: the first insert saves the row and then throws (a timeout), so the retry meets a duplicate.
 // failures: how many registry inserts fail before one works; throws: fail by throwing instead of returning an error.
-const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
+const run = async ({ failures, throws = false, ghost = false, rows = [], statusReply = reply({status:'processing',progress:10}) }) => {
   globalThis.__table = { rows: [...rows], attempts: 0, failures, throws, ghost };
   const saved = { fetch: globalThis.fetch, key: process.env.EVOLINK_API_KEY };
   process.env.EVOLINK_API_KEY = 'k';
-  globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? { id: 'evo-r1' } : { status: 'processing', progress: 10 });
+  globalThis.fetch = async (_url, init) => init?.method === 'POST' ? reply({id:'evo-r1'}) : statusReply;
   try {
     const submit = response();
     await post({ method: 'POST', headers: {}, body: { mode: 'text_only', prompt: 'hi', duration: 5, quality: '720p', videoModel: 'seedance-2.5' } }, submit);
@@ -92,4 +94,18 @@ test('a row this user already had before the submit counts as registered and pol
   assert.equal(submit.statusCode, 200);
   assert.equal(attempts, 2);
   assert.equal(status.statusCode, 200);
+});
+
+test('EvoLink recovery deduplicates output copies and distinguishes render time from footage and reserved credits', async () => {
+  const url = 'https://media.example.com/result.mp4';
+  const {status} = await run({ failures:0, statusReply:reply({status:'success',results:[url],outputs:[{video_url:url}],duration:90,video_duration:8,usage:{credits_reserved:11,cost:{usd:0.32}}}) });
+  assert.equal(status.statusCode,200); assert.deepEqual(status.body.output,[url]);
+  assert.equal(status.body.actualCostUsd,0.32); assert.equal(status.body.usage.credits_reserved,11); assert.equal(status.body.duration,8);
+  const missing = await run({failures:0,statusReply:reply({status:'completed',results:[url],duration:90})});
+  assert.equal(missing.status.body.duration,undefined); assert.equal(missing.status.body.actualCostUsd,undefined);
+});
+
+test('EvoLink 429 keeps the accepted task and propagates the polling delay', async () => {
+  const {status} = await run({ failures:0, statusReply:new Response('retry later', {status:429,headers:{'retry-after':'12'}}) });
+  assert.equal(status.statusCode,429); assert.equal(status.body.retryable,true); assert.equal(status.headers['Retry-After'],'12');
 });

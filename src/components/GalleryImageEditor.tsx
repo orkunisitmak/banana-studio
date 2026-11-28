@@ -1,4 +1,6 @@
-import { ProviderRouteControl, useProviderRoute } from './ProviderRoutingSettings';
+import { useProviderWorkspace } from './ProviderRoutingSettings';
+import { PROVIDER_LABELS } from '../lib/providers';
+import { SEEDREAM_MODEL } from '../lib/images/seedream55';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getClipboardImages } from '../lib/references/clipboardImages';
 import { AlertTriangle, ArrowRight, Check, Expand, Image as ImageIcon, ImagePlus, Loader2, Pencil, RotateCcw, Sparkles, SquareDashedMousePointer, Wand2, X } from 'lucide-react';
@@ -6,12 +8,12 @@ import { displayReferencePrompt, storeReferencePrompt } from '../lib/references/
 import { getStableImageTag } from '../lib/references/referenceTokens';
 import { validateImageGenerationReferences } from '../lib/images/imagePrompting';
 import { getImageCostPreview } from '../lib/images/imageCostPreview';
-import { getOpenAIImageOptions, SUNBURST_MODEL, SUNBURST_QUALITY_OPTIONS, validateOpenAIImageSize } from '../lib/images/openaiImage';
+import { getOpenAIImageOptions, isOpenAIImageModel, SUNBURST_QUALITY_OPTIONS, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import { isValidEditRegion, type ImageEditRegion } from '../lib/images/imageEditRegion';
 import { enhancePrompt } from '../services/geminiService';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
-import { getPromptEnhancementTarget, IMAGE_MODEL_OPTIONS, isEnhancedPromptStale, type AspectRatio, type GeneratedMedia, type GenerationConfig, type ImageModelId, type OpenAIImageOptions, type ReferenceImage, type TextModelId } from '../types';
+import { getPromptEnhancementTarget, DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, isEnhancedPromptStale, type AspectRatio, type GeneratedMedia, type GenerationConfig, type ImageModelId, type OpenAIImageOptions, type ReferenceImage, type TextModelId } from '../types';
 import { getGalleryEditJobs, getEditJobProgress } from '../lib/gallery/galleryEditJobs';
 import { GalleryEditResults } from './GalleryEditResults';
 import { ImageEditCanvas } from './ImageEditCanvas';
@@ -54,10 +56,17 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const [isUploading, setIsUploading] = useState(false);
   const [mention, setMention] = useState<{ start: number; end: number; query: string }>();
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [imageModel, setImageModel] = useState<ImageModelId>(SUNBURST_MODEL);
-  const providerRoute = useProviderRoute(imageModel);
+  const [selectedModel, setImageModel] = useState<ImageModelId>(DEFAULT_IMAGE_MODEL);
+  const { settings, route: providerRoute } = useProviderWorkspace(selectedModel);
+  const editModels = IMAGE_MODEL_OPTIONS.filter(option => !settings.loading && !settings.error && option.value !== SEEDREAM_MODEL && settings.preferences[option.value] !== 'off');
+  const imageModel = editModels.find(option => option.value === selectedModel)?.value;
+  useEffect(() => {
+    if (!settings.loading && !settings.error && !imageModel && editModels.length) setImageModel(editModels[0].value);
+  }, [settings.loading, settings.error, imageModel, editModels]);
+  const textAvailable = !settings.error && !settings.loading && TEXT_MODEL_OPTIONS.some(option => settings.preferences[option.value] !== 'off');
+  const modelError = settings.error || (settings.loading ? 'Loading workspace model settings…' : !imageModel ? 'Enable a masked edit model in workspace settings.' : providerRoute.error || (!providerRoute.provider ? 'Checking provider route…' : undefined));
   const [count, setCount] = useState(1);
-  const [quality, setQuality] = useState<OpenAIImageOptions['quality']>(() => getOpenAIImageOptions(image.openaiImageOptions).quality);
+  const [quality, setQuality] = useState<OpenAIImageOptions['quality']>(() => getOpenAIImageOptions(image.openaiImageOptions, imageModel).quality);
   const [previewId, setPreviewId] = useState<string>();
   const [lastQueuedIds, setLastQueuedIds] = useState<string[]>([]);
   const [enhancement, setEnhancement] = useState<Partial<GenerationConfig>>({});
@@ -85,17 +94,17 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const expansion = layout && expanded?.key === expandKey ? expanded : undefined;
   const isExpanding = mode === 'expand';
   // The expanded canvas is the edit source: the original plus placeholder fill.
-  const editImage: GeneratedMedia = expansion ? { ...image, url: expansion.url, openaiImageOptions: { ...getOpenAIImageOptions(image.openaiImageOptions), outputFormat: 'png' } } : image;
+  const editImage: GeneratedMedia = expansion ? { ...image, url: expansion.url, openaiImageOptions: { ...getOpenAIImageOptions(image.openaiImageOptions, imageModel), outputFormat: 'png' } } : image;
   const editCanvas = expansion ? { width: expansion.layout.width, height: expansion.layout.height } : isExpanding ? undefined : canvas;
   const editRegion = expansion ? expansion.layout.region : isExpanding ? undefined : region;
   const editPrompt = expansion && !prompt.trim() ? DEFAULT_EXPAND_PROMPT : prompt;
   const hasArea = isValidEditRegion(editRegion);
-  const baseConfig = hasArea && editCanvas ? buildGalleryImageEditConfig(editImage, editPrompt, imageModel, count, editCanvas, editRegion!, references) : undefined;
+  const baseConfig = hasArea && editCanvas && imageModel ? buildGalleryImageEditConfig(editImage, editPrompt, imageModel, count, editCanvas, editRegion!, references) : undefined;
   const config = baseConfig ? { ...baseConfig, openaiImageOptions: { ...baseConfig.openaiImageOptions!, quality }, ...enhancement } : undefined;
   const editReferences = baseConfig?.referenceImages || [source, ...references];
   const displayPrompt = displayReferencePrompt(prompt, editReferences);
-  const referenceLimit = getGalleryEditReferenceLimit(imageModel);
-  let referenceError: string | null = references.length > referenceLimit ? `This model supports ${referenceLimit} added references. Remove a reference or choose GPT Image 2.5.` : null;
+  const referenceLimit = imageModel ? getGalleryEditReferenceLimit(imageModel) : 0;
+  let referenceError: string | null = references.length > referenceLimit ? `This model supports ${referenceLimit} added references. Remove a reference or choose a GPT Image model.` : null;
   if (config && !referenceError) {
     try { validateImageGenerationReferences(config); }
     catch (failure) { referenceError = failure instanceof Error ? failure.message : 'Check the references in your prompt.'; }
@@ -111,9 +120,9 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   const isStale = config ? isEnhancedPromptStale(config) : false;
   const busy = isEnhancing || isGenerating || isUploading;
   const nanoCanvasSupported = editCanvas ? canUseNanoEditCanvas(editCanvas) : true;
-  const canvasError = editCanvas ? imageModel === SUNBURST_MODEL ? validateOpenAIImageSize(`${editCanvas.width}x${editCanvas.height}`)
-    : !nanoCanvasSupported ? 'Choose GPT Image 2.5 to keep this canvas.' : null : null;
-  const canGenerate = !providerRoute.error && !busy && !preview && !!editPrompt.trim() && !!config && !isStale && !canvasError && !referenceError;
+  const canvasError = editCanvas ? isOpenAIImageModel(imageModel) ? validateOpenAIImageSize(`${editCanvas.width}x${editCanvas.height}`)
+    : !nanoCanvasSupported ? 'Choose GPT Image to keep this canvas.' : null : null;
+  const canGenerate = !modelError && !busy && !preview && !!editPrompt.trim() && !!config && !isStale && !canvasError && !referenceError;
   const previewExpands = !!preview?.referenceImages?.some(reference => reference.isEditSource && reference.editRegion?.expandsCanvas);
   const imageCostPreview = config ? getImageCostPreview({ ...config, imageProvider: providerRoute.provider }) : undefined;
 
@@ -204,14 +213,14 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   };
 
   const handleEnhance = async () => {
-    if (!config || referenceError || !prompt.trim() || busyRef.current) return;
+    if (!config || modelError || !textAvailable || referenceError || !prompt.trim() || busyRef.current) return;
     busyRef.current = true; setIsEnhancing(true); setError(null);
     const controller = new AbortController(); enhancementAbortRef.current = controller;
     const brief = config.originalPrompt ?? prompt;
     try {
-      const preferences = await resolveTextModelPreferences();
+      const preferences = await resolveTextModelPreferences('enhance');
       const textOptions = {
-        model: initialTextModel || preferences.model, thinkingLevel: preferences.thinkingLevel,
+        model: initialTextModel && settings.preferences[initialTextModel] !== 'off' ? initialTextModel : preferences.model, thinkingLevel: preferences.thinkingLevel,
         reasoningEffort: preferences.reasoningEffort, signal: controller.signal,
       };
       const result = await enhancePrompt(brief, config.referenceImages, config, textOptions);
@@ -228,7 +237,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
   };
 
   const handleGenerate = async () => {
-    if (!config || !editPrompt.trim() || busyRef.current) return;
+    if (!config || modelError || !editPrompt.trim() || busyRef.current) return;
     if (referenceError) { setError(referenceError); return; }
     if (canvasError) { setError(canvasError); return; }
     if (isStale) { setError('References or model changed. Enhance again or revert to your original prompt.'); return; }
@@ -354,16 +363,16 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
           </button>) : <p className="p-3 text-xs text-gray-400">No matching reference.</p>}
         </div>}
       </div>
-      <div className="px-4 py-2"><ProviderRouteControl model={imageModel} compact /></div>
+      <div role="status" className="px-4 py-2 text-xs text-gray-400">{modelError || (providerRoute.provider && `Provider · ${PROVIDER_LABELS[providerRoute.provider]}`)}</div>
       <div className={PROMPT_TOOLBAR_CLASS}>
         <div className={PROMPT_SETTINGS_CLASS} role="group" aria-label="Edit settings">
-          <Dropdown label="Edit model" value={imageModel} options={IMAGE_MODEL_OPTIONS.map(model => ({ ...model, disabled: model.value !== SUNBURST_MODEL && (!nanoCanvasSupported || references.length > getGalleryEditReferenceLimit(model.value)) }))} onSelect={value => { if (busyRef.current) return; setImageModel(value as ImageModelId); setError(null); setGenerationStarted(false); }} icon={ImageIcon} compact disabled={busy} />
-          {imageModel === SUNBURST_MODEL && <Dropdown label="Quality" value={quality} options={SUNBURST_QUALITY_OPTIONS} onSelect={(value: OpenAIImageOptions['quality']) => { if (!busyRef.current) setQuality(value); }} icon={Sparkles} compact disabled={busy} />}
+          <Dropdown label="Edit model" value={imageModel ?? 'No edit model'} options={editModels.map(model => ({ ...model, disabled: !isOpenAIImageModel(model.value) && (!nanoCanvasSupported || references.length > getGalleryEditReferenceLimit(model.value)) }))} onSelect={value => { if (busyRef.current) return; setImageModel(value as ImageModelId); setError(null); setGenerationStarted(false); }} icon={ImageIcon} compact disabled={busy || !editModels.length || settings.loading || !!settings.error} />
+          {isOpenAIImageModel(imageModel) && <Dropdown label="Quality" value={quality} options={SUNBURST_QUALITY_OPTIONS} onSelect={(value: OpenAIImageOptions['quality']) => { if (!busyRef.current) setQuality(value); }} icon={Sparkles} compact disabled={busy} />}
           <ImageCountControl count={count} onChange={value => { if (!busyRef.current) { setCount(value); setGenerationStarted(false); } }} disabled={busy} />
         </div>
         <div className={PROMPT_ACTIONS_CLASS}>
           {enhancement.originalPrompt != null && <button type="button" disabled={busy} onClick={() => { setPrompt(enhancement.originalPrompt!); setEnhancement({}); setError(null); }} className={PROMPT_REVERT_CLASS} aria-label="Revert edit prompt" title="Restore the brief before Enhance"><RotateCcw className="w-4 h-4" /><span>Revert</span></button>}
-          <button type="button" onClick={() => { setMention(undefined); void handleEnhance(); }} disabled={busy || !prompt.trim() || !canvas || !!referenceError} className={promptEnhanceClass(isEnhancing, false)} aria-label="Enhance edit prompt" title={isEnhancing ? 'Enhancing...' : 'Enhance prompt'}>{isEnhancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}</button>
+          <button type="button" onClick={() => { setMention(undefined); void handleEnhance(); }} disabled={busy || !!modelError || !textAvailable || !prompt.trim() || !canvas || !!referenceError} className={promptEnhanceClass(isEnhancing, false)} aria-label="Enhance edit prompt" title={isEnhancing ? 'Enhancing...' : 'Enhance prompt'}>{isEnhancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}</button>
           <button type="button" onClick={() => void handleGenerate()} disabled={!canGenerate} className={promptGenerateClass(canGenerate)} aria-label="Generate image edit" title={isStale ? 'Enhance again or revert to your original prompt for the selected model.' : imageCostPreview?.description}>
             <div className="relative z-10 flex flex-col items-center gap-0.5 leading-tight">
               {isGenerating ? <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-gray-200"><Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-400" />Adding to queue…</span> : <>
@@ -379,7 +388,7 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
     {isStale && <p role="status" className="px-1 text-xs text-amber-300">References or model changed. Enhance again or revert before generating.</p>}
     {referenceError && <p role="status" className="px-1 text-xs text-amber-300">{referenceError}</p>}
     {canvasError && <p role="status" className="px-1 text-xs text-amber-300">{canvasError}</p>}
-    {editCanvas && !nanoCanvasSupported && !canvasError && <p className="px-1 text-[11px] text-gray-500">GPT Image 2.5 keeps this canvas. Nano Banana needs a standard image ratio.</p>}
+    {editCanvas && !nanoCanvasSupported && !canvasError && <p className="px-1 text-[11px] text-gray-500">GPT Image keeps this canvas. Nano Banana needs a standard image ratio.</p>}
     {error && <p role="alert" className="px-1 text-xs text-red-400">{error}</p>}
     {generationStarted && <p role="status" className="flex items-center gap-1.5 px-1 text-xs text-lime-300"><Check className="h-3.5 w-3.5" /> {lastQueuedIds.length} image{lastQueuedIds.length === 1 ? '' : 's'} added to the queue.</p>}
     <div ref={resultsRef}><GalleryEditResults source={image} jobs={jobs} selectedId={preview?.id} onSelect={id => setPreviewId(id)} /></div>

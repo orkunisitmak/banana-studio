@@ -9,7 +9,7 @@ const src = readFileSync(new URL('../src/components/Controls.tsx', import.meta.u
 const piece = (from, to) => { const a = src.indexOf(from); return src.slice(a, src.indexOf(to, a)); };
 const pvf = piece('  const processVideoFiles = async', '  const handleVideoFileUpload = async');
 const hv = piece('  const handleVideoFileUpload = async', '  const handleAudioFileUpload = async');
-const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, uploadingReferenceVideos, videoUploadDraft, insertUploadDraftRef, setUploadingReferenceVideos, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync } = env;
+const code = transformSync(`module.exports = env => { const isMagi2=false,isFalSeedance20=false,isEvoH3=false,falCaps=null,seedanceLimits=null; const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, uploadingReferenceVideos, videoUploadDraft, insertUploadDraftRef, setUploadingReferenceVideos, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync } = env;
   ${pvf}\n${hv}\n return { handleVideoFileUpload }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
 

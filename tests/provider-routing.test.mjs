@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MODEL_ROUTES, PROVIDER_LABELS, resolveProvider } from '../src/lib/providers.ts';
-import { falSeedanceInput, openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
+import { openRouterSeedanceInput, seedanceProviderError } from '../src/lib/video/seedanceProviders.ts';
+import { buildFalSeedanceInput } from '../src/lib/video/falSeedance25.ts';
 import { resizePixels } from '../src/lib/images/resizePixels.ts';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
@@ -31,13 +32,17 @@ test('every key combination selects only a configured route for the same model',
     }
   }
   assert.throws(()=>resolveProvider('__proto__','auto',{fal:true}),/Unsupported/);
-  assert.throws(()=>resolveProvider('anthropic/claude-opus-5.5','fal',{fal:true,openrouter:true}));
+  for (const [model,routes] of Object.entries(MODEL_ROUTES)) {
+    assert.equal(routes[0],model === 'magi-2' ? 'evolink' : 'fal');
+    assert.throws(()=>resolveProvider(model,'off',Object.fromEntries(routes.map(route=>[route,true]))),/turned off/);
+    if(routes.length>1)assert.throws(()=>resolveProvider(model,undefined,{[routes[1]]:true}),/Auto/, 'default is pinned; only explicit Auto may choose another provider');
+  }
 });
 const request=(extra={})=>({videoModel:'seedance-2.5',mode:'image_to_video',prompt:'Move from @IMAGE_1 to @IMAGE_2.',duration:8,quality:'720p',aspectRatio:'adaptive',generateAudio:true,imageUrls:['https://example.invalid/first.png','https://example.invalid/last.png'],...extra});
 test('first and last frames remain distinct in both video providers; reference mode remains separate',()=>{
-  const body=request(),fal=falSeedanceInput(body),router=openRouterSeedanceInput({...body,aspectRatio:'16:9'});
+  const body=request(),fal=buildFalSeedanceInput(body),router=openRouterSeedanceInput({...body,aspectRatio:'16:9'});
   assert.equal(seedanceProviderError('fal',body),undefined);assert.equal(seedanceProviderError('openrouter',{...body,aspectRatio:'16:9'}),undefined);
-  assert.equal(fal.endpoint,'bytedance/seedance-2.5/image-to-video');
+  assert.equal(fal.endpoint,'bytedance/seedance-2.5/us/image-to-video');
   assert.equal(fal.input.image_url,body.imageUrls[0]);assert.equal(fal.input.end_image_url,body.imageUrls[1]);assert.equal(fal.input.aspect_ratio,'auto');assert.equal(fal.input.duration,'8');
   assert.deepEqual(router.frame_images.map(image=>image.frame_type),['first_frame','last_frame']);assert.equal(router.input_references,undefined);assert.equal(router.provider.allow_fallbacks,false);
   const reference=openRouterSeedanceInput(request({mode:'reference_to_video',aspectRatio:'16:9'}));assert.equal(reference.frame_images,undefined);assert.equal(reference.input_references.length,2);
@@ -47,7 +52,7 @@ test('provider-specific unsupported operations and values fail before submission
   assert.equal(seedanceProviderError('fal',request({duration:-1,quality:'1080p'})),undefined);
   assert.ok(seedanceProviderError('fal',request({imageUrls:Array(3).fill('https://example.invalid/x')})));
   assert.ok(seedanceProviderError('fal',request({duration:31})));
-  const edit=falSeedanceInput(request({mode:'video_edit',videoUrls:['https://example.invalid/source.mp4'],prompt:'Edit @VIDEO_1 using @IMAGE_1 and @AUDIO_1.'}));
+  const edit=buildFalSeedanceInput(request({mode:'video_edit',videoUrls:['https://example.invalid/source.mp4'],prompt:'Edit @VIDEO_1 using @IMAGE_1 and @AUDIO_1.'}));
   assert.equal(edit.input.task,'editing');assert.equal(edit.input.duration,'auto');assert.equal(edit.input.aspect_ratio,'auto');assert.match(edit.input.prompt,/@Video1.*@Image1.*@Audio1/);
 });
 test('resizing a generated tier cannot change any source pixel outside selected layers',()=>{
@@ -61,11 +66,33 @@ test('resizing a generated tier cannot change any source pixel outside selected 
 test('native route preferences survive restart and cannot select a foreign model/provider pair',()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-routing-'));let store=new LocalWorkspace(directory);
   try{
-    assert.equal(store.rpc('save_provider_preference',{p_model:'seedance-2.5',p_provider:'fal'},false),true);
-    assert.throws(()=>store.rpc('save_provider_preference',{p_model:'minimax-h3',p_provider:'evolink'},false));
+    const save = (p_model,p_provider,p_expected_user_id = store.user.id) => store.rpc('save_provider_preference',{p_expected_user_id,p_model,p_provider},false);
+    assert.equal(save('seedance-2.5','off'),true);
+    const detail = store.rpc('get_provider_preferences',{p_include_policy:true},false);
+    assert.deepEqual(detail,{preferences:{'seedance-2.5':'off'},personal:{'seedance-2.5':'off'},policy:{},canManage:false});
+    assert.throws(()=>store.rpc('save_workspace_provider_policy',{p_expected_user_id:store.user.id,p_model:'minimax-h3',p_provider:'off'},false));
+    assert.throws(()=>save('minimax-h3','openrouter'));
+    assert.throws(()=>save('__proto__','off'));
+    assert.throws(()=>save('seedance-2.5','fal','wrong-account'));
+    store.setting('providerRoutes',{...store.rpc('get_provider_preferences',{},false),'anthropic/claude-opus-5.5':'anthropic','gemini-3.8-flash':'gemini'});
     store.close();store=new LocalWorkspace(directory);
-    assert.deepEqual(store.rpc('get_provider_preferences',{},false),{'seedance-2.5':'fal'});
+    assert.deepEqual(store.rpc('get_provider_preferences',{},false),{'seedance-2.5':'off','claude-opus-5.5':'anthropic','gemini-4-hydrogen':'gemini'});
   }finally{store.close();fs.rmSync(directory,{recursive:true,force:true});}
+});
+test('desktop text preferences normalize existing pins and preserve feature overrides on legacy saves',()=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-text-routes-')),store=new LocalWorkspace(directory);
+  try {
+    store.setting('textPreferences',{model:'gpt-6.1-sol',thinkingLevel:'HIGH',reasoningEffort:'high'});
+    assert.equal(store.rpc('get_text_model_preferences',{},false).model,'gpt-6.2-sol');
+    const args={p_expected_user_id:store.user.id,p_scope:'me',p_model:'gpt-6.2-sol',p_gemini_thinking:'HIGH',p_openai_reasoning:'high'};
+    const save = extras => store.rpc('save_text_model_preferences',{...args,...extras},false);
+    const featureModels={brainstorm:'gemini-4-hydrogen'};
+    assert.deepEqual(save({p_feature_models:featureModels}).featureModels,featureModels);
+    assert.deepEqual(save({}).featureModels,featureModels);
+    assert.throws(()=>save({p_feature_models:{variation:'minimax-h3'}}));
+    assert.throws(()=>save({p_expected_user_id:'wrong-account'}));
+    assert.deepEqual(save({p_feature_models:{}}).featureModels,{});
+  } finally {store.close();fs.rmSync(directory,{recursive:true,force:true});}
 });
 test('OpenRouter local frame uploads use bytes without requiring an EvoLink or fal.ai key',async()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'banana-router-upload-')),store=new LocalWorkspace(directory);
@@ -106,6 +133,6 @@ test('a prompt-only Seedance task uses the app mode name on every provider',()=>
   for(const provider of ['evolink','fal','openrouter']) {
     assert.equal(seedanceProviderError(provider,{videoModel:'seedance-2.5',mode:'text_only',duration:5,quality:'720p',aspectRatio:'16:9'}),undefined,provider);
   }
-  assert.equal(falSeedanceInput({videoModel:'seedance-2.0',mode:'text_only',duration:5,quality:'720p',aspectRatio:'16:9'}).endpoint,'bytedance/seedance-2.0/text-to-video');
+  assert.equal(buildFalSeedanceInput({videoModel:'seedance-2.0',mode:'text_only',prompt:'A snowy forest.',duration:5,quality:'720p',aspectRatio:'16:9'}).endpoint,'bytedance/seedance-2.0/text-to-video');
   assert.equal(seedanceProviderError('fal',{videoModel:'seedance-2.5',mode:'text',duration:5,quality:'720p',aspectRatio:'16:9'}),'Unsupported video operation.');
 });

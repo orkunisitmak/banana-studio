@@ -11,8 +11,8 @@ const end = source.indexOf('  const handleGenerateVariation = async', start);
 assert.ok(start > 0 && end > start);
 const load = async (code, format) => import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const draft = await build({ entryPoints: [fileURLToPath(new URL('../src/lib/gallery/recreateDraft.ts', import.meta.url))], bundle: true, write: false, format: 'esm', logLevel: 'silent' });
-const { createRecreateConfig, mergeRecreateHydration } = await load(draft.outputFiles[0].text);
-const { code } = await transform(`export const create = env => { const { config, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, resolveImageModel, createRecreateConfig, mergeRecreateHydration, getImageById, toast } = env;
+const { createRecreateConfig, mergeRecreateHydration, restoreRecreateReferences } = await load(draft.outputFiles[0].text);
+const { code } = await transform(`export const create = env => { const { config, recreateLoadIdRef, recreateLoadingRef, setIsRecreateLoading, setConfig, setPromptLoadVersion, resolveImageModel, createRecreateConfig, mergeRecreateHydration, restoreRecreateReferences, getImageById, getSavedPerson, toast } = env;
 ${source.slice(start, end)}
 return { handleRecreate, handleHistorySelect }; };`, { loader: 'ts', format: 'esm' });
 const { create } = await load(code);
@@ -24,11 +24,11 @@ const refPhoto = id => ({ id, data: 'data:image/png;base64,AAAA', mimeType: 'ima
 const withIds = (ids, extra = {}) => ({ ...listRow, imageGenerationReferenceIds: ids, ...extra });
 
 // One editor session: every call goes through the same handlers, config and load counter, like the real component.
-const session = getImageById => {
+const session = (getImageById, getSavedPerson) => {
   const state = { config: { imageModel: 'gemini-3-pro-image-preview', referenceImages: [] }, toasts: [] };
-  const handlers = create({ config: state.config, recreateLoadIdRef: { current: 0 }, recreateLoadingRef: { current: null }, setIsRecreateLoading() {}, setPromptLoadVersion() {},
+  const handlers = create({ config: state.config, recreateLoadIdRef: { current: 0 }, recreateLoadingRef: { current: null }, setIsRecreateLoading(value) { state.loading = value; }, setPromptLoadVersion() {},
     setConfig: value => { state.config = typeof value === 'function' ? value(state.config) : value; }, resolveImageModel: model => model, createRecreateConfig, mergeRecreateHydration,
-    getImageById, toast: { info: (t) => state.toasts.push('info:' + t), error: (t) => state.toasts.push('error:' + t) } });
+    getImageById, getSavedPerson, restoreRecreateReferences, toast: { info: (t) => state.toasts.push('info:' + t), error: (t) => state.toasts.push('error:' + t) } });
   return { state, select: handlers.handleHistorySelect };
 };
 const run = async (getImageById, row = listRow) => {
@@ -123,4 +123,52 @@ test('a stale read that fails late does not warn over the newer selection', asyn
   await first;
   assert.deepEqual(state.toasts, ['info:Settings Loaded']);
   assert.equal(state.config.prompt, 'landscape');
+});
+
+test('restores missing Saved People slots by owner and photo, preserving role and exact matches before fallback', async () => {
+  const missing = ['removed', 'b', 'unavailable'].map(id => ({ id: `saved-person:alice:${id}`, personId: 2, data: '' }));
+  const row = withIds(missing.map(ref => ref.id), { referenceImages: missing });
+  const reads = [];
+  const { state, select } = session(async () => row, async id => {
+    reads.push(id);
+    return { id, photos: ['b', 'c'].map(key => ({ id: key, data: `data:image/png;base64,${key}`, mimeType: 'image/png' })) };
+  });
+  await select(row);
+  assert.deepEqual(reads, ['alice']);
+  assert.deepEqual(state.config.referenceImages.map(ref => [ref.id, ref.personId, ref.data]), [
+    [missing[0].id, 2, 'data:image/png;base64,c'], [missing[1].id, 2, 'data:image/png;base64,b'], [missing[2].id, 2, ''],
+  ]);
+  assert.deepEqual(state.toasts, ['error:References unavailable']);
+});
+
+test('slow Saved People recovery cannot overwrite a newer selection', async () => {
+  const id = 'saved-person:alice:photo';
+  const row = withIds([id]);
+  let begin, finish;
+  const started = new Promise(resolve => { begin = resolve; });
+  const { select, state } = session(async key => key === row.id ? row : null, () => new Promise(resolve => { finish = resolve; begin(); }));
+  const first = select(row);
+  await started;
+  assert.equal(state.loading, true, 'keep Generate and Brainstorm blocked until recovery finishes');
+  await select({ ...listRow, id: 'new', referenceImages: [refPhoto('ref-1')] });
+  finish({ id: 'alice', photos: [refPhoto('photo')] });
+  await first;
+  assert.deepEqual(state.config.referenceImages, [refPhoto('ref-1')]);
+  assert.deepEqual(state.toasts, ['info:Settings Loaded']);
+});
+
+test('Magi keeps numbered image slots and recovers the matching person even from a partial detail row', async () => {
+  const ids = ['saved-person:alice:first', 'middle', 'last'];
+  const row = { ...listRow, mediaType: 'video', videoModel: 'magi-2', magi2Mode: 'reference_to_video',
+    videoReferenceImageIds: ids, imageGenerationReferenceIds: undefined, referenceImages: [refPhoto('last')],
+    referenceVideos: [{ id: 'clip' }], referenceAudios: [{ id: 'audio' }] };
+  const fetched = [];
+  const { state, select } = session(async id => { fetched.push(id); return { ...row, referenceImages: [refPhoto('last'), refPhoto('middle')] }; },
+    async id => ({ id, photos: [{ ...refPhoto('first'), data: 'first-pixels' }] }));
+  await select(row);
+  assert.deepEqual(fetched, [row.id]);
+  assert.deepEqual(state.config.referenceImages.map(({ id }) => id), ids);
+  assert.equal(state.config.referenceImages[0].data, 'first-pixels');
+  assert.equal(state.loading, false);
+  assert.deepEqual(state.toasts, ['info:Settings Loaded']);
 });

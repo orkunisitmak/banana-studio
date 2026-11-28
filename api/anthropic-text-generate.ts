@@ -6,6 +6,7 @@ import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js'
 import { DEFAULT_OPENROUTER_REASONING, isOpenRouterReasoningEffort } from '../src/lib/prompts/openrouterText.js';
 import { ANTHROPIC_MODELS, anthropicErrorMessage, calculateAnthropicTextCost } from '../src/lib/prompts/anthropicText.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
 
 export const config = { maxDuration: 300 };
 const ACTIONS = ['enhance', 'video_enhance', 'brainstorm', 'variation'];
@@ -47,6 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       content.push({ type: 'image', source: { type: 'base64', media_type: part.inlineData.mimeType as ImageType, data: part.inlineData.data } });
     } else return res.status(400).json({ error: 'This model accepts text and image references. YouTube footage requires Gemini.' });
   }
+  if (!await admitProvider(req, res, model, 'anthropic')) return;
   const guard = await startOpenAIRequest(req, res, user, 'text', undefined, 'Anthropic');
   if (!guard) return;
   const streaming = String(req.headers?.accept || req.headers?.Accept || '').includes('application/x-ndjson');
@@ -116,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (typeof value?.videoAvailable !== 'boolean' || typeof value.brief !== 'string' || typeof value.premise !== 'string'
         || typeof value.limitation !== 'string' || !Array.isArray(value.evidence)) return fail(502, 'Model video analizini beklenen biçimde döndürmedi.');
     }
-    const result = { text, candidates: null, provider: 'anthropic', providerModel: message.model, usageMetadata: { provider: 'anthropic', anthropicUsage: message.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
+    const result = { text, candidates: null, provider: 'anthropic', providerModel: message.model, usageMetadata: { provider: 'anthropic', textProvider: 'anthropic', providerCost: calculateAnthropicTextCost(message.usage, message.model), anthropicUsage: message.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
     outcome = 'completed'; await guard.finish('completed', requestId, providerStatus);
     if (streaming) { send({ type: 'result', result }); return res.end(); }
     return res.status(200).json(result);

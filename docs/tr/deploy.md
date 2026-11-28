@@ -36,9 +36,9 @@ Bu uygulamaya ayrılmış boş bir proje kullan. Başlangıç SQL'i sabit adlarl
 
 1. [Başlangıç SQL dosyasını](../../supabase/migrations/20261019123903_banana_studio_baseline.sql) aç. GitHub'daki **Raw** veya kopyalama düğmesiyle **dosyanın tamamını** kopyala.
 2. Yeni Supabase projen içinde **SQL Editor → New query** aç.
-3. SQL'i yapıştır ve **Run** seç. Başlangıç dosyasını yeni projede bir kez çalıştır.
+3. SQL'i yapıştır ve **Run** seç. Yeni projede başlangıç dosyasını bir kez çalıştır, ardından [migrations klasöründeki](../../supabase/migrations/) **sonraki her dosyayı** dosya adı sırasıyla uygula. Sunucuda saklanan model ve yönlendirme tercihleri bu ek dosyalarla kurulur. Mevcut kurulumda yalnızca daha önce uygulanmamış dosyaları çalıştır.
 4. **Table Editor** bölümünde `profiles`, `generations`, `folders`, `authorized_emails` gibi tabloları kontrol et.
-5. **Storage** bölümünde `media` alanının oluştuğunu ve **private / özel** olduğunu kontrol et. Dosyanın oluşturduğu erişim kurallarını koru.
+5. **Storage** bölümünde `media` alanının **private / özel** olduğunu doğrula. [Görsel çıktı erişim kuralı](../../supabase/migrations/20261128121000_image_output_access.sql), sunucunun kaydettiği GIF/SVG ve Seedream çıktıları dahil sonuçlara erişimi düzenler. Eksik migration'ı telafi etmek için alanı herkese açma. Kullanıcı medyasını uygulama çerezlerini almayan ayrı bir depolama adresinden sun.
 
 **Kontrol:** SQL başarıyla çalıştı, tablolar var, `media` özel. Geliştiriciler CLI migration yolunu da kullanabilir; migration geçmişini eşleştirmeden aynı şemaya iki yöntemi birden uygulama.
 
@@ -67,12 +67,12 @@ Ortam değişkeni, Vercel'in uygulamaya verdiği isimli bir ayardır. Kurulum ek
 | `SUPABASE_PUBLISHABLE_KEY` | Publishable anahtar; eski `anon` anahtarı da kabul edilir | Evet |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase sunucu kimlik bilgisi: server secret veya eski `service_role` anahtarı; uygulamadaki değişken adı budur | Sunucunun iş ve görevleri için evet |
 | `CRON_SECRET` | Parola yöneticinle ürettiğin yeni rastgele sır; tercihen en az 32 karakter | Evet |
-| `OPENAI_API_KEY` | OpenAI anahtarı | GPT Image 2.5 ve/veya GPT-6.1 Sol için |
-| `OPENROUTER_API_KEY` | OpenRouter anahtarı | Başlangıç yaratıcı modeli Opus 5.5 için |
-| `ANTHROPIC_API_KEY` | Anthropic anahtarı | Opus 5.5'i doğrudan çalıştırır; ikisi de varsa OpenRouter'dan önce kullanılır |
-| `GEMINI_API_KEY` | Google Gemini anahtarı | Gemini metin görevleri ve video analizi için |
-| `FAL_KEY` | fal.ai anahtarı | Nano Banana, H3 Max ve desteklenen video ön işlemleri için |
-| `EVOLINK_API_KEY` | EvoLink anahtarı | Seedance için |
+| `FAL_KEY` | fal.ai anahtarı | MAGI-2 dışındaki varsayılan görsel, yaratıcı metin ve video rotaları; bazı video ön işlemleri |
+| `EVOLINK_API_KEY` | EvoLink anahtarı | MAGI-2 için gerekli; Seedance, H3 Max ve yaratıcı metin için alternatif |
+| `OPENAI_API_KEY` | OpenAI anahtarı | Sunburst görselleri ve GPT-6.2 Sol için doğrudan rota |
+| `OPENROUTER_API_KEY` | OpenRouter anahtarı | Desteklenen görsel, yaratıcı metin ve Seedance modları için alternatif |
+| `ANTHROPIC_API_KEY` | Anthropic anahtarı | Claude Opus 5.5 için doğrudan rota |
+| `GEMINI_API_KEY` | Google Gemini anahtarı | YouTube görüntülerini okumak için gerekli; Nano görselleri ve Gemini 4 Hydrogen için doğrudan rota |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 etkin Google Cloud projesinin anahtarı | YouTube araması için |
 
 Supabase Connect penceresi ve **Settings → API Keys** bölümünden bilgileri al. Server secret/service-role anahtarı yalnızca sunucuda kalır. Uygulama arayüze yalnızca proje adresi ve publishable anahtarını verir. [Supabase anahtar türleri](https://supabase.com/docs/guides/getting-started/api-keys).
@@ -119,12 +119,12 @@ Script, örnek adresi ve doğrulanmamış/bulunmayan hesapları özellikle redde
 
 ## 8. Uçtan uca kontrol et
 
-1. **AI settings** bölümünde anahtarını girdiğin metin sağlayıcısını seç. Başlangıçtaki Opus 5.5 / Medium, Anthropic ya da OpenRouter ister.
-2. Ayarladığın görsel modelini seç; örneğin OpenAI anahtarıyla GPT Image 2.5.
+1. **AI settings** bölümünde açık bir metin modeli ve sağlayıcı seç. `FAL_KEY` ayarlıysa Claude Opus 5.5 varsayılan fal.ai rotasını kullanabilir.
+2. Görsel modelini seçip rotasını tanımlı anahtarla eşleştir. Örneğin Sunburst için fal.ai kullan veya `OPENAI_API_KEY` kullanacaksan açıkça OpenAI seç.
 3. Kendi promptunla tek bir test görseli gönder. Bu gerçek sağlayıcı isteğidir, bakiyenden kullanım yapar.
 4. Sonucun tamamlandığını, sayfayı yenileyince galeride kaldığını ve indirildiğini doğrula.
 5. Vercel'de `vercel.json` içindeki `banana-image-jobs` kuyruk tetikleyicisinin ve `/api/image-job-sweep` Cron'unun göründüğünü kontrol et.
-6. YouTube kullanacaksan [özellik tablosundaki](models.md#video-ve-youtube) tüm anahtarları ekle; arama ve analizi ayrı dene.
+6. YouTube kullanacaksan [arama ve görüntü analizi anahtarlarını](models.md#yaratıcı-metin-ve-youtube-görüntülerinin-analizi) tanımla; arama ve analizi ayrı ayrı dene.
 
 Web alanın artık adresinden Windows, Mac ve mobil tarayıcılarla kullanılabilir. Bağımsız masaüstü veritabanından ayrıdır. Alan sahibi olarak servis kullanımını, depolamayı, yedekleri ve barındırma limitlerini takip et.
 

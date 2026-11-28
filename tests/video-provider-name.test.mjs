@@ -12,8 +12,10 @@ test('names the provider that holds the video', () => {
   assert.equal(videoProviderName('task-unified-123'), 'EvoLink');
 });
 
-test('H3 videos are fal.ai whatever the task id looks like', () => {
+test('unprefixed historical H3 jobs fall back to fal unless a provider was recorded', () => {
   assert.equal(videoProviderName('anything', true), 'fal.ai');
+  assert.equal(videoProviderName('anything', true, 'evolink'), 'EvoLink');
+  assert.equal(videoProviderName('bs_evolink_task', true), 'EvoLink');
 });
 
 test('a video without a task id falls back to EvoLink', () => {

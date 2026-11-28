@@ -118,8 +118,23 @@ export class LocalWorkspace {
       if(plan.or) { if(typeof plan.or!=='string'||plan.or.length>2000)throw new Error('Invalid filter.');const ors=plan.or.split(',').map(v=>{const [column,operator,...value]=v.split('.');const raw=value.join('.');return {column,operator,value:raw==='true'?true:raw==='false'?false:raw};});rows=rows.filter(row=>ors.some(f=>filter(row,f))); }
       if(operation==='insert'||operation==='upsert') {
         const values=Array.isArray(plan.value)?plan.value:[plan.value];if(values.length>1000)throw new Error('Too many rows.');
-        rows=values.map(value=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid row.');const row={created_at:Date.now(),user_id:this.user.id,...clone(value)};row.id??=table==='provider_tasks'?`${row.provider}:${row.task_id}`:randomUUID();if(String(row.id).length>200)throw new Error('Invalid row ID.');const old=this.get(table,row.id);if(old&&operation==='insert')throw Object.assign(new Error('Row already exists.'),{code:'23505'});return {...old,...row};});
-        this.db.exec('BEGIN IMMEDIATE');try{for(const row of rows)this.put(table,row.id,row);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+        this.db.exec('BEGIN IMMEDIATE');
+        try{
+          const seen=new Map(),written=new Map();
+          for(const value of values){
+            if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid row.');
+            const cloned=clone(value),rawId=cloned.id??(table==='provider_tasks'?`${cloned.provider}:${cloned.task_id}`:randomUUID()),rowId=String(rawId);
+            if(rowId.length>200)throw new Error('Invalid row ID.');
+            const old=seen.has(rowId)?seen.get(rowId):this.get(table,rowId);
+            if(old&&operation==='insert')throw Object.assign(new Error('Row already exists.'),{code:'23505'});
+            if(old&&operation==='upsert'&&plan.ignoreDuplicates===true)continue;
+            const row={created_at:Date.now(),user_id:this.user.id,...old,...cloned,id:rawId};
+            seen.set(rowId,row);written.set(rowId,row);
+          }
+          rows=[...written.values()];
+          for(const row of rows)this.put(table,row.id,row);
+          this.db.exec('COMMIT');
+        }catch(error){this.db.exec('ROLLBACK');throw error;}
       } else if(operation==='update') { if(!filters.length)throw new Error('An update needs an explicit filter.');rows=rows.map(row=>({...row,...clone(plan.value)}));for(const row of rows)this.put(table,row.id,row);
       } else if(operation==='delete') { if(!filters.length)throw new Error('A deletion needs an explicit filter.');for(const row of rows)this.db.prepare('DELETE FROM records WHERE collection=? AND id=?').run(table,String(row.id)); }
       const count=rows.length;

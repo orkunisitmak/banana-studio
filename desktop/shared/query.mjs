@@ -7,7 +7,7 @@ export class WorkspaceQuery {
   }
   select(columns = '*', options = {}) { this.plan.columns = columns; this.plan.count = options.count; this.plan.head = !!options.head; this.plan.returning = true; return this; }
   insert(value) { this.plan.operation = 'insert'; this.plan.value = value; return this; }
-  upsert(value, options = {}) { this.plan.operation = 'upsert'; this.plan.value = value; this.plan.onConflict = options.onConflict; return this; }
+  upsert(value, options = {}) { this.plan.operation = 'upsert'; this.plan.value = value; this.plan.onConflict = options.onConflict; this.plan.ignoreDuplicates = !!options.ignoreDuplicates; return this; }
   update(value) { this.plan.operation = 'update'; this.plan.value = value; return this; }
   delete() { this.plan.operation = 'delete'; return this; }
   filter(column, operator, value) { this.plan.filters.push({ column, operator, value }); return this; }

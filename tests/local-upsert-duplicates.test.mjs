@@ -55,3 +55,14 @@ test('batch insert rejects intra-batch duplicate IDs with 23505 without writing 
     assert.equal(res.error?.code, '23505');
     assert.equal(store.get('folders', 'f1'), null);
   }));
+
+test('reused WorkspaceQuery resets ignoreDuplicates on subsequent upsert without it', () =>
+  withStore(async (store, db) => {
+    assert.equal((await db.from('generations').insert({ id: 'g2', prompt: 'v1', created_at: 1000 })).error, null);
+    const query = db.from('generations');
+    assert.equal((await query.upsert({ id: 'g2', prompt: 'skipped' }, { onConflict: 'id', ignoreDuplicates: true })).error, null);
+    assert.equal(store.get('generations', 'g2').prompt, 'v1');
+    assert.equal((await query.upsert({ id: 'g2', prompt: 'v2' }, { onConflict: 'id' })).error, null);
+    assert.equal(store.get('generations', 'g2').prompt, 'v2');
+    assert.equal(store.get('generations', 'g2').created_at, 1000);
+  }));

@@ -81,11 +81,12 @@ export function useGalleryImageSource(src: string, fallbackSrc?: string) {
     },
     onError: () => {
       if (activeKey.current !== key || !current.url) return;
-      if (current.url === fallbackSrc) {
-        setSource(value => value.key === key ? { ...value, url: '', preview: false } : value);
+      if (current.url === fallbackSrc && (isStoredImage(src) || current.failed)) {
+        setSource(value => value.key === key && value.url === fallbackSrc ? { ...value, url: '', preview: false } : value);
       } else {
         stopTimer.current();
-        setSource({ key, url: fallbackSrc || '', loading: false, preview: Boolean(fallbackSrc), failed: true });
+        const nextFallback = current.url === fallbackSrc ? '' : fallbackSrc || '';
+        setSource({ key, url: nextFallback, loading: false, preview: Boolean(nextFallback), failed: true });
       }
     },
   };

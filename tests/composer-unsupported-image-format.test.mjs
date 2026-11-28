@@ -4,12 +4,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-// The composer's file picker (accept="image/*"), paste and drop all go through
-// processImageFiles, which attaches any image/* file as-is in image mode. The image
-// providers only take PNG, JPEG or WebP (Gemini: providerImageData throws
-// "Unsupported image format."), so a GIF/HEIC/AVIF reference is accepted silently and
-// the generation fails later. The image editor's reference reader already refuses
-// these formats up front with "Choose a PNG, JPG or WebP reference image."
+// Provider-compatible image-mode references are checked by their bytes before slots are counted.
 const root = fileURLToPath(new URL('..', import.meta.url));
 const req = createRequire(root + '/package.json');
 const ts = req('typescript');
@@ -18,12 +13,14 @@ const source = fs.readFileSync(root + '/src/components/Controls.tsx', 'utf8');
 const ast = ts.createSourceFile('Controls.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const find = name => { let found; const visit = node => { if (!found && ts.isVariableDeclaration(node) && node.name.getText(ast) === name) found = node.initializer.getText(ast); ts.forEachChild(node, visit); }; visit(ast); assert.ok(found, name); return found; };
 
-const { code } = await transform(`export const create=(state)=>{
+const mime = await build({ entryPoints: ['src/lib/references/mediaMimeType.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node' });
+const { getMediaMimeType } = await import('data:text/javascript;base64,' + Buffer.from(mime.outputFiles[0].text).toString('base64'));
+const { code } = await transform(`export const create=(state,getMimeType)=>{
   const {config,onChange,setAttachmentError,addAttachmentError,maxReferenceImages,attachLimitsRef,readFileAsBase64,estimateBase64Size,compressImage,flushSync}=state;
-  const getMimeType=${find('getMimeType')};
   return ${find('processImageFiles')};
 };`, { loader: 'ts', format: 'esm' });
-const create = (await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))).create;
+const compiledPicker = (await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))).create;
+const create = state => compiledPicker(state, getMediaMimeType);
 
 const SIGNATURE = { 'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'image/jpeg': [0xff, 0xd8, 0xff, 0xe0, 0, 0x10], 'image/webp': [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50] };
 const image = (name, type, signature = type) => new File([new Uint8Array(SIGNATURE[signature] || [1, 2, 3])], name, { type });

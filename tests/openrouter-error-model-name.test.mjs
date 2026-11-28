@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 // Real api/openrouter-text-generate.ts handler. Only auth and the spend ledger are stubbed.
 const root = fileURLToPath(new URL('..', import.meta.url));
 const stubs = {
-  auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({from:()=>({insert:()=>({abortSignal:async()=>({error:null})})})});',
-  openaiGuard: 'export const startOpenAIRequest=async()=>({id:"g1",finish:async()=>{}});',
+  auth: 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({rpc:()=>({abortSignal:async()=>({data:{"gpt-6.2-sol":"openrouter","gemini-4-hydrogen":"openrouter"}})}),from:()=>({insert:()=>({abortSignal:async()=>({error:null})})})});',
+  openaiGuard: 'export const startOpenAIRequest=async()=>({id:"g1",finish:async()=>{}});export const startPaidRequest=startOpenAIRequest;',
 };
 const stubbed = new RegExp(`/(${Object.keys(stubs).join('|')})\\.js$`);
 const out = await build({ entryPoints: ['api/openrouter-text-generate.ts'], absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
@@ -26,7 +26,7 @@ const call = async (model, upstreamStatus) => {
   return { res, fetchCalls };
 };
 
-for (const model of ['gpt-6.1-sol', 'gemini-3.8-flash']) {
+for (const model of ['gpt-6.2-sol', 'gemini-4-hydrogen']) {
   for (const status of [429, 500]) {
     test(`${model} through OpenRouter: upstream ${status} does not blame Opus 5.5`, async () => {
       const { res, fetchCalls } = await call(model, status);

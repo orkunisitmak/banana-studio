@@ -20,9 +20,10 @@ const jsxRuntime = req('react/jsx-runtime');
 
 const routeHook = `import { resolveProvider } from '../lib/providers';
 export function useProviderRoute(model) {
-  const choice = 'auto', available = { evolink: true, fal: true, openrouter: true };
+  const choice = 'evolink', available = { evolink: true, fal: true, openrouter: true };
   return { model, choice, available, provider: resolveProvider(model, choice, available) };
 }
+export function useProviderWorkspace(model) { return { settings: { preferences: { 'seedance-2.5':'evolink' }, loading:false }, route: useProviderRoute(model) }; }
 export function ProviderRouteControl() { return null; }
 export function ProviderRoutingSettings() { return null; }`;
 
@@ -83,7 +84,7 @@ const galleryEditResult = { id: 'v1', mediaType: 'video', url: 'https://example.
 
 const editConfig = { prompt: 'add falling snow', count: 1, aspectRatio: '16:9', resolution: '1K',
   imageModel: 'gpt-image-2.5-sunburst', referenceImages: [], referenceVideos: [], referenceAudios: [], mode: 'video',
-  videoModel: 'seedance-2.5', videoOperation: 'edit', videoAspectRatio: 'adaptive', videoQuality: '720p', videoDuration: -1,
+  videoModel: 'seedance-2.5', videoProvider: 'evolink', videoOperation: 'edit', videoAspectRatio: 'adaptive', videoQuality: '720p', videoDuration: -1,
   audioEnabled: true, videoPromptExpansionMode: 'balanced' };
 const props = (config, onChange = () => {}) => ({ config, onChange, onGenerate() {}, onBrainstormGenerate() {}, templates: [], onSaveTemplate() {},
   onUpdateTemplate() {}, onDeleteTemplate() {}, onSelectTemplate() {}, activeRequests: 0, generationProgress: null });

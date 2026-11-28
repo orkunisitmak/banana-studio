@@ -21,6 +21,7 @@ const find = name => { let found; const visit = node => { if (!found && ts.isVar
 const { code } = await transform(`export const create=(state)=>{
   const {config,onChange,setAttachmentError,addAttachmentError,maxReferenceImages,attachLimitsRef,readFileAsBase64,estimateBase64Size,compressImage,flushSync}=state;
   const getMimeType=${find('getMimeType')};
+  const readAttachments=fn=>fn(),isMagi2=false,falCaps=null;
   return ${find('processImageFiles')};
 };`, { loader: 'ts', format: 'esm' });
 const create = (await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))).create;

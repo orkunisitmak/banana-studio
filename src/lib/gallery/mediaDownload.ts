@@ -1,3 +1,17 @@
+import type { GeneratedMedia } from '../../types';
+
+export function originalDownloadExtension(item: Pick<GeneratedMedia, 'mediaType' | 'openaiImageOptions' | 'seedreamOptions' | 'falSeedanceOptions'>, mime: string) {
+  if (item.mediaType === 'video') return mime === 'video/quicktime' || item.falSeedanceOptions?.outputFormat === 'mov' ? 'mov' : 'mp4';
+  switch (mime.toLowerCase()) {
+    case 'image/jpeg': return 'jpg';
+    case 'image/webp': return 'webp';
+    case 'image/svg+xml': return 'svg';
+    case 'image/gif': return 'gif';
+    case 'image/png': return 'png';
+    default: return item.seedreamOptions?.outputFormat === 'jpeg' ? 'jpg' : item.openaiImageOptions?.outputFormat || 'png';
+  }
+}
+
 /** The server answered with an error status or a non-media page. */
 export class DownloadHttpError extends Error {}
 

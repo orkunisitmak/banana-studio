@@ -21,6 +21,7 @@ export const readImageDimensions = (bytes: Buffer): string | undefined => {
       offset = start + length + (length % 2);
     }
   }
+  if (bytes.length >= 10 && /^GIF8[79]a$/.test(bytes.toString('ascii', 0, 6))) return size(bytes.readUInt16LE(6), bytes.readUInt16LE(8));
   if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
     let offset = 2;
     while (offset < bytes.length) {
@@ -38,6 +39,16 @@ export const readImageDimensions = (bytes: Buffer): string | undefined => {
       }
       offset += length;
     }
+  }
+  // GPT Image 2.6 SVG output: read the root element's pixel width/height or viewBox.
+  const head = bytes.subarray(0, 4096).toString('utf8');
+  const root = head.match(/<svg\b[^>]*>/i)?.[0];
+  if (root) {
+    const attribute = (name: string) => root.match(new RegExp(`\\s${name}\\s*=\\s*["']\\s*([\\d.]+)(?:px)?\\s*["']`, 'i'))?.[1];
+    const width = Number(attribute('width')), height = Number(attribute('height'));
+    if (width > 0 && height > 0) return size(Math.round(width), Math.round(height));
+    const box = root.match(/\sviewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i);
+    if (box) return size(Math.round(Number(box[1])), Math.round(Number(box[2])));
   }
   return undefined;
 };

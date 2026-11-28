@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // Real api/fal-image-generate.ts and api/fal-status.ts and real providerTasks.ts over an in-memory provider_tasks table; only auth and the database client are faked.
 const stubs = {
+  preferences: 'export const admitProvider=async()=>"fal";',
   guard: 'export const startPaidRequest=async()=>({finish:async()=>{}});',
   auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});
 export const createServiceRoleClient=()=>({from:()=>({
@@ -18,6 +19,7 @@ const load = async entry => {
     entryPoints: [entry], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
+      b.onResolve({filter:/providerConfiguration\.js$/},()=>({path:'preferences',namespace:'stub'}));
       b.onResolve({ filter: /(^|\/)auth\.js$/ }, () => ({ path: 'auth', namespace: 'stub' }));
       b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));
@@ -40,7 +42,7 @@ const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
   globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? { request_id: 'fal-r1' } : { status: 'IN_QUEUE' });
   try {
     const submit = response();
-    await post({ method: 'POST', headers: {}, body: { endpoint: 'fal-ai/nano-banana-pro', input: { prompt: 'p' } } }, submit);
+    await post({ method:'POST',headers:{},body:{endpoint:'fal-ai/nano-banana-pro',input:{prompt:'Draw a tree'}} }, submit);
     const id = submit.body?.requestId ?? submit.body?.taskId;
     const status = response();
     if (id) await poll({ method: 'GET', headers: {}, query: { requestId: id, endpoint: 'fal-ai/nano-banana-pro' } }, status);

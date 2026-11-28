@@ -25,9 +25,9 @@ Mevcut sürüm **v0.1.2**, gereken sistem **macOS 13.5 veya sonrası**. Çalış
 1. Üstteki **Provider keys** düğmesini veya Mac menüsündeki **Banana Studio → Provider API Keys…** seçeneğini aç.
 2. [Sağlayıcı bağlantılarından](models.md) kullanacağın serviste anahtar oluştur. Servisin ödeme veya model erişimi açmanı istemesi mümkündür.
 3. Anahtarı ilgili kutuya yapıştır ve **Save** seç. Anahtarı üretim promptuna yazma.
-4. O servise ait görsel/video modelini seç. Enhance veya Brainstorm için **AI settings** bölümünde anahtarını eklediğin bir metin modeli de seç.
+4. **AI settings → Provider routing** içinde model için anahtarını kaydettiğin sağlayıcıyı seç. Enhance veya Brainstorm kullanacaksan metin modelini de seç.
 
-Başlangıçta GPT Image 2.5 + Opus 5.5 / Medium seçilidir; OpenAI + Anthropic ya da OpenRouter gerekir. Yalnızca OpenAI kullanmak istiyorsan hesabının erişimi varsa metin modelini de GPT-6.1 Sol seç. Enhance/Brainstorm'u kullanmadan doğrudan görsel promptu da yazabilirsin.
+[Güncel model listesini](models.md) içeren paketlerde tek bir fal.ai anahtarı, varsayılan rotalarda görsel ve yaratıcı metin üretimine yeter. MAGI-2 için EvoLink gerekir. Yalnızca OpenAI kullanacaksan bir Sunburst görsel modeli ve GPT-6.2 Sol için OpenAI rotasını seç. Enhance/Brainstorm'u atlayıp promptu doğrudan yazman da mümkün. Kurduğun pakette modeller farklıysa o sürümün yayın notlarını kontrol et.
 
 **Kontrol:** yeniden açınca kayıtlı alan **Saved in Keychain** yazar. Boş bıraktığın alan mevcut anahtarı korur; **Remove** yalnızca o sağlayıcının kayıtlı anahtarını siler. Anahtarlar macOS Anahtar Zinciri'ndedir; Banana Studio bulut hesabına gönderilmez.
 
@@ -65,7 +65,7 @@ Mac ve Windows aynı React arayüzünü ve SQLite çalışma alanını kullanır
 | Durum | Kontrol et |
 | --- | --- |
 | Mac uygulamayı açmıyor | Doğru işlemci paketini indir, Uygulamalar'a taşı, yukarıdaki uygulamaya özel Yine de Aç adımını izle. |
-| Sağlayıcı ayarlanmamış hatası | O sağlayıcının anahtarını ekle; bu uygulamada Gemini anahtarı Nano Banana için `FAL_KEY` yerine geçmez. |
+| Sağlayıcı ayarlanmamış hatası | Seçili sağlayıcının anahtarını ekle veya anahtarı bulunan desteklenen bir sağlayıcı seç. Örneğin Gemini anahtarı Nano'yu Google Gemini üzerinden çalıştırabilir, fal.ai üzerinden çalıştıramaz. |
 | Görsel üretildi ama Brainstorm çalışmıyor | Görsel ve metin modelleri farklı servis kullanabilir; **AI settings** bölümüne bak. |
 | Anahtar kayıtlı ama istek reddediliyor | Sağlayıcı bakiyesini, ödeme ayarını, model erişimini, limitleri ve hata metnini kontrol et. |
 | Webdeki galeri burada görünmüyor | Mac ve web alanları ayrı veri tutar. |

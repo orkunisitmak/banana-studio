@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Clock, Film, Wand2, Volume2, Scan } from 'lucide-react';
 import type { GenerationConfig } from '../types';
-import { DEFAULT_H3_MAX_OPTIONS, isH3MaxModeAvailable, resolveH3MaxMode, type H3MaxOptions } from '../lib/video/h3Max';
+import { DEFAULT_H3_MAX_OPTIONS, isH3MaxModeAvailable, resolveH3MaxMode, usesH3MaxTargetAudio, type H3MaxOptions } from '../lib/video/h3Max';
 import { getH3MaxConfigError, getH3MaxDraftCapabilities, getH3MaxDurationSeconds, getH3MaxReferenceImages } from '../lib/video/h3MaxConfig';
 export { getH3MaxDurationSeconds } from '../lib/video/h3MaxConfig';
 import { Dropdown } from './ControlDropdown';
@@ -13,7 +13,7 @@ export const getH3MaxUIState = (config: GenerationConfig) => {
   const keyframeIds = new Set([options.startImageId, options.endImageId, options.middleImageId].filter(id => id && config.referenceImages.some(image => image.id === id)));
   const available = isH3MaxModeAvailable(mode);
   const capabilities = getH3MaxDraftCapabilities(config);
-  return { mode, available, capabilities, options, imageLimit: available ? capabilities.images.max + (mode === 'reference_to_video' ? keyframeIds.size : 0) : 0 };
+  return { mode, available, capabilities, options, targetSoundtrack: mode === 'lip_sync' || usesH3MaxTargetAudio(mode, options.useTargetAudio), imageLimit: available ? capabilities.images.max + (mode === 'reference_to_video' ? keyframeIds.size : 0) : 0 };
 };
 
 export const getH3MaxInputError = getH3MaxConfigError;
@@ -69,6 +69,8 @@ export const H3MaxSettings: React.FC<{ config: GenerationConfig; onChange: React
   return <>
     {['text_to_video', 'image_to_video', 'reference_to_video'].includes(mode) && <Dropdown label="H3 Max prompt expansion" value={options.promptExpansionMode} options={[{ label: 'Balanced prompt', value: 'balanced' }, { label: 'Prompt as written', value: 'disabled' }, { label: 'Quality prompt', value: 'quality' }]} onSelect={value => update({ promptExpansionMode: value })} icon={Wand2} compact />}
     {mode === 'extend_video' && <Dropdown label="Expand prompt using source video" value={options.enablePromptExpansion ? 'on' : 'off'} options={[{ label: 'Expand prompt', value: 'on' }, { label: 'Prompt as written', value: 'off' }]} onSelect={value => update({ enablePromptExpansion: value === 'on' })} icon={Wand2} compact />}
+    {mode === 'reference_to_video' && <Dropdown label="H3 Max audio role" value={options.useTargetAudio ? 'target' : 'reference'} options={[{ label: 'Audio references', value: 'reference' }, { label: 'Target soundtrack', value: 'target' }]} onSelect={value => update({ useTargetAudio: value === 'target' })} icon={Volume2} compact />}
+
     {mode === 'reference_to_video' && options.middleImageId && <H3MaxTimeControl label="Middle" name="H3 Max middle frame time" value={options.middleFrameTime ?? config.videoDuration / 2} min={1 / 24} max={config.videoDuration - 1 / 24} onCommit={middleFrameTime => update({ middleFrameTime })} />}
     {mode === 'extend_video' && <Dropdown label="H3 Max extend output" value={options.output} options={[{ label: 'Source + continuation', value: 'extended' }, { label: 'Continuation only', value: 'continuation' }]} onSelect={output => update({ output })} icon={Film} compact />}
     {mode === 'lip_sync' && <Dropdown label="Transcribe target audio" value={options.enableTranscription ? 'on' : 'off'} options={[{ label: 'Transcription off', value: 'off' }, { label: 'Transcription on', value: 'on' }]} onSelect={value => update({ enableTranscription: value === 'on' })} icon={Volume2} compact />}

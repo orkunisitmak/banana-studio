@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
 const out = await build({ stdin: { contents: `export * from './src/lib/images/outpaint.ts';
-  export { compositeEditPixels } from './src/lib/images/imageEditPixels.ts';
+  export { compositeEditPixels, buildEditMarkupPixels } from './src/lib/images/imageEditPixels.ts';
   export { isValidEditRegion, copyEditRegion, describeEditRegion, describeEditRegionPercent, editRegionPixels } from './src/lib/images/imageEditRegion.ts';
   export { validateOpenAIImageSize } from './src/lib/images/openaiImage.ts';
   export { canUseNanoEditCanvas } from './src/components/galleryImageEdit.ts';
@@ -90,4 +90,15 @@ test('saved expansion results are not offered a source/result comparison', () =>
   assert.equal(m.isCanvasExpansionEdit(m.getRecordedImageEditDetails(media(ordinary, m.copyEditRegion(layout.region)))), true, 'server protection record');
   assert.equal(m.isCanvasExpansionEdit(m.getRecordedImageEditDetails(media(ordinary))), false, 'ordinary edit keeps the comparison');
   assert.equal(m.isCanvasExpansionEdit(undefined), false);
+});
+
+test('the 2.6 markup sits entirely outside the editable pixels and is discarded by the compositor',()=>{
+  const size=40,region={tool:'rectangle',x:.25,y:.25,width:.5,height:.5};
+  const markup=m.buildEditMarkupPixels(region,size,size),source=new Uint8ClampedArray(markup.length);
+  let red=0;
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const i=(y*size+x)*4;if(!markup[i+3])continue;
+    assert.ok(x<10||x>=30||y<10||y>=30);assert.deepEqual([...markup.slice(i,i+4)],[255,0,0,255]);red++;
+  }
+  assert.ok(red>0);assert.deepEqual(m.compositeEditPixels(source,markup,size,size,region),source);
 });

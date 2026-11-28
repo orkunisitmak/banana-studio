@@ -12,7 +12,7 @@ const { build } = req('esbuild');
 const stubs = {
   '/authService': 'export const logUsage=()=>{};export const supabase={auth:{getSession:async()=>({data:{session:{access_token:"t",user:{id:"u1"}}}})}};',
   '/storageService': 'export const uploadBase64ToPublicUrl=async()=>(globalThis.__media++,"https://cdn.example/frame.jpg");export const uploadBlobToPublicUrl=async()=>(globalThis.__media++,"");export const uploadVideoBlobToPublicUrl=async()=>(globalThis.__media++,"");export const refreshMediaAccessUrl=async u=>(globalThis.__media++,u);',
-  '/providerRouting': 'export const selectProvider=async()=>"evolink";',
+  '/providerRouting': 'export const selectProvider=async()=>"fal";',
 };
 const compiled = await build({ entryPoints: ['src/services/runwayService.ts'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
   define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },

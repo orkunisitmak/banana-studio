@@ -1,3 +1,5 @@
+import { BrainstormTextToggle } from './BrainstormTextToggle';
+
 import { submitOnEnter } from './submitOnEnter';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,6 +30,10 @@ import type { TextTaskStage } from '../services/geminiClient';
 interface YouTubeChannelRefProps {
   onAddReferences: (images: ReferenceImage[]) => void;
   onPrepareBrainstorm: (prepared: YouTubeBrainstormPreparation) => void;
+  analysisDisabledReason?: string | null;
+  brainstormNoText?: boolean;
+  onBrainstormNoTextChange?: (value: boolean) => void;
+
   referenceImages?: ReferenceImage[];
   personGroups?: PersonGroupDefinition[];
   draftKey: string;
@@ -55,6 +61,8 @@ const BRIEF_STAGE_LABELS: Record<'cover' | TextTaskStage, string> = {
 export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   onAddReferences,
   onPrepareBrainstorm,
+  analysisDisabledReason, brainstormNoText, onBrainstormNoTextChange,
+
   referenceImages = [],
   personGroups = [],
   draftKey,
@@ -83,6 +91,9 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   const [briefElapsed, setBriefElapsed] = useState(0);
   const [selectedPersonIds, setSelectedPersonIds] = useState<number[]>([]);
   const people = getPersonGroups(referenceImages.filter(ref => !ref.isVideoContext), personGroups).filter(group => group.images.length);
+  const analysisBlock = useRef(analysisDisabledReason);
+  analysisBlock.current = analysisDisabledReason;
+
   const requestRef = useRef<AbortController | null>(null);
   // Only the latest Top/Browse request may apply its list; reset() also invalidates it.
   const listRequest = useRef(0);
@@ -265,7 +276,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   };
 
   const handlePrepareBrainstorm = async () => {
-    if (!videoInfo || requestRef.current) return;
+    if (!videoInfo || requestRef.current || analysisBlock.current) return;
     const request = new AbortController();
     requestRef.current = request;
     const expectedDraftKey = draftKey;
@@ -290,7 +301,10 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
       const thumbnailData = await waitForTask(downloadThumbnail(videoInfo.thumbnailUrl, { signal: task.signal }), task.signal);
       task.check();
       task.signal.throwIfAborted();
+      if (analysisBlock.current) throw new Error(analysisBlock.current);
+
       const analysis = await waitForTask(analyzeYouTubeVideo(videoInfo, thumbnailData, {
+        brainstormNoText,
         signal: task.signal,
         onStage: stage => {
           task.check();
@@ -576,7 +590,7 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                         {people.length ? <div className="mt-2 flex flex-wrap gap-1.5">
                           {people.map(group => <button key={group.id} type="button"
                             aria-label={`Include ${group.label}`} aria-pressed={selectedPersonIds.includes(group.id)}
-                            disabled={isGeneratingBrief}
+                            disabled={isGeneratingBrief || !!analysisDisabledReason}
                             onClick={() => {
                               const ids = selectedPersonIds.includes(group.id) ? selectedPersonIds.filter(id => id !== group.id) : [...selectedPersonIds, group.id];
                               setSelectedPersonIds(ids);
@@ -588,6 +602,8 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                           </button>)}
                         </div> : <p className="mt-1 text-xs leading-relaxed text-gray-400">Add saved people or assign reference photos for consistent faces. You can also prepare ideas without selected people.</p>}
                       </div>
+                      {onBrainstormNoTextChange && <BrainstormTextToggle noText={brainstormNoText} onChange={onBrainstormNoTextChange} />}
+
                       {preparedVideo ? <div className="space-y-3">
                         <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-200">
                           {preparedVideo.analysis.warning}
@@ -608,13 +624,15 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
                           className="w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-semibold text-black disabled:opacity-40">
                           Use analyzed brief
                         </button>
-                        <button onClick={() => handlePrepareBrainstorm()} className="text-xs text-gray-400 hover:text-white">Try video analysis again</button>
+                        <button disabled={!!analysisDisabledReason} onClick={() => handlePrepareBrainstorm()} className="text-xs text-gray-400 hover:text-white disabled:opacity-40">Try video analysis again</button>
                       </div> : <button onClick={() => handlePrepareBrainstorm()}
-                        disabled={isGeneratingBrief}
+                        disabled={isGeneratingBrief || !!analysisDisabledReason}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-3 py-3 text-sm font-bold text-black transition-colors hover:bg-lime-300 disabled:bg-gray-800 disabled:text-gray-500">
                         {isGeneratingBrief ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                         {isGeneratingBrief ? BRIEF_STAGE_LABELS[briefStage] : 'Analyze full video'}
                       </button>}
+                      {!isGeneratingBrief && analysisDisabledReason && <p role="status" className="text-xs text-amber-300">{analysisDisabledReason}</p>}
+
                       {isGeneratingBrief && <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-xs text-gray-400">
                           <span role="status">{BRIEF_STAGE_LABELS[briefStage]}</span>

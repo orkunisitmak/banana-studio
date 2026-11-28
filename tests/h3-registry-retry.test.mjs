@@ -18,6 +18,8 @@ const load = async entry => {
     entryPoints: [entry], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
+    b.onResolve({ filter: /providerConfiguration\.js$/ }, () => ({ path: 'admission', namespace: 'video-provider' }));
+    b.onLoad({ filter: /.*/, namespace: 'video-provider' }, () => ({ contents: 'export const admitProvider=async (_req,_res,_model,provider)=>provider;export const providerKey=()=>"testing";' }));
       b.onResolve({ filter: /(^|\/)auth\.js$/ }, () => ({ path: 'auth', namespace: 'stub' }));
       b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'guard', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({ contents: stubs[a.path], loader: 'js' }));

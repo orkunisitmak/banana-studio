@@ -9,13 +9,25 @@ import { getGeminiClient, getOpenAITextClient, Modality, ThinkingLevel, type Tex
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { compressBase64Image } from "./imageCompression";
 import { generateOpenAIImage, type ImageGenerationContext } from "./openaiImageService";
-import { getSunburstReferences, SUNBURST_MODEL } from "../lib/images/openaiImage";
+import { getSunburstReferences, isOpenAIImageModel } from "../lib/images/openaiImage";
+import { SEEDREAM_MODEL } from '../lib/images/seedreamModel';
+import { applyBrainstormTextPolicy, buildBrainstormTextInstruction } from '../lib/prompts/brainstormText';
 import { assembleSunburstBrainstormIdea, buildReferenceGenerationRule, buildSunburstGuidance, prepareImagePromptResult, buildYouTubeCameraGazeRule, buildYouTubeWardrobeRule, buildYouTubeEditorialRule, buildYouTubeStyleReferenceRule, describeSunburstReference, getSunburstEditIntent, isYouTubeChannelBannerPrompt, isYouTubeThumbnailPrompt, normalizeSunburstPrompt, preserveSunburstEditBrief, preserveSunburstSourceBrief, preserveSunburstThumbnailBrief, stripLegacyOutputCanvas, type ImagePromptSettings } from "../lib/images/imagePrompting";
 import { logUsage } from "./authService";
 import { refreshMediaAccessUrl } from './storageService';
 import { getSeedanceFrameError, normalizeSeedanceFrameTags } from '../lib/video/seedanceFrames';
+import { isSeedanceModel, seedanceMode } from '../lib/video/seedance';
+import { falSeedanceReferenceError } from '../lib/video/falSeedance25';
+import { exceedsCharacterLimit } from '../lib/video/providerTextLimits';
 import { resolveH3MaxMode } from '../lib/video/h3Max';
 import { buildH3MaxPromptGuide, getH3MaxPromptImages, h3MaxAcceptsPrompt, normalizeH3MaxPromptLanguage, type H3MaxEnhancementContext } from '../lib/video/h3MaxPromptGuide';
+import { getOmniMode, normalizeOmniPrompt, OMNI_LIMITS, OMNI_MODEL } from '../lib/video/omniFlash';
+import { MAGI2_ENDPOINTS, MAGI2_LIMITS, MAGI2_MODEL, validateMagi2MediaCounts, type Magi2Mode } from '../lib/video/magi2';
+import { getMagi2Images, getMagi2Prompt } from '../lib/video/magi2Config';
+import { getEvoH3DraftMode, normalizeEvoH3Prompt, toEvoH3Mode } from '../lib/video/evoH3MaxConfig';
+import { EVO_H3_CAPABILITIES, validateEvoH3MediaCounts } from '../lib/video/evoH3Max';
+import { selectProvider } from './providerRouting';
+import type { TextFeature } from '../lib/prompts/textModels';
 import { OPENAI_TEXT_MODEL, OPENROUTER_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThinkingLevel, resolveTextModelPreferences } from "../lib/prompts/textModels";
 export { getTextModel, setTextModel } from "../lib/prompts/textModels";
 
@@ -27,9 +39,9 @@ const DEFAULT_IMAGE_THINKING_LEVEL = ThinkingLevel.HIGH;
 
 // Enhance / brainstorm / variations run on the configurable text
 // model and thinking settings are captured before preparing references.
-const captureTextSettings = async (options: TextTaskOptions = {}): Promise<TextTaskOptions> => {
+const captureTextSettings = async (feature: TextFeature, options: TextTaskOptions = {}): Promise<TextTaskOptions> => {
   if (options.model && options.reasoningEffort && options.thinkingLevel) return { ...options };
-  const preferences = await resolveTextModelPreferences();
+  const preferences = await resolveTextModelPreferences(feature);
   options.signal?.throwIfAborted();
   return { ...options, model: options.model || preferences.model,
     reasoningEffort: options.reasoningEffort || preferences.reasoningEffort,
@@ -53,7 +65,7 @@ const isSupportedImageModel = (model: unknown): model is ImageModelId => {
   return model === 'gemini-3-pro-image-preview'
     || model === 'gemini-3.1-flash-image-preview'
     || model === 'gemini-nano-banana-2.1'
-    || model === SUNBURST_MODEL;
+    || model === 'seedream-5.5' || isOpenAIImageModel(model);
 };
 
 /**
@@ -232,12 +244,12 @@ const runImagePromptTask = async (
     : settings.imagePromptCategory === 'youtube_thumbnail' ? 'simple' : settings.imagePromptCategory || 'simple', count = 5, customInstructions?: string,
   options: TextTaskOptions = {},
 ): Promise<string> => {
-  options = await captureTextSettings(options);
+  options = await captureTextSettings(task, options);
   if (getSunburstEditIntent(prompt, references, settings)) {
     prompt = stripYouTubeCameraGaze(prompt);
     if (customInstructions) customInstructions = stripYouTubeCameraGaze(customInstructions);
   }
-  const compactBrainstorm = task === 'brainstorm' && settings.imageModel === SUNBURST_MODEL;
+  const compactBrainstorm = task === 'brainstorm' && isOpenAIImageModel(settings.imageModel);
   if (compactBrainstorm) {
     prompt = flattenPreparedImageBrief(prompt);
     if (customInstructions) customInstructions = flattenPreparedImageBrief(customInstructions);
@@ -266,6 +278,7 @@ const runImagePromptTask = async (
     parts.push({ text: describeSunburstReference(ref, index) }, { inlineData: { data, mimeType: 'image/jpeg' } });
   }
   parts.push({ text: `${customInstructions ? `USER CREATIVE DIRECTION:\n${prepareTextStagePrompt(customInstructions, references)}\n\n` : ''}USER BRIEF:\n${prepareTextStagePrompt(prompt, references) || 'Use the attached visual concept and the selected reference roles.'}` });
+  if (task === 'brainstorm' && settings.brainstormNoText) parts.push({ text: buildBrainstormTextInstruction(true) });
   const response = await generateTextContent(getGeminiClient(), parts, task, prompt, options, wardrobeRequired ? 'wardrobe' : undefined, task === 'brainstorm' ? count : undefined);
   options.onStage?.('finishing');
   await finishTextUsage(logUsage(task, response.model, prompt || `[${task}-empty-prompt]`, 0, {
@@ -286,9 +299,9 @@ export const enhancePrompt = async (
   settings?: ImagePromptSettings,
   taskOptions: TextTaskOptions = {},
 ): Promise<string> => {
-  const options = await captureTextSettings(taskOptions);
+  const options = await captureTextSettings('enhance', taskOptions);
   options.onStage?.('preparing');
-  if (settings?.imageModel === SUNBURST_MODEL) {
+  if (settings && (settings.imageModel === SEEDREAM_MODEL || isOpenAIImageModel(settings.imageModel) || getSunburstEditIntent(prompt, referenceImages, settings)?.wholeImage)) {
     return runImagePromptTask('enhance', prompt, referenceImages, settings, undefined, undefined, undefined, options);
   }
   const ai = getGeminiClient();
@@ -399,24 +412,79 @@ export const enhanceVideoPrompt = async (
   referenceAudios: ReferenceAudio[] = [],
   taskOptions: TextTaskOptions = {},
   h3Context?: H3MaxEnhancementContext,
+  magi2Context?: { mode: Magi2Mode; audioEnabled?: boolean },
 ): Promise<string> => {
-  const h3 = videoModel === 'minimax-h3' ? h3Context || { mode: resolveH3MaxMode('auto', { images: referenceImages.length, videos: referenceVideos.length, audios: referenceAudios.length }) } : undefined;
+  const assets = { referenceImages, referenceVideos, referenceAudios };
+  const magi2Mode = videoModel === MAGI2_MODEL ? magi2Context?.mode ?? 'text_only' : undefined;
+  if (videoModel === MAGI2_MODEL) {
+    if (!magi2Mode || !Object.hasOwn(MAGI2_ENDPOINTS, magi2Mode) || videoOperation !== 'generate') throw new Error('Choose a valid MAGI-2 generation mode.');
+    validateMagi2MediaCounts(magi2Mode, referenceImages.length, referenceVideos.length, referenceAudios.length);
+  }
+  const omniMode = videoModel === OMNI_MODEL ? getOmniMode({ ...assets, videoOperation }) : undefined;
+  if (omniMode === 'upscale') throw new Error('Omni upscale does not use a prompt.');
+  if (omniMode && referenceAudios.length) throw new Error('Omni does not accept separate audio references.');
+  const evoMode = videoModel === 'minimax-h3' && await selectProvider(videoModel, taskOptions.signal) === 'evolink'
+    ? getEvoH3DraftMode({ h3MaxMode: h3Context?.mode }) : undefined;
+  if (evoMode) {
+    if (videoOperation !== 'generate') throw new Error('EvoLink H3 Max supports generation only.');
+    validateEvoH3MediaCounts(toEvoH3Mode(evoMode), referenceImages.length, referenceVideos.length, referenceAudios.length);
+  }
+  const h3 = evoMode ? { mode: evoMode } : videoModel === 'minimax-h3' ? h3Context || { mode: resolveH3MaxMode('auto', { images: referenceImages.length, videos: referenceVideos.length, audios: referenceAudios.length }) } : undefined;
   if (h3 && !h3MaxAcceptsPrompt(h3.mode)) {
     throw new Error('Bu H3 Max modu prompt kabul etmiyor. Görsel, video ve ses girdileri doğrudan kullanılır; prompt geliştirme gerekmiyor.');
   }
-  if (videoModel === 'seedance-2.5' && !referenceVideos.some(video => video.isContinuation)) {
+  const seedanceProvider = isSeedanceModel(videoModel) ? await selectProvider(videoModel, taskOptions.signal) : undefined;
+  const falSeedance = seedanceProvider === 'fal';
+  if (falSeedance && isSeedanceModel(videoModel)) {
+    const mode = seedanceMode(referenceImages, referenceVideos, referenceAudios, videoOperation);
+    const error = falSeedanceReferenceError(mode, referenceImages.length, referenceVideos.length, referenceAudios.length, videoModel);
+    if (error) throw new Error(error);
+  }
+  if (falSeedance || (videoModel === 'seedance-2.5' && !referenceVideos.some(video => video.isContinuation))) {
     const error = getSeedanceFrameError(referenceImages, referenceVideos.length, referenceAudios.length, videoOperation);
     if (error) throw new Error(error);
   }
-  const options = await captureTextSettings(taskOptions);
+  const options = await captureTextSettings('video_enhance', taskOptions);
   options.onStage?.('preparing');
   const ai = getGeminiClient();
 
   const parts: any[] = [];
 
+  if (magi2Mode || omniMode) {
+    const mode = magi2Mode ?? omniMode;
+    const name = magi2Mode ? 'MAGI-2' : 'Gemini Omni 1.2 Flash';
+    const limit = magi2Mode ? MAGI2_LIMITS.maxPromptLength : OMNI_LIMITS.prompt;
+    const images = magi2Mode ? getMagi2Images({ magi2Mode, referenceImages }) : referenceImages;
+    for (const [index, image] of images.entries()) {
+      const label = mode === 'image_to_video'
+        ? ((magi2Mode ? index === 0 : image.isFirstFrame) ? 'First frame' : 'Last frame')
+        : omniMode === 'reference_to_video' ? `<IMAGE_REF_${index}>` : `Image ${index + 1}`;
+      const data = await resolveReferenceImageData(image, options.signal);
+      if (!data) throw new Error(`${name}: could not read ${label}.`);
+      parts.push({ text: label }, { inlineData: { data, mimeType: 'image/jpeg' } });
+    }
+    const normalize = (value: string) => magi2Mode ? getMagi2Prompt({ ...assets, magi2Mode, prompt: value }) : normalizeOmniPrompt(value, omniMode!, images);
+    const instruction = mode === 'text_to_video' || mode === 'text_only' ? 'Generate from text alone; no references are attached.'
+      : mode === 'image_to_video' ? 'Animate the first frame and, only when supplied, end on the last frame. Keep the subjects and composition consistent.'
+      : mode === 'edit' ? 'Describe only the requested edits to the supplied video. Preserve all unrelated details.'
+      : mode === 'extend' ? 'Describe the continuation after the supplied video, not a replacement for it.'
+      : `Guide the shot using only the ordered assets: ${images.length} images, ${referenceVideos.length} videos, ${referenceAudios.length} audio clips. ${omniMode ? 'Use zero-based <IMAGE_REF_n> and <VIDEO_REF_n> labels.' : 'Use one-based Image N, Video N and Audio N labels.'}`;
+    parts.push({ text: `Write a production prompt for ${name}, mode ${mode}${duration > 0 ? `, ${duration} seconds` : ''}. ${instruction}
+${magi2Context?.audioEnabled === false ? 'Generated audio is off; describe visual action only.' : 'Preserve requested sound or dialogue without inventing dialogue.'}
+Respect the requested subject, movement, camera and timing. Do not invent content from audio or video metadata. Use natural language, no URLs, editor tags or unsupported controls. Return only the finished prompt, at most ${limit} characters.
+User-provided video notes: ${JSON.stringify(referenceVideos.map((video, index) => ({ video: index + 1, seconds: video.duration, description: video.previousPrompt })))}
+User draft: ${normalize(prompt)}` });
+    const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
+    await finishTextUsage(logUsage('video_enhance', response.model, prompt, 0, { usageMetadata: response.usageMetadata, targetVideoModel: videoModel }));
+    const enhanced = normalize(response.text || '');
+    if (!enhanced || exceedsCharacterLimit(enhanced, limit)) throw new Error(`The enhanced ${name} prompt must contain 1–${limit} characters.`);
+    return enhanced;
+  }
+
   if (h3) {
     const references = { images: referenceImages, videos: referenceVideos, audios: referenceAudios };
-    for (const { label, image } of getH3MaxPromptImages(h3, referenceImages)) {
+    const images = evoMode ? referenceImages.map((image, index) => ({ image, label: evoMode === 'image_to_video' ? (index === 0 ? 'First frame' : 'Last frame') : `Image ${index + 1}` })) : getH3MaxPromptImages(h3, referenceImages);
+    for (const { label, image } of images) {
       const data = await resolveReferenceImageData(image, options.signal);
       if (!data) throw new Error(`H3 Max ${label} görseli okunamadı; prompt eksik referansla oluşturulmadı.`);
       parts.push({ text: `=== ${label} ===` }, { inlineData: { data, mimeType: 'image/jpeg' } });
@@ -425,14 +493,19 @@ export const enhanceVideoPrompt = async (
       position: index + 1, duration: video.duration, description: video.previousPrompt || undefined,
     }));
     const audioContext = referenceAudios.map((audio, index) => ({ position: index + 1, duration: audio.duration }));
-    parts.push({ text: `${buildH3MaxPromptGuide(h3, references, duration)}\n\nAttached video metadata (descriptions are unverified user context): ${JSON.stringify(sourceContext)}\nAttached audio metadata: ${JSON.stringify(audioContext)}\n\nUser Draft: ${normalizeH3MaxPromptLanguage(prompt, h3, references) || 'Describe the selected operation using only its attached inputs; preserve unrequested details.'}` });
+    const normalize = (value: string) => evoMode ? normalizeEvoH3Prompt(value, evoMode, assets) : normalizeH3MaxPromptLanguage(value, h3, references);
+    const guide = evoMode
+      ? `Write a ${duration}-second MiniMax H3 Max ${evoMode} production prompt for EvoLink. ${evoMode === 'reference_to_video' ? 'Use only the attached, ordered Image N, Video N and Audio N labels and assign their requested roles.' : evoMode === 'image_to_video' ? 'Animate the start image and end on the supplied end image if present.' : 'No media are attached.'} Preserve the user’s subject and quoted dialogue. Do not invent references, editor tags, URLs or unsupported controls. Do not claim to have seen videos or heard audio from metadata. Return only the prompt, at most ${EVO_H3_CAPABILITIES.maxPromptLength} characters.`
+      : buildH3MaxPromptGuide(h3, references, duration);
+    parts.push({ text: `${guide}\n\nAttached video metadata (descriptions are unverified user context): ${JSON.stringify(sourceContext)}\nAttached audio metadata: ${JSON.stringify(audioContext)}\n\nUser Draft: ${normalize(prompt) || 'Describe the selected operation using only its attached inputs; preserve unrequested details.'}` });
     const response = await generateTextContent(ai, parts, 'video_enhance', prompt, options);
     await finishTextUsage(logUsage('video_enhance', response.model, prompt || '[video-enhance-empty]', 0, {
       usageMetadata: response.usageMetadata as any,
       referenceImageCount: referenceImages.length, referenceVideoCount: referenceVideos.length,
       referenceAudioCount: referenceAudios.length, targetVideoModel: videoModel, h3MaxMode: h3.mode,
     }));
-    const enhanced = normalizeH3MaxPromptLanguage(response.text || prompt, h3, references);
+    const enhanced = normalize(response.text || prompt);
+    if (evoMode && exceedsCharacterLimit(enhanced, EVO_H3_CAPABILITIES.maxPromptLength)) throw new Error('The enhanced EvoLink H3 Max prompt exceeds 7000 characters.');
     if (h3.mode === 'recast' && enhanced.length > 2000) {
       throw new Error('H3 Max için geliştirilen prompt 2000 karakteri aşıyor. Taslağı kısaltıp yeniden dene.');
     }
@@ -444,7 +517,8 @@ export const enhanceVideoPrompt = async (
   const styleImgs = referenceImages.filter(img => getPersonId(img) == null && !img.isFirstFrame && !img.isLastFrame);
   const firstFrame = referenceImages.find(img => img.isFirstFrame);
   const lastFrame = referenceImages.find(img => img.isLastFrame);
-  const isSeedanceFrameGeneration = videoModel === 'seedance-2.5' && videoOperation === 'generate'
+  const seedanceVersion = videoModel === 'seedance-2.0' ? '2.0' : '2.5';
+  const isSeedanceFrameGeneration = (falSeedance || videoModel === 'seedance-2.5') && videoOperation === 'generate'
     && !!firstFrame && referenceVideos.length === 0 && referenceAudios.length === 0
     && referenceImages.every(image => image.isFirstFrame || image.isLastFrame);
   const isSeedance20ReferenceEdit = videoModel === 'seedance-2.0' && videoOperation === 'reference_edit';
@@ -453,8 +527,8 @@ export const enhanceVideoPrompt = async (
   const isContinuation = (videoOperation === 'extend'
     || (videoOperation === 'generate' && continuationReferenceIndex !== -1));
   const isReferenceGeneration = videoOperation === 'generate'
-    && referenceVideos.length > 0 && !isContinuation;
-  const isSeedance25ReferenceGeneration = videoModel === 'seedance-2.5'
+    && (referenceVideos.length > 0 || (falSeedance && !isSeedanceFrameGeneration && (referenceImages.length > 0 || referenceAudios.length > 0))) && !isContinuation;
+  const isSeedance25ReferenceGeneration = videoModel === 'seedance-2.5' && seedanceProvider === 'evolink'
     && isReferenceGeneration;
   // Seedance keeps the editor's canonical @ tokens.
   const videoReferenceTags = referenceVideos.map((_, index) => `@VIDEO_${index + 1}`);
@@ -575,7 +649,7 @@ export const enhanceVideoPrompt = async (
         ? `Use ${sourceVideoTag} as the terminal-state source of truth; fit only the next action beats into the ${durationLabel} duration`
         : `Time the action beats to fit the ${durationLabel} duration`;
 
-  const seedanceFrameInstruction = `You are a video director writing Seedance 2.5 image-to-video directions. The attached images are endpoint constraints, not generic style references. The FIRST FRAME is the exact opening composition.${lastFrame ? ' The LAST FRAME is the exact ending composition.' : ' There is no last frame; do not invent an attached ending image.'} Interpret the visible images and describe only the requested movement${lastFrame ? ' that connects these two compositions' : ' beginning from the first image'} within the ${durationLabel} clip.
+  const seedanceFrameInstruction = `You are a video director writing Seedance ${seedanceVersion} image-to-video directions. The attached images are endpoint constraints, not generic style references. The FIRST FRAME is the exact opening composition.${lastFrame ? ' The LAST FRAME is the exact ending composition.' : ' There is no last frame; do not invent an attached ending image.'} Interpret the visible images and describe only the requested movement${lastFrame ? ' that connects these two compositions' : ' beginning from the first image'} within the ${durationLabel} clip.
 
 ## FRAME TRANSITION RULES
 - Preserve the user's requested camera path, action and transformation. Work out a coherent opening, middle and arrival; do not replace the brief with a different transition.
@@ -592,7 +666,7 @@ Keep the prompt concise, normally 120-250 words. Use [FRAME GUIDANCE], [MOTION A
 
   const systemInstruction = isSeedanceFrameGeneration
       ? seedanceFrameInstruction
-    : `You are an expert video prompt engineer for ${videoModel === 'seedance-2.0' ? 'Seedance 2.0' : 'Seedance 2.5'} (via EvoLink API). ${operationInstruction} Your task is to transform the user's simple video concept into a detailed, cinematic video prompt.${imageContext}
+    : `You are an expert video prompt engineer for Seedance ${seedanceVersion} via ${seedanceProvider}. ${operationInstruction} ${falSeedance ? 'Keep the editor tags in your deliverable; the runtime translates them to the provider’s reference syntax. ' : ''}Transform the user's video concept into a detailed, cinematic video prompt.${imageContext}
 
 ## CRITICAL RULE: PRESERVE GROUP AND REF TAGS
 Keep every @MAIN_PERSON, @SECOND_PERSON, @PERSON_N, @REF_IMAGE_N, @VIDEO_1, @VIDEO_N, and @AUDIO_N token from the user's draft verbatim in your output.
@@ -718,9 +792,9 @@ export const generatePromptVariation = async (
   settings?: ImagePromptSettings,
   taskOptions: TextTaskOptions = {},
 ): Promise<string> => {
-  const options = await captureTextSettings(taskOptions);
+  const options = await captureTextSettings('variation', taskOptions);
   options.onStage?.('preparing');
-  if (settings?.imageModel === SUNBURST_MODEL) {
+  if (settings && (settings.imageModel === SEEDREAM_MODEL || isOpenAIImageModel(settings.imageModel) || getSunburstEditIntent(originalPrompt, referenceImages, settings)?.wholeImage)) {
     return runImagePromptTask('variation', originalPrompt, referenceImages, settings, undefined, undefined, undefined, options);
   }
   const ai = getGeminiClient();
@@ -882,7 +956,8 @@ export const generateMedia = async (
   if (activeImageModel !== config.imageModel) config = { ...config, imageModel: activeImageModel };
   const selectedImageModel = isSupportedImageModel(config.imageModel) ? config.imageModel : IMAGE_MODEL_NAME;
 
-  const requestPrompt = config.prompt.trim() || (selectedImageModel !== SUNBURST_MODEL && config.referenceImages?.length
+  if (selectedImageModel === 'seedream-5.5') return generateOpenAIImage(config,config.prompt.trim(),context,onProgress);
+  const requestPrompt = config.prompt.trim() || (!isOpenAIImageModel(selectedImageModel) && config.referenceImages?.length
     ? 'Create a new image using the attached references.' : config.prompt);
   return generateOpenAIImage({ ...config, imageModel: selectedImageModel }, normalizeSunburstPrompt(requestPrompt, config.referenceImages || []), context, onProgress);
 };
@@ -1029,8 +1104,9 @@ export const brainstormIdeas = async (
   try {
     task.signal.throwIfAborted();
     options.onStage?.('preparing');
-    return await waitForTask(brainstormIdeasInternal(referenceImages, category, userBrief, customInstructions, ideaCount, settings,
-      await captureTextSettings({ ...options, signal: task.signal })), task.signal);
+    const ideas = await waitForTask(brainstormIdeasInternal(referenceImages, category, userBrief, customInstructions, ideaCount, settings,
+      await captureTextSettings('brainstorm', { ...options, signal: task.signal })), task.signal);
+    return settings?.brainstormNoText ? ideas.map(idea => ({ ...idea, text: applyBrainstormTextPolicy(idea.text, true) })) : ideas;
   } finally { task.dispose(); }
 };
 
@@ -1051,7 +1127,7 @@ const brainstormIdeasInternal = async (
   const wardrobeRequired = needsBrainstormWardrobe(combinedBrief, referenceImages, targetSettings, category, normalizedIdeaCount);
   const cameraGaze = buildYouTubeCameraGazeRule(combinedBrief, referenceImages, targetSettings,
     category === 'youtube_thumbnail' || isYouTubeThumbnailPrompt(combinedBrief, referenceImages, targetSettings));
-  if (settings?.imageModel === SUNBURST_MODEL || category === 'simple' || category === 'youtube_thumbnail') {
+  if (targetSettings.imageModel === SEEDREAM_MODEL || isOpenAIImageModel(targetSettings.imageModel) || getSunburstEditIntent(combinedBrief, referenceImages, targetSettings)?.wholeImage || category === 'simple' || category === 'youtube_thumbnail') {
     const response = await runImagePromptTask('brainstorm', userBrief || '', referenceImages, targetSettings, category, normalizedIdeaCount, customInstructions, options);
     const brief = [userBrief, customInstructions].filter(Boolean).join('\n\n');
     return parseBrainstormIdeas(response, normalizedIdeaCount,
@@ -1059,7 +1135,7 @@ const brainstormIdeasInternal = async (
       .map(idea => {
         const text = getSunburstEditIntent(brief, referenceImages, settings)
         ? preserveSunburstEditBrief(idea.text, brief, referenceImages, settings)
-        : settings?.imageModel === SUNBURST_MODEL
+        : isOpenAIImageModel(settings?.imageModel)
         ? assembleSunburstBrainstormIdea(idea.text, userBrief || '', referenceImages, customInstructions, !isYouTubeChannelBannerPrompt(brief) && (category === 'youtube_thumbnail' || isYouTubeThumbnailPrompt(brief, referenceImages, settings)))
         : isYouTubeChannelBannerPrompt(brief)
         ? preserveSunburstSourceBrief(idea.text, userBrief || '', referenceImages, customInstructions)
@@ -1196,7 +1272,7 @@ Each idea should be distinctly different from the others.
 Return ONLY a valid JSON array of exactly ${normalizedIdeaCount} strings. Each string is one complete, detailed narrative prompt.
 Format: ["Detailed narrative prompt 1...", "Detailed narrative prompt 2...", ...]`;
 
-  const guidance = [fullPrompt, buildYouTubeWardrobeRule(userBrief || '', referenceImages, { imagePromptCategory: category }), cameraGaze].filter(Boolean).join('\n\n');
+  const guidance = [fullPrompt, buildBrainstormTextInstruction(settings?.brainstormNoText), buildYouTubeWardrobeRule(userBrief || '', referenceImages, { imagePromptCategory: category }), cameraGaze].filter(Boolean).join('\n\n');
   parts.push({ text: wardrobeRequired ? buildBrainstormWardrobeGuidance(guidance, referenceImages, normalizedIdeaCount) : guidance });
 
   try {

@@ -11,7 +11,7 @@ export const createServiceRoleClient=()=>({from:()=>({
   select:()=>({limit:async()=>({error:null}),eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id)||null,error:null})})})}),
   insert:async row=>{const t=globalThis.__table;t.attempts++;if(t.rows.some(r=>r.task_id===row.task_id))return{error:{code:"23505"}};if(t.ghost&&t.attempts===1){t.rows.push(row);throw new Error("timeout")}if(t.failures>0){t.failures--;if(t.throws)throw new Error("db down");return{error:{code:"500"}}}t.rows.push(row);return{error:null}},
 })});
-export const createUserScopedClient=()=>({from:()=>({select:()=>({eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id&&r.user_id==="u1")||null,error:null})})})})})});`,
+export const createUserScopedClient=()=>({rpc:()=>({abortSignal:async()=>({data:{'seedance-2.5':'evolink'}})}),from:()=>({select:()=>({eq:(_,provider)=>({eq:(__,id)=>({maybeSingle:async()=>({data:globalThis.__table.rows.find(r=>r.provider===provider&&r.task_id===id&&r.user_id==="u1")||null,error:null})})})})})});`,
 };
 const load = async entry => {
   const out = await build({
@@ -35,8 +35,8 @@ const reply = body => ({ ok: true, status: 200, json: async () => body, text: as
 // failures: how many registry inserts fail before one works; throws: fail by throwing instead of returning an error.
 const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
   globalThis.__table = { rows: [...rows], attempts: 0, failures, throws, ghost };
-  const saved = { fetch: globalThis.fetch, key: process.env.FAL_KEY };
-  process.env.FAL_KEY = 'k';
+  const saved = { fetch: globalThis.fetch, key: process.env.FAL_KEY, enabled:process.env.FAL_ENABLED, evoKey:process.env.EVOLINK_API_KEY };
+  process.env.FAL_KEY = 'k'; process.env.FAL_ENABLED = 'true'; process.env.EVOLINK_API_KEY = 'synthetic';
   let posts = 0;
   globalThis.fetch = async (url, init) => reply(init?.method === 'POST' ? (posts++, { request_id: 'scale-r1' }) : { status: 'IN_QUEUE' });
   try {
@@ -44,9 +44,15 @@ const run = async ({ failures, throws = false, ghost = false, rows = [] }) => {
     await post({ method: 'POST', headers: {}, body: { videoUrl: 'https://example.com/v.mp4', width: 640, height: 480 } }, submit);
     const id = submit.body?.requestId;
     const status = response();
+    process.env.FAL_ENABLED = 'false'; // Already accepted preprocessing must remain pollable.
     if (id) await poll({ method: 'GET', headers: {}, query: { requestId: id } }, status);
     return { submit, status, attempts: globalThis.__table.attempts, posts };
-  } finally { globalThis.fetch = saved.fetch; if (saved.key === undefined) delete process.env.FAL_KEY; else process.env.FAL_KEY = saved.key; }
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.key === undefined) delete process.env.FAL_KEY; else process.env.FAL_KEY = saved.key;
+    if (saved.enabled === undefined) delete process.env.FAL_ENABLED; else process.env.FAL_ENABLED = saved.enabled;
+    if (saved.evoKey === undefined) delete process.env.EVOLINK_API_KEY; else process.env.EVOLINK_API_KEY = saved.evoKey;
+  }
 };
 
 test('a registry insert that fails once is retried, the submit succeeds and the id polls', async () => {

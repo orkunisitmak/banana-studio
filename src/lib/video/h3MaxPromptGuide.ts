@@ -1,5 +1,5 @@
 import type { ReferenceAudio, ReferenceImage, ReferenceVideo } from '../../types';
-import { isH3MaxModeAvailable, type H3MaxMode, type H3MaxOptions } from './h3Max';
+import { isH3MaxModeAvailable, usesH3MaxTargetAudio, type H3MaxMode, type H3MaxOptions } from './h3Max';
 import { getPersonId } from '../references/personReferences';
 import { mapUnquotedPrompt } from '../references/referenceTokens';
 
@@ -94,7 +94,7 @@ export const normalizeH3MaxPromptLanguage = (value: string, context: H3MaxEnhanc
     : mode === 'insert_video' && index > 1 && index <= references.videos.length
       ? `supplemental clip ${index - 1}`
       : ['extend_video', 'insert_video', 'recast'].includes(mode) ? 'the source video' : 'the requested motion';
-  const audio = (index: number): string => ['reference_to_video', 'extend_video'].includes(mode) && index >= 1 && index <= references.audios.length
+  const audio = (index: number): string => (mode === 'extend_video' || (mode === 'reference_to_video' && !context.options?.useTargetAudio)) && index >= 1 && index <= references.audios.length
     ? `Audio ${index}` : references.audios.length ? 'the supplied soundtrack' : 'the requested sound';
   const person = (id: number): string => mode === 'reference_to_video' ? groupPhotos(numberedImages, id)
     : hasStart ? 'the people in the start image' : 'the described people';
@@ -126,7 +126,7 @@ export const buildH3MaxPromptGuide = (context: H3MaxEnhancementContext, referenc
     ? 'Use relative phases without inventing timestamps or a source duration.'
     : `Keep all requested action beats within ${duration} seconds; timed ranges must fit that duration exactly.`;
   const referenceRoles = mode === 'reference_to_video'
-    ? `Reference assets: ${numberedImages.length} images, ${references.videos.length} videos, ${references.audios.length} audio clips. Use only documented plain modality-and-position labels: Image 1, Image 2, Video 1, Audio 1, and so on. Assign each used file its requested role (identity, object, visual style, motion, camera, voice, rhythm, or ambience); never turn a style reference into another person. The file order is fixed. Reference photos are not opening/closing frames unless separately supplied as frame constraints. ${frames.filter(frame => !frame.label.startsWith('Image ')).map(frame => frame.label).join(', ') || 'No separate frames'} are supplied as separate frame constraints, not numbered identity/style references.${frames.some(frame => frame.label === 'MIDDLE IMAGE') ? ` The middle image fixes the composition at ${options.middleFrameTime ?? 'the selected middle time'} seconds.` : ''}`
+    ? `Reference assets: ${numberedImages.length} images, ${references.videos.length} videos, ${options.useTargetAudio ? 0 : references.audios.length} reference audio clips. Use only documented plain modality-and-position labels for attached references: Image 1, Image 2, Video 1, Audio 1, and so on. Assign each used file its requested role (identity, object, visual style, motion, camera, voice, rhythm, or ambience); never turn a style reference into another person. The file order is fixed. Reference photos are not opening/closing frames unless separately supplied as frame constraints. ${frames.filter(frame => !frame.label.startsWith('Image ')).map(frame => frame.label).join(', ') || 'No separate frames'} are supplied as separate frame constraints, not numbered identity/style references.${frames.some(frame => frame.label === 'MIDDLE IMAGE') ? ` The middle image fixes the composition at ${options.middleFrameTime ?? 'the selected middle time'} seconds.` : ''}`
     : mode === 'extend_video'
       ? `The primary video is the source to continue. Describe only what happens NEXT, starting from its final visible state; do not replay, recap, edit, or replace the earlier footage. Match identities, wardrobe, setting, camera direction, lighting, action and audio across the join unless the user requests a transition. ${references.audios.length ? `There are ${references.audios.length} optional continuation audio references; use plain Audio 1, Audio 2 labels and give each its requested role. The supplied reference audio guides newly generated audio; do not replace the source soundtrack.` : 'Keep source sound continuity and add only sounds naturally caused by the requested new action.'}`
       : mode === 'insert_video'
@@ -136,7 +136,7 @@ export const buildH3MaxPromptGuide = (context: H3MaxEnhancementContext, referenc
           : mode === 'image_to_video'
             ? `The supplied image constraints are ${frames.map(frame => frame.label).join(', ') || 'not yet attached'}. A START IMAGE fixes the exact opening; an END IMAGE fixes the exact ending. Describe physical motion between the supplied constraints, not a new description that overwrites them. Name the visible identities, clothing, objects, framing and lighting to preserve unless the user explicitly requests changes. Default to one continuous shot with no new cuts. ${options.middleImageUrl ? `The MIDDLE IMAGE constrains the composition at ${options.middleFrameTime ?? 'the selected middle time'} seconds; plan the motion through it without treating it as a separate reference character.` : ''}`
             : 'Generate a new clip from the user’s text. Describe the subject, setting and requested physical action with specific nouns and verbs. Keep the user’s chosen camera and visual style; add only minimal supporting detail needed to make the shot clear.';
-  const suppliedAudio = ['text_to_video', 'image_to_video'].includes(mode) && references.audios.length > 0
+  const suppliedAudio = usesH3MaxTargetAudio(mode, options.useTargetAudio) && references.audios.length > 0
     ? 'A target audio track is supplied and becomes the output soundtrack. Preserve that recording as requested; do not invent replacement music, dialogue or sound effects, or imply the text prompt can change its words.'
     : 'Picture and sound are generated together. For generated audio, describe concrete action-linked effects and room tone. Do not invent dialogue, vocal reactions or music. Preserve requested silence. If dialogue is requested, preserve its exact wording and language in double quotes, describe delivery, and exclude subtitles/on-screen text unless requested.';
   const identityGroups = mode === 'reference_to_video' ? [...new Set(numberedImages.map(getPersonId).filter((id): id is number => id != null))]

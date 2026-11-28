@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // Execute the real file-selection handlers with independently gated upload outcomes.
 const source = readFileSync(new URL('../src/components/Controls.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('  const processVideoFiles = async');
-const handlers = source.slice(start, source.indexOf('  const processAudioFiles = async', start));
+const handlers = source.slice(start, source.indexOf('  const processAudioFiles =', start));
 const counterStart = source.indexOf('  const [uploadingReferenceVideos, setUploadingReferenceVideos]');
 const initStart = counterStart >= 0 ? counterStart : source.indexOf('  const insertSourceUploadRef');
 const initialize = source.slice(initStart, source.indexOf('\n  useLayoutEffect(() => {\n    const element = generationBarRef.current;', initStart));
@@ -15,7 +15,7 @@ const clearStart = source.indexOf('  const handleClearAll =');
 const clearHandler = source.slice(clearStart, source.indexOf('  const handleRemoveImage', clearStart));
 const dropStart = source.indexOf('  const handleDrop = async');
 const dropHandler = source.slice(dropStart, source.indexOf('  // --- Prompt Resize Handlers ---', dropStart));
-const code = transformSync(`module.exports = env => { const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, useUnloadWarning, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError, draggedRefId, draggedGalleryItem, setIsDragging, setIsDraggingSavedRef, setDraggedGalleryItem, handleAddFromGallery, processImageFiles, processAudioFiles, maxReferenceAudios } = env; ${initialize} ${handlers} ${clearHandler} ${dropHandler}; return { handleVideoFileUpload, handleClearAll, handleDrop, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
+const code = transformSync(`module.exports = env => { const isMagi2=false,isFalSeedance20=false,isEvoH3=false,falCaps=null,seedanceLimits=null; const { config, onChange, setAttachmentError, isH3VideoConfig, h3State, currentReferenceVideos, maxReferenceVideos, useRef, useState, useLayoutEffect, useUnloadWarning, promptLoadVersion, uploadReferenceVideo, videoInputRef, attachLimitsRef, flushSync, setUndoStack, getPersonDefinitions, refInputRef, setEnhanceError, draggedRefId, draggedGalleryItem, setIsDragging, setIsDraggingSavedRef, setDraggedGalleryItem, handleAddFromGallery, processImageFiles, processAudioFiles, maxReferenceAudios } = env; ${initialize} ${handlers} ${clearHandler} ${dropHandler}; return { handleVideoFileUpload, handleClearAll, handleDrop, uploadingReferenceVideos }; };`, { loader: 'ts', format: 'cjs' }).code;
 const mod = { exports: {} }; new Function('module', code)(mod);
 const h3 = await build({ entryPoints: [fileURLToPath(new URL('../src/components/H3MaxSettings.tsx', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic' });
 const { getH3MaxUIState } = await import('data:text/javascript;base64,' + Buffer.from(h3.outputFiles[0].text).toString('base64'));

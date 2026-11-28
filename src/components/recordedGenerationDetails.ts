@@ -49,9 +49,9 @@ export const getRecordedEditSourceReference = (media: GeneratedMedia): Reference
     const matches = references.filter(reference => reference.id === `gallery-${linkedId}`);
     if (matches.length === 1) return matches[0];
   }
-  const marked = references.filter(reference => reference.isEditSource === true && isValidEditRegion(reference.editRegion));
+  const marked = references.filter(reference => reference.isEditSource === true && (reference.editScope === 'image' || isValidEditRegion(reference.editRegion)));
   if (marked.length) return marked.length === 1 ? marked[0] : undefined;
-  const selected = references.filter(reference => isValidEditRegion(reference.editRegion));
+  const selected = references.filter(reference => reference.editScope === 'image' || isValidEditRegion(reference.editRegion));
   return selected.length === 1 ? selected[0] : undefined;
 };
 

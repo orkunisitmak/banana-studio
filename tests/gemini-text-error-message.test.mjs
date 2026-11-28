@@ -10,9 +10,9 @@ const out = await build({
   absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
   plugins: [{ name: 'stub', setup(b) {
-    b.onResolve({ filter: /[\\/]_lib[\\/](auth|openaiGuard)(\.js)?$/ }, () => ({ path: 'auth', namespace: 'stub' }));
+    b.onResolve({ filter: /(?:^|[\\/])(auth|openaiGuard)(\.js)?$/ }, () => ({ path: 'auth', namespace: 'stub' }));
     b.onResolve({ filter: /^@google[\\/]genai$/ }, () => ({ path: pathToFileURL(req.resolve('@google/genai')).href, external: true }));
-    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const applyCors = () => {}; export const requireUser = async () => ({ id: "u1" }); export const startPaidRequest = async () => ({ id: "g1", finish: async () => {} });', loader: 'js' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const applyCors = () => {}; export const requireUser = async () => ({ id: "u1" }); export const createUserScopedClient=()=>({rpc:()=>({abortSignal:async()=>({data:{"gemini-4-hydrogen":"gemini"}})})});export const startPaidRequest = async () => ({ id: "g1", finish: async () => {} });export const startOpenAIRequest = startPaidRequest;', loader: 'js' }));
   } }],
 });
 const { default: handler } = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
@@ -26,7 +26,7 @@ console.error = console.info = console.log = () => {};
 const call = async accept => {
   const res = { code: 0, body: null, chunks: [], setHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; },
     write(s) { this.chunks.push(s); }, end() { return this; }, on() {}, off() {} };
-  await handler({ method: 'POST', headers: accept ? { accept } : {}, body: { model: 'gemini-3.8-flash', contents: { parts: [{ text: 'enhance this' }] } } }, res);
+  await handler({ method: 'POST', headers: accept ? { accept } : {}, body: { model: 'gemini-4-hydrogen', contents: { parts: [{ text: 'enhance this' }] } } }, res);
   return res;
 };
 

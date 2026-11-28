@@ -1,5 +1,5 @@
 import type { GeneratedMedia, GenerationConfig, ReferenceImage } from '../types';
-import { SUNBURST_MODEL } from '../lib/images/openaiImage';
+import { isOpenAIImageModel } from '../lib/images/openaiImage';
 import { EDIT_REGION_REQUIRED, isValidEditRegion, editRegionPixels } from '../lib/images/imageEditRegion';
 import { compositeEditPixels } from '../lib/images/imageEditPixels';
 
@@ -26,7 +26,7 @@ export type ProtectedImageSource = { reference: ReferenceImage; decoded: Awaited
 export const prepareProtectedImageSource = async (config: Pick<GenerationConfig, 'imageModel' | 'referenceImages' | 'aspectRatio'>): Promise<ProtectedImageSource | undefined> => {
   const refs = config.referenceImages || [];
   const marked = refs.filter(ref => ref.editRegion != null);
-  if (!marked.length || config.imageModel === SUNBURST_MODEL || config.imageModel === 'gpt-image-2-beta') return undefined;
+  if (!marked.length || isOpenAIImageModel(config.imageModel) || config.imageModel === 'gpt-image-2-beta') return undefined;
   if (marked.length !== 1 || !isValidEditRegion(marked[0].editRegion)) throw new Error(EDIT_REGION_REQUIRED);
   const reference = marked[0];
   const decoded = await loadPixels(imageUrl(reference));

@@ -1,55 +1,80 @@
-import { getImagePromptContextKey, isImagePromptContextCurrent, SUNBURST_MODEL } from './lib/images/openaiImage.ts';
+import type { AIProvider } from './lib/providers.js';
+import { getImagePromptContextKey, GPT_IMAGE_26_SUNBURST_MODEL, isImagePromptContextCurrent, isOpenAIImageModel, SUNBURST_MODEL } from './lib/images/openaiImage.ts';
+import { SEEDREAM_MODEL, type SeedreamOptions, type SeedreamResult } from './lib/images/seedream55.ts';
+import { MAGI2_MODEL, type Magi2Mode } from './lib/video/magi2.ts';
+export { MAGI2_MODEL, type Magi2Mode };
+export { MAGI2_ENDPOINTS } from './lib/video/magi2.ts';
+export { EVO_H3_MODEL } from './lib/video/evoH3Max.ts';
+export { FAL_SEEDANCE_MODEL, FAL_SEEDANCE_20_MODEL, isFalSeedanceModel, type FalSeedanceModel } from './lib/video/falSeedanceModel.ts';
 import { resolveH3MaxMode, type H3MaxMode, type H3MaxOptions, type H3MaxSelection } from './lib/video/h3Max.ts';
 export type { H3MaxMode, H3MaxOptions, H3MaxSelection } from './lib/video/h3Max.js';
 export type AspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 export type Resolution = '1K' | '2K' | '4K';
 /** Retired model IDs remain readable in historical gallery rows. */
-export type ImageModelId = 'gemini-3-pro-image-preview' | 'gemini-nano-banana-2.1' | 'gemini-3.1-flash-image-preview' | 'gpt-image-2-beta' | 'gpt-image-2.5-sunburst';
+export type ImageModelId = 'gemini-3-pro-image-preview' | 'gemini-nano-banana-2.1' | 'gemini-3.1-flash-image-preview' | 'gpt-image-2-beta' | 'gpt-image-2.5-sunburst' | 'gpt-image-2.6-flare' | typeof GPT_IMAGE_26_SUNBURST_MODEL | typeof SEEDREAM_MODEL;
+export type ImageOperation = 'generate' | 'edit';
 export interface OpenAIImageOptions {
   quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   size: 'preset' | 'auto' | 'custom';
   width: number;
   height: number;
   background: 'auto' | 'opaque' | 'transparent';
-  /** Legacy formats remain readable in history; new Sunburst requests use PNG. */
-  outputFormat: 'png' | 'jpeg' | 'webp';
+  /** JPEG/WebP remain readable in history. 2.6 additionally supports SVG and GIF. */
+  outputFormat: 'png' | 'jpeg' | 'webp' | 'svg' | 'gif';
   outputCompression: number;
   moderation: 'auto' | 'low';
   inputFidelity?: 'high' | 'low';
+  complexity?: 'low' | 'medium' | 'high';
+  gifFrameCount?: number;
+  gifFrameDurationMs?: number;
 }
 export type LocalImageSyncStatus = 'local-only' | 'synced';
 
 export type GenerationMode = 'image' | 'video';
 export type MediaType = 'image' | 'video';
-export type VideoModelId = 'seedance-2.0' | 'seedance-2.5' | 'minimax-h3';
-export type VideoOperation = 'generate' | 'reference_edit' | 'edit' | 'extend';
+export type SeedanceVideoModelId = 'seedance-2.0' | 'seedance-2.5';
+export type VideoModelId = SeedanceVideoModelId | 'minimax-h3' | 'gemini-omni-1.2-flash' | typeof MAGI2_MODEL;
+export interface FalSeedanceOptions {
+  draft?: boolean;
+  bitrateMode?: 'standard' | 'high';
+  codec?: 'auto' | 'H264' | 'H265';
+  outputFormat?: 'mp4' | 'mov';
+  returnLastFrame?: boolean;
+  seed?: number;
+  task?: 'reference' | 'auto';
+}
+export type VideoOperation = 'generate' | 'reference_edit' | 'edit' | 'extend' | 'upscale';
 /** Continue can also create a new shot from a marked reference in Generate mode. */
 export type VideoPromptIntent = VideoOperation | 'continue';
 export type H3GenerationMode = 'text_only' | 'image_to_video' | 'reference_to_video';
 export type VideoAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | 'adaptive';
-export type VideoQuality = '480p' | '720p' | '768p' | '1080p' | '2K' | '4K';
+export type VideoQuality = '360p' | '480p' | '720p' | '768p' | '1080p' | '2K' | '4K';
 export type VideoPromptExpansionMode = 'disabled' | 'fast' | 'balanced' | 'quality';
 /** Provider validation owns bounds; H3 Max also accepts fractional seconds. */
 export type VideoDuration = number;
 
-export const DEFAULT_IMAGE_MODEL: ImageModelId = SUNBURST_MODEL;
+export const DEFAULT_IMAGE_MODEL: ImageModelId = GPT_IMAGE_26_SUNBURST_MODEL;
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'seedance-2.5';
 
 export const IMAGE_MODEL_OPTIONS: { label: string; value: ImageModelId }[] = [
   { label: 'Nano Banana Pro', value: 'gemini-3-pro-image-preview' },
   { label: 'Nano Banana 2.1', value: 'gemini-nano-banana-2.1' },
-  { label: 'GPT Image 2.5', value: 'gpt-image-2.5-sunburst' },
+  { label: 'GPT Image 2.6 Sunburst', value: GPT_IMAGE_26_SUNBURST_MODEL },
+  { label: 'GPT Image 2.5', value: SUNBURST_MODEL },
+  { label: 'Seedream 5.5', value: SEEDREAM_MODEL },
 ];
 
 /** Resolve new drafts without relabeling or rewriting saved generations. */
 export const getActiveImageModel = (value: unknown): ImageModelId => {
   if (value === 'gemini-3.1-flash-image-preview') return 'gemini-nano-banana-2.1';
   if (value === 'gpt-image-2-beta') return SUNBURST_MODEL;
+  if (value === 'gpt-image-2.6-flare') return GPT_IMAGE_26_SUNBURST_MODEL;
   return IMAGE_MODEL_OPTIONS.some(option => option.value === value) ? value as ImageModelId : DEFAULT_IMAGE_MODEL;
 };
 export const getImageModelLabel = (value?: string): string => {
   if (value === 'gemini-3.1-flash-image-preview') return 'Nano Banana 2';
   if (value === 'gpt-image-2-beta') return 'GPT Image 2 (retired)';
+  if (value === 'gpt-image-2.6-flare') return 'GPT Image 2.6 Flare (retired)';
   const model = value || DEFAULT_IMAGE_MODEL;
   return IMAGE_MODEL_OPTIONS.find(option => option.value === model)?.label || model;
 };
@@ -66,11 +91,14 @@ export const VIDEO_ASPECT_RATIO_OPTIONS: { label: string; value: VideoAspectRati
 
 export const VIDEO_MODEL_OPTIONS: { label: string; value: VideoModelId }[] = [
   { label: 'Seedance 2.0', value: 'seedance-2.0' },
-  { label: 'Seedance 2.5 Relaxed', value: 'seedance-2.5' },
+  { label: 'Seedance 2.5', value: 'seedance-2.5' },
   { label: 'MiniMax H3 Max', value: 'minimax-h3' },
+  { label: 'Gemini Omni 1.2 Flash', value: 'gemini-omni-1.2-flash' },
+  { label: 'MAGI-2', value: MAGI2_MODEL },
 ];
 
 export const VIDEO_QUALITY_OPTIONS: { label: string; value: VideoQuality }[] = [
+  { label: '360p', value: '360p' },
   { label: '480p', value: '480p' },
   { label: '720p', value: '720p' },
   { label: '768p', value: '768p' },
@@ -87,30 +115,37 @@ export const VIDEO_DURATION_OPTIONS: { label: string; value: VideoDuration }[] =
   }
 );
 
-export type TextModelId = 'gemini-3.8-flash' | 'gpt-6.1-sol' | 'anthropic/claude-opus-5.5';
+export type TextModelId = 'gemini-4-hydrogen' | 'gpt-6.2-sol' | 'claude-opus-5.5';
 
 export const TEXT_MODEL_OPTIONS: { label: string; value: TextModelId; description: string }[] = [
   {
     label: 'Claude Opus 5.5',
-    value: 'anthropic/claude-opus-5.5',
-    description: 'Direct via Anthropic or through OpenRouter. Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
+    value: 'claude-opus-5.5',
+    description: 'Adjustable thinking. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
   },
   {
-    label: 'Gemini 3.8 Flash',
-    value: 'gemini-3.8-flash',
-    description: 'Adjustable thinking · Medium by default. Enhance, brainstorm, and variations. Video brief extraction uses Low.',
+    label: 'Gemini 4 Hydrogen',
+    value: 'gemini-4-hydrogen',
+    description: 'Adjustable thinking · Medium by default. Enhance, brainstorm, and variations.',
   },
   {
-    label: 'GPT-6.1 Sol',
-    value: 'gpt-6.1-sol',
+    label: 'GPT-6.2 Sol',
+    value: 'gpt-6.2-sol',
     description: 'Adjustable reasoning · High by default. Enhance, brainstorm, variations and evidence-based video briefs with image references.',
   },
 ];
 
-export const DEFAULT_TEXT_MODEL: TextModelId = 'anthropic/claude-opus-5.5';
-export const getTextModelLabel = (model: string): string => TEXT_MODEL_OPTIONS.find(option => option.value === model)?.label || model;
-/** Gemini reads native YouTube footage; the selected text model prepares its final analysis. */
-export const GEMINI_TEXT_MODEL: TextModelId = 'gemini-3.8-flash';
+export const DEFAULT_TEXT_MODEL: TextModelId = 'claude-opus-5.5';
+export const getTextModelLabel = (model: string): string => {
+  if (model === 'anthropic/claude-opus-5.5') return 'Claude Opus 5.5';
+  if (model === 'gemini-3.8-flash') return 'Gemini 3.8 Flash';
+  if (model === 'gpt-6.1-sol') return 'GPT-6.1 Sol';
+  return TEXT_MODEL_OPTIONS.find(option => option.value === model)?.label || model;
+};
+/** YouTube footage is analyzed in one native Gemini call, independent of the text-model preference. */
+export const GEMINI_TEXT_MODEL: TextModelId = 'gemini-4-hydrogen';
+export const YOUTUBE_ANALYSIS_MODEL = GEMINI_TEXT_MODEL;
+export const YOUTUBE_ANALYSIS_THINKING = 'HIGH';
 
 export interface PersonGroupDefinition {
   id: number;
@@ -158,6 +193,8 @@ export interface ReferenceImage {
   isDraftImage?: boolean;
   /** Approved base of a local image edit; other attachments are donors. */
   isEditSource?: boolean;
+  /** Explicit whole-image Edit, distinct from a protected edit area. */
+  editScope?: 'image';
   /** Normalized selection envelope. Layers form a union; gaps stay original. */
   editRegion?: { x: number; y: number; width: number; height: number; points?: { x: number; y: number }[]; layers?: ImageEditLayer[];
     /** Outpaint: the areas are new canvas around the original, which may reach the canvas edges. */
@@ -214,18 +251,18 @@ export type VideoPricingRate = {
 // EvoLink Standard-route pricing per billed second. Seedance video-input jobs
 // bill max(total input video duration, output duration) + output duration.
 // Sources: https://evolink.ai/seedance-2-0 and https://evolink.ai/seedance-2-5
-export const EVOLINK_PRICING: Record<Exclude<VideoModelId, 'minimax-h3'>, Partial<Record<VideoQuality, VideoPricingRate>>> = {
+export const EVOLINK_PRICING: Record<SeedanceVideoModelId, Partial<Record<VideoQuality, VideoPricingRate>>> = {
   'seedance-2.0': {
     '480p': { noVideoInput: 0.092, withVideoInput: 0.056, credits: { noVideoInput: 6.2775, withVideoInput: 3.834 } },
     '720p': { noVideoInput: 0.199, withVideoInput: 0.121, credits: { noVideoInput: 13.5, withVideoInput: 8.2215 } },
     '1080p': { noVideoInput: 0.496, withVideoInput: 0.302, credits: { noVideoInput: 33.75, withVideoInput: 20.52 } },
+    '4K': { noVideoInput: 1.013, withVideoInput: 0.626, credits: { noVideoInput: 68.85, withVideoInput: 42.525 } },
   },
   'seedance-2.5': {
-    '480p': { noVideoInput: 0.138, withVideoInput: 0.084, credits: { noVideoInput: 9.34, withVideoInput: 5.71 } },
-    '720p': { noVideoInput: 0.296, withVideoInput: 0.180, credits: { noVideoInput: 20.09, withVideoInput: 12.23 } },
-    // EvoLink's limited 1080p rate is active through 2026-09-17 (UTC+8).
-    // Provider-returned credits remain authoritative after task acceptance.
-    '1080p': { noVideoInput: 0.532, withVideoInput: 0.324, credits: { noVideoInput: 36.16, withVideoInput: 21.99 } },
+    '480p': { noVideoInput: 0.138, withVideoInput: 0.084, credits: { noVideoInput: 9.3419, withVideoInput: 5.7056 } },
+    '720p': { noVideoInput: 0.296, withVideoInput: 0.180, credits: { noVideoInput: 20.09, withVideoInput: 12.2349 } },
+    '1080p': { noVideoInput: 0.739, withVideoInput: 0.450, credits: { noVideoInput: 50.225, withVideoInput: 30.5368 } },
+    '4K': { noVideoInput: 1.182, withVideoInput: 0.724, credits: { noVideoInput: 80.36, withVideoInput: 49.2205 } },
   },
 };
 
@@ -263,25 +300,10 @@ export const getFalH3MaxPricing = (quality: VideoQuality): number => {
   return pricing[normalizedQuality];
 };
 
-const SEEDANCE_25_1080_PROMO_END = Date.UTC(2026, 8, 17, 16, 0, 0);
 const SEEDANCE_25_RELAXED_CHANNEL_MULTIPLIER = 1.1;
 
-export const isSeedance25PromoActive = (): boolean => Date.now() <= SEEDANCE_25_1080_PROMO_END;
-
-export const getEvoLinkVideoPricing = (model: Exclude<VideoModelId, 'minimax-h3'>, quality: VideoQuality): VideoPricingRate => {
-  let pricing = EVOLINK_PRICING[model][quality] || EVOLINK_PRICING[model]['720p']!;
-  if (model === 'seedance-2.5' && quality === '1080p' && !isSeedance25PromoActive()) {
-    // After the promotion, EvoLink documents 1080p as 2.5x the 720p rate.
-    const base = EVOLINK_PRICING['seedance-2.5']['720p']!;
-    pricing = {
-      noVideoInput: base.noVideoInput * 2.5,
-      withVideoInput: base.withVideoInput * 2.5,
-      credits: {
-        noVideoInput: base.credits.noVideoInput * 2.5,
-        withVideoInput: base.credits.withVideoInput * 2.5,
-      },
-    };
-  }
+export const getEvoLinkVideoPricing = (model: SeedanceVideoModelId, quality: VideoQuality): VideoPricingRate => {
+  const pricing = EVOLINK_PRICING[model][quality] || EVOLINK_PRICING[model]['720p']!;
 
   if (model !== 'seedance-2.5') return pricing;
 
@@ -298,7 +320,7 @@ export const getEvoLinkVideoPricing = (model: Exclude<VideoModelId, 'minimax-h3'
 };
 
 export const estimateVideoCost = (
-  model: VideoModelId,
+  model: SeedanceVideoModelId | 'minimax-h3' | typeof MAGI2_MODEL,
   quality: VideoQuality,
   outputDuration: number,
   hasVideoInput: boolean,
@@ -308,6 +330,10 @@ export const estimateVideoCost = (
   referenceImageCount: number = 0,
   h3Mode?: H3GenerationMode,
 ): VideoCost => {
+  if (model === MAGI2_MODEL) {
+    const usd = outputDuration * 0.08;
+    return { usd, credits: usd * EVOLINK_CREDITS_PER_USD, source: 'published_estimate' };
+  }
   if (model === 'minimax-h3') {
     const duration = Math.max(5, Math.min(15, outputDuration === -1 ? 5 : outputDuration));
     if (h3Mode === 'text_only' || h3Mode === 'image_to_video') {
@@ -338,10 +364,9 @@ export const estimateVideoCost = (
       ? Math.max(4, primaryVideoDuration || referenceVideoDuration || 5)
       : 30
     : Math.max(0, outputDuration);
-  const inputDuration = Math.max(0, referenceVideoDuration);
-  const billedDuration = hasVideoInput
-    ? Math.max(inputDuration, estimatedOutputDuration) + estimatedOutputDuration
-    : estimatedOutputDuration;
+  const billedOutput = model === 'seedance-2.5' ? Math.ceil(estimatedOutputDuration * 10) / 10 : estimatedOutputDuration;
+  const inputDuration = Math.max(0, model === 'seedance-2.5' ? Math.ceil(referenceVideoDuration * 10) / 10 : referenceVideoDuration);
+  const billedDuration = hasVideoInput ? Math.max(inputDuration, billedOutput) + billedOutput : billedOutput;
   const credits = creditPerSec * billedDuration;
   return {
     usd: credits / EVOLINK_CREDITS_PER_USD,
@@ -414,7 +439,7 @@ export const estimateImageCost = (
 ): number | null => {
   // Historical costs cannot be inferred without Sunburst quality/size. New
   // generation previews use getImageCostPreview with the full settings.
-  if (model === 'gpt-image-2.5-sunburst') return count === 0 ? 0 : null;
+  if (isOpenAIImageModel(model) || model === SEEDREAM_MODEL || model === 'gpt-image-2.6-flare') return count === 0 ? 0 : null;
   // Nano Banana 2.1 bills actual input, thinking and image-output tokens.
   // The queue does not expose them; never reuse Nano Banana 2's flat fees.
   if (model === 'gemini-nano-banana-2.1') return count === 0 ? 0 : null;
@@ -456,7 +481,8 @@ export interface PromptPreparation {
 }
 
 export interface GenerationConfig {
-  imageProvider?: import('./lib/providers.js').AIProvider;
+  imageProvider?: AIProvider;
+  videoProvider?: AIProvider;
   prompt: string;
   /** Brief before Enhance or Brainstorm, retained for Revert/Re-create. */
   originalPrompt?: string;
@@ -477,6 +503,9 @@ export interface GenerationConfig {
   aspectRatio: AspectRatio;
   resolution: Resolution;
   imageModel: ImageModelId;
+  imageOperation?: ImageOperation;
+  seedreamOptions?: Partial<SeedreamOptions>;
+  brainstormNoText?: boolean;
   openaiImageOptions?: OpenAIImageOptions;
   imagePromptCategory?: BrainstormCategory;
   referenceImages: ReferenceImage[];
@@ -486,6 +515,8 @@ export interface GenerationConfig {
   referenceAudios: ReferenceAudio[];
   mode: GenerationMode;
   videoModel: VideoModelId;
+  falSeedanceOptions?: FalSeedanceOptions;
+  magi2Mode?: Magi2Mode;
   h3MaxMode?: H3MaxSelection;
   h3MaxOptions?: Partial<H3MaxOptions>;
   videoOperation: VideoOperation;
@@ -503,9 +534,11 @@ export const getVideoPromptIntent = (
   : config.videoOperation || 'generate';
 
 export const getVideoEnhancementReferenceKey = (
-  config: Pick<GenerationConfig, 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'videoDuration'>,
+  config: Pick<GenerationConfig, 'referenceImages' | 'referenceVideos' | 'referenceAudios' | 'videoDuration'> & Partial<Pick<GenerationConfig, 'videoModel' | 'magi2Mode' | 'audioEnabled' | 'videoProvider'>>,
 ): string => JSON.stringify({
   duration: config.videoDuration,
+  ...(config.videoModel === MAGI2_MODEL ? { magi2Mode: config.magi2Mode ?? 'text_only', generateAudio: config.audioEnabled !== false } : {}),
+  ...(config.videoModel === 'minimax-h3' && config.videoProvider === 'evolink' ? { provider: 'evolink' } : {}),
   images: (config.referenceImages || []).map(image => [
     image.id, !!image.isSubjectImage, !!image.isSecondPerson, image.personId, image.personName, !!image.isFirstFrame, !!image.isLastFrame,
   ]),
@@ -557,7 +590,7 @@ export const isEnhancedPromptStale = (config: GenerationConfig): boolean => Bool
 );
 
 export interface GeneratedMedia {
-  generationProvider?: import('./lib/providers.js').AIProvider;
+  generationProvider?: AIProvider;
   providerModel?: string;
   id: string;
   url: string;
@@ -574,6 +607,9 @@ export interface GeneratedMedia {
   aspectRatio: AspectRatio;
   resolution: Resolution;
   imageModel?: ImageModelId;
+  imageOperation?: ImageOperation;
+  seedreamOptions?: Partial<SeedreamOptions>;
+  seedreamResult?: SeedreamResult;
   openaiImageOptions?: OpenAIImageOptions;
   imagePromptCategory?: BrainstormCategory;
   /** Exact prompt sent to the image provider, including reference roles. */
@@ -587,6 +623,7 @@ export interface GeneratedMedia {
   imageEditProtection?: { version: number; sourceReferenceId: string; sourceSha256: string; sourceSize: string;
     region: NonNullable<ReferenceImage['editRegion']>; pixelRegion: { left: number; top: number; width: number; height: number };
     preservedOutsideRegion: boolean; providerOutputSha256: string };
+  imageEditMarkup?: boolean;
   /** Gallery source for pending and completed edits, retained in the lightweight index. */
   imageEditSourceId?: string;
   openaiUsage?: Record<string, unknown>;
@@ -597,6 +634,10 @@ export interface GeneratedMedia {
   isFavorite?: boolean;
   mediaType: MediaType;
   videoModel?: VideoModelId;
+  videoReferenceImageIds?: string[];
+  falSeedanceOptions?: FalSeedanceOptions;
+  falSeedanceResult?: { seed?: number; draftId?: string; lastFrameUrl?: string };
+  magi2Mode?: Magi2Mode;
   videoOperation?: VideoOperation;
   videoAspectRatio?: VideoAspectRatio;
   videoQuality?: VideoQuality;
@@ -621,11 +662,12 @@ export interface GeneratedMedia {
   taskIdUnsaved?: boolean;
   isLoading?: boolean;
   videoProgress?: number;
-  videoStage?: 'generating' | 'saving';
+  videoStage?: 'sending' | 'generating' | 'saving';
   /** Shared by tabs/devices while a video provider submission is in flight. */
   submissionHeartbeatAt?: number;
   imageProgress?: number;
-  imageStage?: 'preparing' | 'queued' | 'generating';
+  preparationBatch?: string;
+  imageStage?: 'sending' | 'preparing' | 'queued' | 'generating';
   imageQueue?: { version: 1; queuedAt: number };
   imageQueueWaitReason?: 'rate' | 'quota';
   brainstormBatchId?: string;

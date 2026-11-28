@@ -14,16 +14,20 @@ const fd = src.indexOf('  const handleDeleteFolder = async');
 const fe = src.indexOf('  const handleRenameFolder', fd);
 const body = src.slice(a, b) + src.slice(hd, he) + src.slice(fd, fe);
 const cls = (src.match(/class DeletedVideoError[^\n]*\n/) || [''])[0];
-const code = transformSync(`${cls}module.exports = (env) => { const { setGeneratedMedia, setActiveRequests, pollVideoTask, saveVideo, deleteImage, updateVideoStatus, getImageById, assertWorkspaceSession, toast, deletedMediaIdsRef, RecoverableVideoTaskError, isRecoverableVideoTaskError, DEFAULT_VIDEO_MODEL, deleteFolder, setTimeout, generatedMedia, workspaceStorage } = env; ${body}; return { resumeVideoPolling, handleDelete, handleDeleteFolder }; };`, { loader: 'ts', format: 'cjs' }).code;
+const code = transformSync(`${cls}module.exports = (env) => { const { userId, setGeneratedMedia, setActiveRequests, pollVideoTask, saveVideo, deleteImage, updateVideoStatus, getImageById, assertWorkspaceSession, toast, deletedMediaIdsRef, RecoverableVideoTaskError, isRecoverableVideoTaskError, DEFAULT_VIDEO_MODEL, deleteFolder, setTimeout, generatedMedia, workspaceStorage } = env; ${body}; return { resumeVideoPolling, handleDelete, handleDeleteFolder }; };`, { loader: 'ts', format: 'cjs' }).code;
 class FolderDeleteError extends Error { constructor(message, keptMediaIds) { super(message); this.keptMediaIds = keptMediaIds; } }
 const run = async deleteWhen => {
   const calls = { saveCalls: 0, saved: 0, deleted: [], completed: 0, toasts: [] };
   let retryWait;
-  let items = [{ id: 'v1', mediaType: 'video', status: 'processing', isLoading: true, folderId: 'f1' }];
+  let items = [{ id: 'v1', mediaType: 'video', status: 'processing', isLoading: true, folderId: 'f1', generationProvider: 'fal', falEndpoint: 'test/model/generate', falQueueEndpoint: 'test/model' }];
   let release, releaseSave;
   const env = {
     setGeneratedMedia: f => { items = typeof f === 'function' ? f(items) : f; }, setActiveRequests() {},
-    pollVideoTask: () => new Promise(r => { release = () => r({ urls: ['https://provider/v.mp4'] }); }),
+    userId: 'u1',
+    pollVideoTask: (id, _progress, _model, endpoint, queue, provider, owner) => {
+      assert.deepEqual([id, endpoint, queue, provider, owner], ['task1', 'test/model/generate', 'test/model', 'fal', 'u1']);
+      return new Promise(r => { release = () => r({ urls: ['https://provider/v.mp4'] }); });
+    },
     saveVideo: async () => { calls.saveCalls++; if (deleteWhen === 'retry' && calls.saveCalls === 1) return null; if (deleteWhen === 'saving') await new Promise(r => { releaseSave = r; }); calls.saved++; return { publicUrl: 'https://store/v.mp4', storagePath: 'u/v1.mp4', thumbnailPath: 'u/v1.png' }; },
     deleteImage: async m => { calls.deleted.push(m.storagePath || 'default'); },
     updateVideoStatus: async (id, status) => { if (status === 'completed') calls.completed++; },
@@ -117,7 +121,7 @@ const createRow = async deleteDuringCreate => {
   const deleted = new Set(), removed = []; let active = 1, heartbeats = 0;
   const env = {
     videoId: 'vid1', config: { prompt: 'p' }, DEFAULT_VIDEO_MODEL: 'm', requestedVideoAspectRatio: '16:9', requestedVideoDuration: 5, effectiveVideoPromptExpansionMode: 'off',
-    h3MaxMode: undefined, currentFolderId: null, genStart: 0, placeholder: { id: 'vid1' },
+    h3MaxMode: undefined, h3MaxOptions: undefined, magi2Mode: undefined, falSeedanceOptions: undefined, currentFolderId: null, genStart: 0, placeholder: { id: 'vid1' },
     // handleDelete runs while the row is still being created.
     createPendingVideo: async () => { if (deleteDuringCreate) deleted.add('vid1'); return true; },
     deletedMediaIdsRef: { current: deleted }, deleteImage: async media => { removed.push(media.id); },

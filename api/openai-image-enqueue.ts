@@ -3,6 +3,7 @@ import { applyCors, createServiceRoleClient, createUserScopedClient, requireUser
 import { getOpenAISessionId } from './_lib/openaiGuard.js';
 import { ImageJobInputError, prepareImageJobPayload } from './_lib/imageJobPayload.js';
 import { publishImageJob } from './_lib/imageJobQueue.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
 
 export const config = { maxDuration: 60 };
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -18,7 +19,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try { body = typeof req.body==='string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error:'Invalid image job.' }); }
   try {
-    const { payload, metadata } = await prepareImageJobPayload(body,createUserScopedClient(req));
+    const provider = await admitProvider(req, res, body?.model, body?.provider);
+    if (!provider) return;
+    const { payload, metadata } = await prepareImageJobPayload({ ...body, provider },createUserScopedClient(req));
     const { data, error } = await db.rpc('enqueue_image_job', { p_user_id:user.id, p_session_id:sessionId, p_id:payload.id, p_payload:payload, p_metadata:metadata });
     if (error || !data) return res.status(503).json({ code:'QUEUE_STATE_UNKNOWN', error:'The queue could not confirm this image. Check the gallery before submitting again.' });
     if (data.error) return res.status(data.error==='session'?403:data.error==='full'?429:409).json({ error:data.error==='full'?'The saved image queue is full. Wait for existing jobs to finish.':'This generation could not be queued.', ...(data.error==='exists'?{code:'GENERATION_EXISTS'}:{}) });

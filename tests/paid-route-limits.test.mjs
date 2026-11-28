@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // Real routes and the real admission guard over a fake ledger. Only auth, the
 // task registry, usage records and the provider's HTTP endpoint are faked.
 const stubs = {
-  auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({});
+  auth: `export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});export const createUserScopedClient=()=>({rpc:name=>({abortSignal:async()=>name==='get_provider_preferences'?{data:globalThis.__prefs,error:null}:{error:'Unknown RPC'}})});
 export const createServiceRoleClient=()=>process.env.SUPABASE_SERVICE_ROLE_KEY?{rpc:(name,args)=>({abortSignal:async()=>globalThis.__ledger(name,args)})}:null;`,
   providerTasks: `export const prepareTaskRegistry=async()=>globalThis.__registry;export const registerProviderTask=async()=>{};export const requireProviderTask=async()=>true;export const isGenerationId=v=>typeof v==="string"&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(v);export const requireSavedVideo=async()=>true;export const saveGenerationTask=async()=>true;`,
   h3Usage: 'export const recordH3Usage=async()=>{};',
@@ -29,16 +29,20 @@ const load = async entry => {
 
 const seedance = { videoModel: 'seedance-2.0', mode: 'text_only', prompt: 'hi', duration: 5, quality: '720p', aspectRatio: '16:9' };
 const ROUTES = [
-  { name: 'fal image', entry: 'api/fal-image-generate.ts', kind: 'image', body: { endpoint: 'fal-ai/nano-banana-pro', input: { prompt: 'a cat' } } },
-  { name: 'fal video scale', entry: 'api/fal-video-scale.ts', kind: 'image', body: { videoUrl: 'https://example.com/a.mp4', width: 640, height: 360 } },
-  { name: 'MiniMax H3 video', entry: 'api/fal-h3-video.ts', kind: 'image', body: { prompt: 'a cat', mode: 'text_to_video' } },
-  { name: 'EvoLink video', entry: 'api/evolink-generate.ts', kind: 'image', body: { mode: 'text_only', prompt: 'hi', duration: 5, quality: '720p', videoModel: 'seedance-2.5' } },
+  { name: 'fal image', entry: 'api/fal-image-generate.ts', kind: 'image', model:'gemini-3-pro-image-preview', pin:'fal', body: { endpoint: 'fal-ai/nano-banana-pro', input: { prompt: 'a cat' } } },
+  { name: 'Seedream', entry:'api/fal-image-generate.ts', kind:'image', model:'seedream-5.5', pin:'fal', body:{endpoint:'bytedance/seedream/v5.5/text-to-image',input:{prompt:'a cat'}} },
+  { name: 'fal video scale', entry: 'api/fal-video-scale.ts', kind: 'image', model:'seedance-2.5', pin:'evolink', body: { videoUrl: 'https://example.com/a.mp4', width: 640, height: 360 } },
+  { name: 'MiniMax H3 video', entry: 'api/fal-h3-video.ts', kind: 'image', model:'minimax-h3', pin:'fal', body: { prompt: 'a cat', mode: 'text_to_video' } },
+  { name: 'Omni video', entry:'api/fal-h3-video.ts', kind:'image', pin:'fal', body:{videoModel:'gemini-omni-1.2-flash',mode:'text_to_video',prompt:'a cat',duration:5,aspectRatio:'16:9',resolution:'720p'} },
+  { name: 'H3 on EvoLink', entry:'api/evolink-generate.ts', kind:'image', pin:'evolink', body:{videoModel:'minimax-h3',mode:'text_only',prompt:'a cat'} },
+  { name: 'MAGI-2', entry:'api/evolink-generate.ts', kind:'image', pin:'evolink', body:{videoModel:'magi-2',mode:'text_only',prompt:'a cat'} },
+  { name: 'EvoLink video', entry: 'api/evolink-generate.ts', kind: 'image', pin:'evolink', body: { mode: 'text_only', prompt: 'hi', duration: 5, quality: '720p', videoModel: 'seedance-2.5' } },
   { name: 'Seedance on fal', entry: 'api/seedance-video.ts', kind: 'image', body: { ...seedance, provider: 'fal' } },
   { name: 'Seedance on OpenRouter', entry: 'api/seedance-video.ts', kind: 'image', body: { ...seedance, provider: 'openrouter' } },
   { name: 'Seedance on EvoLink', entry: 'api/seedance-video.ts', kind: 'image', body: { ...seedance, provider: 'evolink' } },
-  { name: 'Gemini text', entry: 'api/gemini-generate.ts', kind: 'text', body: { model: 'gemini-3.8-flash', contents: { parts: [{ text: 'hi' }] } } },
-  { name: 'Gemini image', entry: 'api/gemini-generate.ts', kind: 'image', body: { model: 'gemini-3-pro-image-preview', contents: { parts: [{ text: 'hi' }] } } },
-  { name: 'Gemini Nano Banana 2.1', entry: 'api/gemini-generate.ts', kind: 'image', body: { model: 'gemini-nano-banana-2.1', contents: { parts: [{ text: 'hi' }] } } },
+  { name: 'Gemini text', entry: 'api/gemini-generate.ts', kind: 'text', pin:'gemini', body: { model: 'gemini-4-hydrogen', contents: { parts: [{ text: 'hi' }] } } },
+  { name: 'Gemini image', entry: 'api/gemini-generate.ts', kind: 'image', pin:'gemini', body: { model: 'gemini-3-pro-image-preview', contents: { parts: [{ text: 'hi' }] } } },
+  { name: 'Gemini Nano Banana 2.1', entry: 'api/gemini-generate.ts', kind: 'image', pin:'gemini', body: { model: 'gemini-nano-banana-2.1', contents: { parts: [{ text: 'hi' }] } } },
 ].filter(route => existsSync(new URL(`../${route.entry}`, import.meta.url)));
 const handlers = new Map();
 for (const route of ROUTES) if (!handlers.has(route.entry)) handlers.set(route.entry, await load(route.entry));
@@ -48,9 +52,11 @@ const accepted = () => new Response(JSON.stringify({ request_id: 'r1', id: 't1',
 const refused = () => new Response(JSON.stringify({ error: { message: 'no' } }), { status: 400, headers: { 'content-type': 'application/json' } });
 
 // Sends one POST and reports the response, the provider calls and the ledger calls.
-const post = async (route, { allowed = true, reason = 'daily', provider = accepted, headers = { authorization: `Bearer ${token}` }, env = {}, registry = {} } = {}) => {
-  const ledger = [];
-  globalThis.__registry = registry;
+const post = async (route, { allowed = true, reason = 'daily', provider = accepted, headers = { authorization: `Bearer ${token}` }, env = {}, registry, choice = route.pin ?? route.body.provider } = {}) => {
+  const ledger = [], writes = [];
+  const write = table => async row => { writes.push({table,row}); return { error:null }; };
+  globalThis.__registry = registry ?? { from: table => ({ insert:write(table),upsert:write(table) }) };
+  globalThis.__prefs = { [route.model ?? route.body.model ?? route.body.videoModel]: choice };
   globalThis.__ledger = (name, args) => {
     ledger.push({ name, ...args });
     return { data: name === 'start_openai_request' ? { allowed, reason, retry_after: 3600 } : null, error: null };
@@ -68,10 +74,16 @@ const post = async (route, { allowed = true, reason = 'daily', provider = accept
     globalThis.fetch = savedFetch;
     for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   }
-  return { res, calls, started: ledger.filter(row => row.name === 'start_openai_request'), finished: ledger.filter(row => row.name === 'finish_openai_request') };
+  return { res, calls, writes, started: ledger.filter(row => row.name === 'start_openai_request'), finished: ledger.filter(row => row.name === 'finish_openai_request') };
 };
 
 for (const route of ROUTES) {
+  test(`${route.name}: Off stops new charges even on a direct API request`, async () => {
+    const { res, calls, started, writes } = await post(route,{choice:'off'});
+    assert.equal(res.statusCode,403,JSON.stringify(res.body));
+    assert.match(res.body.error,/turned off/);
+    assert.deepEqual(calls,[]); assert.deepEqual(started,[]); assert.deepEqual(writes,[]);
+  });
   test(`${route.name}: an exhausted limit stops the request before the provider`, async () => {
     for (const reason of ['daily', 'rate']) {
       const { res, calls, started, finished } = await post(route, { allowed: false, reason });
@@ -123,11 +135,33 @@ for (const route of ROUTES) {
   });
 }
 
+test('EvoLink cannot start paid fal video scaling with a disabled fal key', async () => {
+  const route = ROUTES.find(route => route.name === 'fal video scale');
+  const {res,calls,started,writes} = await post(route,{env:{FAL_ENABLED:'false'}});
+  assert.equal(res.statusCode,503);
+  assert.equal(res.body.code,'PROVIDER_ADMISSION_REJECTED');
+  assert.equal(res.body.providerRequestSent,false);
+  assert.deepEqual(calls,[]); assert.deepEqual(started,[]); assert.deepEqual(writes,[]);
+});
+
 const savedVideo = (updates, row = { id: 'g1', user_id: 'u1', type: 'video', status: 'pending', task_id: null, metadata: {} }) => ({ from: () => ({
   select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }) }),
-  update: values => { updates.push(values); const chain = { eq: () => chain, select: () => chain, maybeSingle: async () => ({ data: { id: row.id }, error: null }), then: done => done({ data: [{ id: row.id }], error: null }) }; return chain; },
+  update: values => {
+    const predicates = [];
+    const chain = {
+      eq(key,value) { predicates.push(() => key === 'metadata' ? JSON.stringify(row[key]) === value : row[key] === value); return chain; },
+      is(key,value) { assert.equal(value,null); predicates.push(() => row[key] == null); return chain; },
+      select() { return chain; },
+      async maybeSingle() {
+        if (!predicates.every(matches => matches())) return {data:null,error:null};
+        updates.push(values); Object.assign(row,values);
+        return {data:{id:row.id},error:null};
+      },
+    };
+    return chain;
+  },
 }) });
-const h3 = { name: 'saved H3', entry: 'api/fal-h3-video.ts', body: { prompt: 'a cat', mode: 'text_to_video', generationId: 'g1' } };
+const h3 = { name: 'saved H3', entry: 'api/fal-h3-video.ts', model:'minimax-h3', pin:'fal', body: { prompt: 'a cat', mode: 'text_to_video', generationId: 'g1' } };
 
 test('saved H3 video: the limit leaves it unclaimed, so it can be submitted later', async () => {
   const updates = [];
@@ -139,7 +173,7 @@ test('saved H3 video: the limit leaves it unclaimed, so it can be submitted late
 
 test('saved H3 video: an already submitted one takes no limit slot', async () => {
   const updates = [];
-  const { res, calls, started } = await post(h3, { registry: savedVideo(updates, { id: 'g1', user_id: 'u1', type: 'video', status: 'processing', task_id: 'r0', metadata: {} }) });
+  const { res, calls, started } = await post(h3, { choice:'off', registry: savedVideo(updates, { id: 'g1', user_id: 'u1', type: 'video', status: 'processing', task_id: 'r0', metadata: {} }) });
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.taskId, 'r0');
   assert.equal(calls.length, 0);
@@ -148,10 +182,16 @@ test('saved H3 video: an already submitted one takes no limit slot', async () =>
 
 test('saved H3 video: admitted, claimed and sent once', async () => {
   const updates = [];
-  const { res, calls, started, finished } = await post(h3, { registry: savedVideo(updates) });
+  const registry = savedVideo(updates);
+  const { res, calls, started, finished } = await post(h3, { registry });
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   assert.equal(calls.length, 1);
   assert.equal(started.length, 1);
   assert.deepEqual(finished.map(row => row.p_outcome), ['completed']);
   assert.equal(updates[0].status, 'processing');
+  const recovered = await post(h3,{registry,choice:'off'});
+  assert.equal(recovered.res.statusCode,200);
+  assert.equal(recovered.res.body.taskId,'r1');
+  assert.equal(recovered.calls.length,0);
+  assert.equal(recovered.started.length,0);
 });

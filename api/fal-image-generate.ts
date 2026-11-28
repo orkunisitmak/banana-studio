@@ -1,18 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, requireUser } from './_lib/auth.js';
+import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
 import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { prepareTaskRegistry, registerProviderTask } from './_lib/providerTasks.js';
-import { getNanoBanana21InputError, NANO_BANANA_21_ENDPOINT } from '../src/lib/images/nanoBanana21.js';
+import { getNanoBananaInputError, NANO_BANANA_21_ENDPOINT, NANO_BANANA_21_MODEL, NANO_BANANA_PRO_ENDPOINT, NANO_BANANA_PRO_MODEL } from '../src/lib/images/nanoBanana21.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
+import { providerImageUrl } from './_lib/providerMedia.js';
+import { isSeedreamEndpoint, SEEDREAM_ENDPOINTS, SEEDREAM_MODEL, validateSeedreamInput } from '../src/lib/images/seedream55.js';
 
 const FAL_QUEUE_BASE = 'https://queue.fal.run';
 
 // Only active models can be submitted. fal-status.ts additionally permits
 // retired GPT Image 2 endpoints so existing paid tasks can still be recovered.
-const ALLOWED_ENDPOINTS = new Set([
-  'fal-ai/nano-banana-pro',
-  'fal-ai/nano-banana-pro/edit',
-  'google/nano-banana-2.1',
-  'google/nano-banana-2.1/edit',
+const ENDPOINT_MODELS = new Map<string, string>([
+  [NANO_BANANA_PRO_ENDPOINT, NANO_BANANA_PRO_MODEL], [`${NANO_BANANA_PRO_ENDPOINT}/edit`, NANO_BANANA_PRO_MODEL],
+  [NANO_BANANA_21_ENDPOINT, NANO_BANANA_21_MODEL], [`${NANO_BANANA_21_ENDPOINT}/edit`, NANO_BANANA_21_MODEL],
+  ...Object.values(SEEDREAM_ENDPOINTS).map(endpoint => [endpoint, SEEDREAM_MODEL] as const),
 ]);
 
 // Fields we are willing to forward to fal. Anything not in this list is
@@ -21,12 +24,10 @@ const ALLOWED_ENDPOINTS = new Set([
 const FORWARDABLE_INPUT_KEYS = new Set([
   'prompt',
   'image_urls',
-  'image_size',
   'aspect_ratio',
   'resolution',
   'output_format',
   'safety_tolerance',
-  'quality',
   'num_images',
   'seed',
   'system_prompt',
@@ -93,30 +94,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (body.input?.mask_url != null || body.input?.mask != null) {
     return res.status(400).json({ error: 'Inpaint has been removed. Refresh the app and submit a regular image edit.' });
   }
-  const input = sanitizeInput(body.input);
-  if (!input.prompt && body.prompt) input.prompt = body.prompt;
+  const isSeedream = isSeedreamEndpoint(endpoint);
+  if (isSeedream && body.input !== undefined && (!body.input || typeof body.input !== 'object' || Array.isArray(body.input))) {
+    return res.status(400).json({ error: 'Seedream input must be an object.' });
+  }
+  // Seedream has disjoint per-mode schemas. Validate the original keys rather
+  // than silently stripping an edit reference or permitting Nano-only options.
+  const input = isSeedream ? { ...body.input } : sanitizeInput(body.input);
+  if (body.prompt && (isSeedream ? input.prompt === undefined : !input.prompt)) input.prompt = body.prompt;
 
-  if (!endpoint || !ALLOWED_ENDPOINTS.has(endpoint)) {
+  const model = ENDPOINT_MODELS.get(endpoint);
+  if (!model) {
     return res.status(400).json({ error: `Unsupported fal endpoint: ${endpoint}` });
   }
 
-  if (!input.prompt || typeof input.prompt !== 'string' || !input.prompt.trim()) {
-    return res.status(400).json({ error: 'prompt is required' });
-  }
-
-  if (endpoint === NANO_BANANA_21_ENDPOINT || endpoint === `${NANO_BANANA_21_ENDPOINT}/edit`) {
-    const error = getNanoBanana21InputError(input, endpoint.endsWith('/edit'));
+  if (isSeedream) {
+    const error = validateSeedreamInput(endpoint, input);
     if (error) return res.status(400).json({ error });
-    // These are GPT Image fields, not part of Nano Banana 2.1's contract.
-    delete input.image_size;
-    delete input.quality;
-  }
-
-  if (endpoint.endsWith('/edit')) {
-    const urls = input.image_urls;
-    if (!Array.isArray(urls) || urls.length === 0) {
-      return res.status(400).json({ error: 'image_urls is required for edit endpoints' });
+  } else {
+    if (['video_url','pdf_url','context','history'].some(key => body.input?.[key] != null)) {
+      return res.status(400).json({ error: 'Banana supports still-image references, not video, PDF or conversation inputs on this route.' });
     }
+    const error = getNanoBananaInputError(input, endpoint);
+    if (error) return res.status(400).json({ error });
   }
 
   let acceptedTaskId: string | undefined;
@@ -124,17 +124,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const registry = await prepareTaskRegistry(res);
     if (!registry) return;
+    if (!await admitProvider(req, res, model, 'fal')) return;
+    if (input.image_url || input.image_urls) {
+      const db = createUserScopedClient(req);
+      if (typeof input.image_url === 'string') input.image_url = await providerImageUrl(db, input.image_url);
+      if (Array.isArray(input.image_urls)) input.image_urls = await Promise.all(input.image_urls.map(url => providerImageUrl(db,url)));
+    }
     guard = await startPaidRequest(req, res, user, 'image', 'fal.ai');
     if (!guard) return;
     const response = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
+      redirect: 'error', signal: AbortSignal.timeout(45_000),
       method: 'POST',
       headers: {
         Authorization: `Key ${apiKey}`,
+        'X-Fal-No-Retry': '1',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input),
     });
-    await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
 
     let data: any;
     // Read the body once: after json() fails, text() is always empty.
@@ -142,12 +149,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       data = JSON.parse(text);
     } catch {
+      await guard.finish('failed', null, response.status);
       return res
         .status(502)
         .json({ error: `fal.ai returned non-JSON response (${response.status}): ${text.slice(0, 160)}` });
     }
 
     if (!response.ok) {
+      await guard.finish('failed', null, response.status);
       const errMsg =
         data?.detail?.[0]?.msg ||
         data?.detail ||
@@ -159,20 +168,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json({ error: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg) });
     }
 
-    if (!data.request_id) {
-      return res.status(502).json({ error: 'fal.ai response missing request_id', raw: data });
+    if (typeof data?.request_id !== 'string' || !data.request_id || data.request_id.length > 200) {
+      await guard.finish('failed', null, response.status);
+      return res.status(502).json({ error: 'fal.ai response missing request_id' });
     }
 
     acceptedTaskId = data.request_id;
+    await guard.finish('completed', acceptedTaskId, response.status);
     await registerProviderTask(registry, 'fal', data.request_id, user.id);
+    // Low-level API callers also own a gallery manifest. Never persist wire
+    // references here: they can contain data URIs or temporary access tokens.
+    let generationId: string | undefined;
+    if (isSeedream) {
+      generationId = randomUUID();
+      const mode = endpoint === SEEDREAM_ENDPOINTS.layerize ? 'layerize' : endpoint === SEEDREAM_ENDPOINTS.edit ? 'edit' : 'text-to-image';
+      const { error } = await registry.from('generations').insert({ id:generationId, user_id:user.id, type:'image', status:'processing', image_model:SEEDREAM_MODEL, task_id:acceptedTaskId, url:'', prompt:input.prompt || '', aspect_ratio:'1:1', resolution:'2K', created_at:Date.now(), is_favorite:false,
+        metadata:{ generationProvider:'fal', providerModel:endpoint, falEndpoint:endpoint, falRequestId:acceptedTaskId, generationStartedAt:Date.now(), seedreamInputCount: Array.isArray(input.image_urls) ? input.image_urls.length : input.image_url ? 1 : 0,
+          seedreamOptions:{mode,...(mode === 'layerize' ? {layerSize:input.image_size, maxImages:input.max_images, enableTextRecognition:input.enable_text_recognition} : {imageSize:input.image_size, numImages:input.num_images, background:input.background}), outputFormat:input.output_format, watermark:input.watermark, enableSafetyChecker:input.enable_safety_checker, syncMode:input.sync_mode} } });
+      if (error) throw new Error('Could not save the accepted Seedream generation. Check the task before generating again.');
+    }
 
     console.log(
       `[fal-submit] endpoint=${endpoint} request_id=${data.request_id}`,
     );
 
-    return res.status(200).json({ requestId: data.request_id, endpoint });
+    return res.status(200).json({ requestId: data.request_id, endpoint, ...(generationId ? {generationId} : {}) });
   } catch (error: any) {
-    await guard?.finish('failed');
+    if (!acceptedTaskId) await guard?.finish('failed').catch(()=>{});
     console.error('fal image generate error:', error.message);
     return res.status(500).json({ error: error.message || 'Image generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }

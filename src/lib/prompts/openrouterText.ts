@@ -1,6 +1,6 @@
 // Server-safe definitions. Verified against OpenRouter's live catalog 2026-10-14.
 // https://openrouter.ai/anthropic/claude-opus-5.5
-export const OPENROUTER_TEXT_MODEL = 'anthropic/claude-opus-5.5' as const;
+export const OPENROUTER_TEXT_MODEL = 'claude-opus-5.5' as const;
 export const OPENROUTER_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type OpenRouterReasoningEffort = typeof OPENROUTER_REASONING_EFFORTS[number];
 export const DEFAULT_OPENROUTER_REASONING: OpenRouterReasoningEffort = 'medium';

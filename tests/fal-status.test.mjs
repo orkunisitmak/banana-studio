@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // Auth and the task registry are stubbed at their import seam; fetch is faked.
 const stubs = {
-  'auth.js': 'export const applyCors=()=>{};export const requireUser=async()=>({id:"u1"});',
+  'auth.js': 'export const applyCors=()=>{};export const createUserScopedClient=()=>({});export const requireUser=async()=>({id:"u1"});',
   'providerTasks.js': 'export const requireProviderTask=async()=>true;',
 };
 const compiled = await build({entryPoints:['api/fal-status.ts'],absWorkingDir:fileURLToPath(new URL('..',import.meta.url)),bundle:true,write:false,format:'esm',platform:'node',

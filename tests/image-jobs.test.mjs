@@ -145,3 +145,67 @@ test('a 429 whose deferral was not saved is requeued instead of failed; other di
     assert.ok(store.job(id).dispatchedAt);
   }
 }));
+
+for (const mode of ['text-to-image','edit','layerize']) test('durable Seedream ' + mode + ' preserves the accepted task on redelivery', () => withJobs(async ({store,db}) => {
+  const id = 'seedream-' + mode, task = 'req-' + mode;
+  const images = mode === 'text-to-image' ? [] : (mode === 'edit' ? ['source','donor'] : ['source']).map(id => ({id,data:'https://refs.example.invalid/' + id + '.png',mimeType:'image/png'}));
+  const prompt = mode === 'layerize' ? '' : mode === 'edit' ? 'Copy @REFERENCE[donor] onto @REFERENCE[source].' : 'Illustrate a valley.';
+  const oldKey=process.env.FAL_KEY,oldAdmin=process.env.FAL_ADMIN_KEY;
+  process.env.FAL_KEY='offline';delete process.env.FAL_ADMIN_KEY;
+  const seedreamOptions={mode,numImages:2};
+  store.workerRpc('enqueue_image_job',{p_id:id,p_metadata:{seedreamOptions},p_payload:{id,model:'seedream-5.5',provider:'fal',seedreamOptions,displayPrompt:prompt,prompt,aspectRatio:'1:1',resolution:'1K',referenceImages:images,privateReferencePaths:images.map(()=>null)}});
+  let submissions=0,reads=0;
+  const sample={url:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='};
+  globalThis.fetch=async (url,init)=>{
+    if (init?.method==='POST') {
+      submissions++;
+      assert.equal(url,'https://queue.fal.run/bytedance/seedream/v5.5/'+mode);
+      const input=JSON.parse(init.body);
+      if(mode==='edit'){ assert.deepEqual(input.image_urls,images.map(ref=>ref.data));assert.equal(input.prompt,'Copy image 2 onto image 1.'); }
+      if(mode==='layerize'){assert.equal(input.image_url,images[0].data);assert.equal(input.prompt,'');}
+      return Response.json({request_id:task});
+    }
+    assert.match(url,new RegExp('/bytedance/seedream/requests/'+task+'(?:/status)?$'));
+    if(url.endsWith('/status')) return Response.json({status:++reads===1?'IN_QUEUE':'COMPLETED'});
+    return Response.json({images:[sample,sample],...(mode==='layerize'?{layers:[0,1].map(z_index=>({z_index,image:sample}))}:{})});
+  };
+  try {
+    const job={id,userId:store.user.id};
+    await assert.rejects(runImageJob(db,job),err=>err instanceof ImageJobWait);
+    assert.equal(store.get('generations',id).task_id,task);
+    await runImageJob(db,job); await runImageJob(db,job);
+    const row=store.get('generations',id);
+    assert.equal(submissions,1);assert.equal(row.status,'completed');assert.equal(row.metadata.generationProvider,'fal');
+    assert.equal(row.metadata.seedreamResult.images.length,2);assert.doesNotMatch(JSON.stringify(row.metadata.seedreamResult),/data:image|token=/);
+    assert.ok(fs.existsSync(store.mediaPath(row.storage_path)));
+    if(mode==='layerize')assert.equal(row.metadata.seedreamResult.layers[1].image.url,row.metadata.seedreamResult.images[1].url);
+  } finally {for (const [k,v] of [['FAL_KEY',oldKey],['FAL_ADMIN_KEY',oldAdmin]]){if(v===undefined)delete process.env[k];else process.env[k]=v;}}
+}));
+
+test('unusable completed Seedream results end the saved job without resubmission; CDN failures remain retryable',()=>withJobs(async({store,db,audits})=>{
+  const key=process.env.FAL_KEY;process.env.FAL_KEY='offline';
+  try {
+    for (const failure of ['malformed','oversize']) {
+      const id='unusable-'+failure,task='paid-'+failure,seedreamOptions={mode:'text-to-image'};
+      store.workerRpc('enqueue_image_job',{p_id:id,p_metadata:{seedreamOptions},p_payload:{id,model:'seedream-5.5',provider:'fal',seedreamOptions,prompt:'Paint a tree.',displayPrompt:'Paint a tree.',aspectRatio:'1:1',resolution:'1K',referenceImages:[],privateReferencePaths:[]}});
+      let submissions=0, attempts=0, requests=0;
+      globalThis.fetch=async(url,init)=>{
+        requests++;
+        if(init?.method==='POST'){submissions++;return Response.json({request_id:task});}
+        if(String(url).endsWith('/status'))return Response.json({status:'COMPLETED'});
+        if(String(url).endsWith('/'+task))return Response.json({images:[{url:'https://fal.media/result.png'}]});
+        assert.equal(String(url),'https://fal.media/result.png');
+        if (++attempts === 1) return new Response('temporarily unavailable',{status:503});
+        return new Response('not-an-image',{headers:failure==='oversize'?{'Content-Length':String(48*1024*1024+1)}:{}});
+      };
+      const job={id,userId:store.user.id};
+      await assert.rejects(runImageJob(db,job),/Could not retrieve/);
+      assert.equal(store.get('generations',id).status,'processing');
+      await runImageJob(db,job);
+      const row=store.get('generations',id),before=requests;
+      assert.equal(row.status,'failed');assert.equal(row.task_id,task);assert.match(row.metadata.error,failure==='oversize'?/storage limit/:/expected raster/);
+      assert.deepEqual(audits(id).map(({state,providerRequestId})=>[state,providerRequestId]),[['failed',task]]);
+      await runImageJob(db,job);assert.equal(requests,before);assert.equal(submissions,1);
+    }
+  } finally {if(key===undefined)delete process.env.FAL_KEY;else process.env.FAL_KEY=key;}
+}));

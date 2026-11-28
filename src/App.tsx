@@ -11,24 +11,32 @@ import { startTextPreferencesSync } from './services/textPreferencesService';
 import { AdminPanel } from './components/AdminPanel';
 import { useToast } from './components/Toast';
 import { AdminUserSummary, GenerationConfig, GeneratedMedia, Template, UserProfile, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, isEnhancedPromptStale } from './types';
-import { generateMedia, brainstormIdeas, generatePromptVariation, isFalImageModel } from './services/geminiService';
+import { generateMedia, brainstormIdeas, generatePromptVariation } from './services/geminiService';
 import * as workspaceStorage from './services/storageService';
 import { resumeOpenAIImage, recoverOpenAIImage } from './services/openaiImageService';
-import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL } from './lib/images/openaiImage';
+import { getOpenAIImageOptions, getOpenAIImageSize, isOpenAIImageModel } from './lib/images/openaiImage';
 import { brainstormImageCount } from './lib/brainstorm/brainstormLabels';
 import { createBrainstormBatch, type BrainstormGenerationRequest } from './lib/brainstorm/brainstormGeneration';
 import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
-import { resumeGptImage2Task } from './services/falImageService';
+import { FalImageTaskFailedError, pollImageTask, resumeGptImage2Task } from './services/falImageService';
 import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
-import { getSeedanceFrameError } from './lib/video/seedanceFrames';
+import { videoDraftError } from './lib/video/videoDraftValidation';
+import { isFalSeedanceModel, falSeedanceLimits } from './lib/video/falSeedance25';
+import { getMagi2Limits } from './lib/video/magi2Config';
+import { OMNI_MODEL, OMNI_LIMITS } from './lib/video/omniFlash';
+import { EVO_H3_CAPABILITIES } from './lib/video/evoH3Max';
+import { getEvoH3DraftMode } from './lib/video/evoH3MaxConfig';
+import { isSeedreamEndpoint, SEEDREAM_MODEL } from './lib/images/seedream55';
+import { getImageOperation } from './lib/images/imageOperation';
+import { selectProvider } from './services/providerRouting';
 import { getSession, supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
-import { getH3MaxConfigError, getH3MaxMode } from './lib/video/h3MaxConfig';
+import { getH3MaxMode } from './lib/video/h3MaxConfig';
 import { parseErrorMessage } from './services/generationErrors';
 import { mergePersonReferenceInputs } from './lib/references/personReferences';
-import { createRecreateConfig, mergeRecreateHydration } from './lib/gallery/recreateDraft';
-import { validateImageGenerationReferences } from './lib/images/imagePrompting';
+import { createRecreateConfig, mergeRecreateHydration, restoreRecreateReferences } from './lib/gallery/recreateDraft';
+import { resolveImageDraft } from './lib/images/imageDraftValidation';
 import { prepareProtectedImageSource, finishProtectedImageEdit } from './services/imageEditService';
 import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { isStuckPendingMedia, VIDEO_SUBMISSION_HEARTBEAT_INTERVAL_MS } from './lib/gallery/stuckPending';
@@ -43,6 +51,7 @@ import { resolveTextModelPreferences } from './lib/prompts/textModels';
 class DeletedVideoError extends Error { constructor() { super('The video was deleted.'); } }
 
 const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => getActiveImageModel(value);
+
 
 const mergeSavedMedia = (
   media: GeneratedMedia,
@@ -144,13 +153,13 @@ const AuthorizedWorkspace: React.FC<{
   const deleteImages = withWorkspaceSession(workspaceStorage.deleteImages);
   const syncLocalImages = withWorkspaceSession(workspaceStorage.syncLocalImages);
   const createPendingVideo = withWorkspaceSession(workspaceStorage.createPendingVideo);
+  const savePreparedVideoReferences = withWorkspaceSession(workspaceStorage.savePreparedVideoReferences);
   const updateVideoStatus = withWorkspaceSession(workspaceStorage.updateVideoStatus);
   const getImageById = withWorkspaceSession(workspaceStorage.getImageById);
+  const getSavedPerson = withWorkspaceSession(workspaceStorage.getSavedPerson);
   const refreshVideoSubmission = withWorkspaceSession((id: string) => refreshPendingVideoSubmission(supabase, userId, id));
   const failStaleVideoSubmission = withWorkspaceSession((id: string, message: string, now: number) =>
     failStalePendingVideo(supabase, userId, id, message, now));
-  const createPendingImage = withWorkspaceSession(workspaceStorage.createPendingImage);
-  const setImageTaskInfo = withWorkspaceSession(workspaceStorage.setImageTaskInfo);
   const updateImageStatus = withWorkspaceSession(workspaceStorage.updateImageStatus);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [adminGalleryUser, setAdminGalleryUser] = useState<AdminUserSummary | null>(null);
@@ -539,15 +548,11 @@ const AuthorizedWorkspace: React.FC<{
 
   const handleSignOut = onSignOut;
 
-  /**
-   * Resume a fal.ai GPT Image 2 generation that was in flight when the user
-   * closed/refreshed the tab. Reads the request_id + endpoint we stored in the
-   * row's metadata at submission time, polls fal until the task resolves,
-   * downloads the result, persists the durable Supabase URL, and updates the
-   * gallery tile in place.
-   */
+  // The persisted queue/receipt decides how to resume. A logical model name
+  // alone cannot distinguish a fal task from one accepted by the native worker.
   const resumePendingImage = async (pending: GeneratedMedia) => {
-    if (pending.imageQueue?.version === 1 || pending.openaiStartedAt || pending.imageModel === SUNBURST_MODEL) {
+    const rawFal = Boolean(pending.falRequestId && pending.falEndpoint);
+    if (pending.imageQueue?.version === 1 || (!rawFal && (pending.openaiStartedAt || isOpenAIImageModel(pending.imageModel)))) {
       setActiveRequests(prev => prev + 1);
       try {
         const media = await resumeOpenAIImage(pending, progress => {
@@ -578,16 +583,24 @@ const AuthorizedWorkspace: React.FC<{
       item.id === pending.id ? { ...item, isLoading: true, status: 'processing', imageProgress: 0, error: undefined } : item
     ));
 
+    const serverArchived = isSeedreamEndpoint(pending.falEndpoint);
+    const progress = (imageProgress: number) => {
+      setGeneratedMedia(prev => prev.map(item =>
+        item.id === pending.id ? { ...item, imageProgress, isLoading: true } : item
+      ));
+    };
     try {
-      const dataUrl = await resumeGptImage2Task(
-        pending.falRequestId,
-        pending.falEndpoint,
-        (progress) => {
-          setGeneratedMedia(prev => prev.map(item =>
-            item.id === pending.id ? { ...item, imageProgress: progress, isLoading: true } : item
-          ));
-        },
-      );
+      await assertWorkspaceSession();
+      if (serverArchived) {
+        // The authenticated status endpoint archives every output. Re-read
+        // that row instead of downloading its first layer and overwriting it.
+        await pollImageTask(pending.falRequestId, pending.falEndpoint, progress);
+        const saved = await getImageById(pending.id, undefined, { requireRemote: true });
+        if (!saved?.url || saved.status !== 'completed') throw new Error('The archived image is not available yet.');
+        setGeneratedMedia(prev => prev.map(item => item.id === pending.id ? { ...saved, isLoading: false } : item));
+        return;
+      }
+      const dataUrl = await resumeGptImage2Task(pending.falRequestId, pending.falEndpoint, progress);
 
       // Save the data URL to Supabase storage so the row gets a durable URL
       // (fal.ai result URLs expire after a short window).
@@ -620,6 +633,12 @@ const AuthorizedWorkspace: React.FC<{
       toast.success('Image Ready', 'A queued image generation completed.');
     } catch (e: any) {
       const message = e?.message || 'Image generation failed';
+      if (serverArchived && !(e instanceof FalImageTaskFailedError)) {
+        // A read/archive error does not establish that a paid generation failed.
+        // Keep the saved task resumable, including if another tab has completed it.
+        toast.warning('Image status unavailable', message);
+        return;
+      }
       await updateImageStatus(pending.id, 'failed', { metadata: { error: message } });
       setGeneratedMedia(prev => prev.map(item =>
         item.id === pending.id
@@ -689,14 +708,14 @@ const AuthorizedWorkspace: React.FC<{
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId ? { ...item, videoProgress: progress, isLoading: true } : item
         ));
-      }, baseMedia?.videoModel || DEFAULT_VIDEO_MODEL, baseMedia?.falEndpoint, baseMedia?.falQueueEndpoint);
+      }, baseMedia?.videoModel || DEFAULT_VIDEO_MODEL, baseMedia?.falEndpoint, baseMedia?.falQueueEndpoint, baseMedia?.generationProvider, userId);
 
       if (videoResult.urls.length > 0) {
         const videoUrl = videoResult.urls[0];
         const providerExpandedPrompt = videoResult.expandedPrompt;
         const finalCost = videoResult.actualCostUsd != null
           ? { usd: videoResult.actualCostUsd, source: 'provider_actual' as const }
-          : baseMedia?.generationCost;
+          : videoResult.reservedCost || baseMedia?.generationCost;
         const generationCompletedAt = Date.now();
         const generationTime = Math.max(1, Math.round((generationCompletedAt - generationStartedAt) / 1000));
 
@@ -730,20 +749,21 @@ const AuthorizedWorkspace: React.FC<{
           generationCompletedAt,
           generationCost: finalCost,
           providerExpandedPrompt,
-          videoOutputDuration:videoResult.duration,
+          videoOutputDuration:videoResult.duration, falSeedanceResult: videoResult.falSeedanceResult,
           status: 'completed',
         } as GeneratedMedia);
         const finalUrl = savedResult.publicUrl;
 
         await updateVideoStatus(videoId, 'completed', {
           url: finalUrl,
-          metadata: { generationTime, generationStartedAt, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, storagePath: savedResult.storagePath },
+          metadata: { generationTime, generationStartedAt, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, falSeedanceResult: savedResult.falSeedanceResult, storagePath: savedResult.storagePath },
         });
 
         setGeneratedMedia(prev => prev.map(item =>
           item.id === videoId ? {
             ...item,
             url: finalUrl,
+            falSeedanceResult: savedResult.falSeedanceResult,
             thumbnailUrl: savedResult.thumbnailUrl || item.thumbnailUrl,
             storagePath: savedResult.storagePath,
             thumbnailPath: savedResult.thumbnailPath,
@@ -804,14 +824,7 @@ const AuthorizedWorkspace: React.FC<{
     }
   };
 
-  /**
-   * Run a single image generation for one placeholder. For fal.ai-backed
-   * models (GPT Image 2) we persist a pending row to Supabase so the
-   * generation can be resumed across page refreshes -- otherwise refreshing
-   * mid-flight would silently drop the in-progress placeholders. For Gemini
-   * models the call is fast enough that we still keep the existing
-   * in-memory-only flow.
-   */
+  /** Run one gallery card; durable providers own the accepted task and its stored result. */
   const runImageGeneration = async (
     placeholder: GeneratedMedia,
     batchConfig: GenerationConfig,
@@ -820,7 +833,7 @@ const AuthorizedWorkspace: React.FC<{
     ownImageJobsRef.current.add(placeholder.id);
     try {
       await assertWorkspaceSession();
-      const editSource = await prepareProtectedImageSource(batchConfig);
+      const editSource = batchConfig.imageModel === SEEDREAM_MODEL ? null : await prepareProtectedImageSource(batchConfig);
       const generated = await generateMedia(
         batchConfig,
         (progress) => {
@@ -834,7 +847,7 @@ const AuthorizedWorkspace: React.FC<{
             ? { ...item, imageStage, imageQueueWaitReason, imageProgress: undefined, status: imageStage === 'generating' ? 'processing' : 'pending' } : item));
         } },
       );
-      const media = await finishProtectedImageEdit(generated, editSource);
+      const media = editSource ? await finishProtectedImageEdit(generated, editSource) : generated;
       media.folderId = folderId;
       media.id = placeholder.id; // Keep the same id so the upsert hits the pending row
       media.originalPrompt = batchConfig.originalPrompt;
@@ -879,9 +892,20 @@ const AuthorizedWorkspace: React.FC<{
     }
     // Each request owns a snapshot. Gallery edits must not mutate the main
     // composer or depend on a setState update arriving before Generate.
-    const config = requestConfig.mode === 'image' && getActiveImageModel(requestConfig.imageModel) !== requestConfig.imageModel
-      ? { ...requestConfig, imageModel: getActiveImageModel(requestConfig.imageModel) } : requestConfig;
-    const ignoresText=config.mode==='video'&&config.videoModel==='minimax-h3'&&H3_MAX_CAPABILITIES[getH3MaxMode(config)].prompt==='unsupported';
+    let config: GenerationConfig;
+    try {
+      const model = requestConfig.mode === 'image' ? getActiveImageModel(requestConfig.imageModel) : requestConfig.videoModel || DEFAULT_VIDEO_MODEL;
+      const provider = await selectProvider(model);
+      await assertWorkspaceSession();
+      if (requestConfig.mode === 'video' && requestConfig.videoProvider && provider !== requestConfig.videoProvider)
+        throw new Error('The video provider changed. Review the action and settings before submitting.');
+      config = requestConfig.mode === 'image' ? resolveImageDraft({ ...requestConfig, imageModel: getActiveImageModel(model), imageProvider: provider }) : { ...requestConfig, videoProvider: provider };
+    } catch (error) {
+      if (fromEditor) throw error;
+      toast.error('Generation blocked', error instanceof Error ? error.message : 'Check the model settings.');
+      return;
+    }
+    const ignoresText = config.mode === 'video' && config.videoModel === 'minimax-h3' && config.videoProvider === 'fal' && H3_MAX_CAPABILITIES[getH3MaxMode(config)].prompt === 'unsupported';
     if (!ignoresText && isEnhancedPromptStale(config)) {
       if (fromEditor) throw new Error('Enhance again or revert before generating with this model.');
       toast.warning('Re-enhance Required', 'The model, action, or references changed after Enhance. Revert to the original prompt, then Enhance again.');
@@ -890,30 +914,20 @@ const AuthorizedWorkspace: React.FC<{
 
     // Video generation flow -- persists to DB immediately
     if (config.mode === 'video') {
-      if (config.videoModel!=='minimax-h3'&&!config.prompt.trim()) return;
-      if (config.videoModel === 'seedance-2.5' && !config.referenceVideos?.some(video => video.isContinuation)) {
-        const frameError = getSeedanceFrameError(config.referenceImages, config.referenceVideos?.length || 0, config.referenceAudios?.length || 0, config.videoOperation);
-        if (frameError) { toast.warning('Frame setup', frameError); return; }
-      }
-      if (config.videoModel === 'minimax-h3') {
-        const error=getH3MaxConfigError(config);
-        if(error){toast.warning('H3 Max inputs',error);return;}
-      }
-      if (config.videoModel !== 'minimax-h3' && config.videoOperation !== 'generate' && (config.referenceVideos?.length || 0) === 0) {
-        const actionLabel = config.videoOperation === 'reference_edit'
-          ? 'Seedance 2.0 Ref Edit'
-          : `Video ${config.videoOperation === 'edit' ? 'Edit' : 'Extend'}`;
-        toast.warning('Source Video Required', `Add a source video before using ${actionLabel}.`);
-        return;
-      }
-      const h3MaxMode=config.videoModel==='minimax-h3'?getH3MaxMode(config):undefined;
-      const requestedVideoDuration = config.videoModel!=='minimax-h3'&&config.videoOperation === 'edit' ? -1 : config.videoDuration;
-      const effectiveVideoPromptExpansionMode = config.videoModel === 'minimax-h3'
-        ? config.h3MaxOptions?.promptExpansionMode || config.videoPromptExpansionMode || 'balanced'
-        : config.videoPromptExpansionMode;
-      const requestedVideoAspectRatio = h3MaxMode
-        ? H3_MAX_CAPABILITIES[h3MaxMode].aspectRatios.length?config.videoAspectRatio:'adaptive'
-        : config.videoOperation === 'edit' || config.videoOperation === 'extend'?'adaptive':config.videoAspectRatio;
+      const inputError = videoDraftError(config);
+      if (inputError) { toast.warning('Video inputs', inputError); return; }
+      const isH3 = config.videoModel === 'minimax-h3';
+      const isEvoH3 = isH3 && config.videoProvider === 'evolink';
+      const isFalSeedance = config.videoProvider === 'fal' && isFalSeedanceModel(config.videoModel);
+      const magi2Mode = config.videoModel === 'magi-2' ? config.magi2Mode || 'text_only' : undefined;
+      const h3MaxMode = isEvoH3 ? getEvoH3DraftMode(config) : isH3 ? getH3MaxMode(config) : undefined;
+      const h3MaxOptions = isH3 && !isEvoH3 ? config.h3MaxOptions : undefined;
+      const falSeedanceOptions = isFalSeedance ? config.falSeedanceOptions : undefined;
+      const requestedVideoDuration = !isH3 && (config.videoOperation === 'edit' || config.videoOperation === 'upscale') ? -1 : config.videoDuration;
+      const effectiveVideoPromptExpansionMode = isH3 && !isEvoH3 ? h3MaxOptions?.promptExpansionMode || config.videoPromptExpansionMode || 'balanced' : isEvoH3 || isFalSeedance || magi2Mode ? undefined : config.videoPromptExpansionMode;
+      const requestedVideoAspectRatio = isEvoH3 ? h3MaxMode === 'image_to_video' ? 'adaptive' : config.videoAspectRatio : h3MaxMode
+        ? H3_MAX_CAPABILITIES[h3MaxMode].aspectRatios.length ? config.videoAspectRatio : 'adaptive'
+        : config.videoOperation === 'edit' || config.videoOperation === 'extend' || config.videoOperation === 'upscale' ? 'adaptive' : config.videoAspectRatio;
 
       const videoId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const genStart = Date.now();
@@ -941,10 +955,10 @@ const AuthorizedWorkspace: React.FC<{
         videoDuration: requestedVideoDuration,
         audioEnabled: config.audioEnabled,
         videoPromptExpansionMode: effectiveVideoPromptExpansionMode,
-        h3MaxMode, h3MaxOptions: config.h3MaxOptions,
+        h3MaxMode, h3MaxOptions, magi2Mode, falSeedanceOptions, generationProvider: config.videoProvider,
         generationStartedAt: genStart,
         videoProgress: 0,
-        videoStage: 'generating',
+        videoStage: 'sending',
         status: 'pending',
       };
 
@@ -960,7 +974,7 @@ const AuthorizedWorkspace: React.FC<{
         videoDuration: requestedVideoDuration,
         audioEnabled: config.audioEnabled,
         videoPromptExpansionMode: effectiveVideoPromptExpansionMode,
-        h3MaxMode, h3MaxOptions: config.h3MaxOptions,
+        h3MaxMode, h3MaxOptions, magi2Mode, falSeedanceOptions, generationProvider: config.videoProvider,
         folderId: currentFolderId,
         referenceImages: config.referenceImages,
         referenceVideos: config.referenceVideos,
@@ -997,20 +1011,27 @@ const AuthorizedWorkspace: React.FC<{
       );
 
       try {
-        const { taskId, endpoint, queueEndpoint, cost, mode, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config,{id:videoId});
+        const { taskId, provider, endpoint, queueEndpoint, cost, mode, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config, {
+          id: videoId, userId,
+          savePreparedReferences: async refs => {
+            if (deletedMediaIdsRef.current.has(videoId)) throw new DeletedVideoError();
+            await savePreparedVideoReferences(videoId, refs, userId);
+            return true;
+          },
+        });
 
         // Update DB row with the real task_id now that we have it
         await updateVideoStatus(videoId, 'processing', {
           referenceImages,
           metadata: {
-            generationCost: cost, providerModel: endpoint, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink',
+            generationCost: cost, providerModel: endpoint, generationProvider: provider,
             referenceVideos,
             referenceAudios,
             falEndpoint: endpoint,
             falQueueEndpoint: queueEndpoint,
             videoOperation: config.videoOperation || 'generate',
             videoPromptExpansionMode: effectiveVideoPromptExpansionMode,
-        h3MaxMode, h3MaxOptions: config.h3MaxOptions,
+            h3MaxMode, h3MaxOptions, magi2Mode, falSeedanceOptions,
           },
         });
         // Also store task_id. Until the row holds it, a reload cannot resume
@@ -1018,17 +1039,13 @@ const AuthorizedWorkspace: React.FC<{
         const taskIdSaved = !supabase || await saveVideoTaskId(supabase, userId, videoId, taskId);
         clearInterval(submissionHeartbeat);
 
-        // Log as soon as EvoLink accepts/reserves credits for the task. The
-        // previous success-only logging omitted billed tasks that later hit a
-        // polling, storage, or provider failure and materially understated
-        // the admin dashboard's video spend.
-        // H3 acceptance is logged by the server, so a lost browser response
-        // cannot omit that charge or insert the same request twice.
+        // Record acceptance, not just successful renders. The fal H3 and Seedance
+        // handlers already record this server-side; do not count them twice.
         await assertWorkspaceSession();
-        if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
+        if (!(provider === 'fal' && (isH3 || isFalSeedance))) logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, taskIdUnsaved: !taskIdSaved || undefined, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+          item.id === videoId ? { ...item, status: 'processing', videoStage: 'generating', taskId, taskIdUnsaved: !taskIdSaved || undefined, generationProvider: provider, providerModel: endpoint, falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
         ));
 
         const videoResult = await pollVideoTask(taskId, (progress) => {
@@ -1036,14 +1053,14 @@ const AuthorizedWorkspace: React.FC<{
             item.id === videoId ? { ...item, videoProgress: progress } : item
           ));
           toast.updateToast(progressToastId, { progress: Math.round(progress * 100) });
-        }, config.videoModel || DEFAULT_VIDEO_MODEL, endpoint, queueEndpoint);
+        }, config.videoModel || DEFAULT_VIDEO_MODEL, endpoint, queueEndpoint, provider, userId);
 
         if (videoResult.urls.length > 0) {
           const videoUrl = videoResult.urls[0];
           const providerExpandedPrompt = videoResult.expandedPrompt;
           const finalCost = videoResult.actualCostUsd != null
             ? { usd: videoResult.actualCostUsd, source: 'provider_actual' as const }
-            : cost;
+            : videoResult.reservedCost || cost;
           const generationCompletedAt = Date.now();
           const generationTime = Math.max(1, Math.round((generationCompletedAt - genStart) / 1000));
 
@@ -1062,7 +1079,7 @@ const AuthorizedWorkspace: React.FC<{
               referenceImages:referenceImages||item.referenceImages,
               referenceVideos,
               referenceAudios,
-              videoOutputDuration:videoResult.duration,
+              videoOutputDuration:videoResult.duration, falSeedanceResult: videoResult.falSeedanceResult,
               isLoading: true,
               status: 'processing',
               videoProgress: 1,
@@ -1078,14 +1095,14 @@ const AuthorizedWorkspace: React.FC<{
           // Keep the expiring provider URL out of the database's canonical URL
           // while it is copied to durable storage.
           const savedResult = await persistCompletedVideo({
-            ...placeholder,
+            ...placeholder, taskId, generationProvider: provider, providerModel: endpoint,
             url: videoUrl,
             generationTime,
             generationStartedAt: genStart,
             generationCompletedAt,
             generationCost: finalCost,
             providerExpandedPrompt,
-            videoOutputDuration:videoResult.duration,
+            videoOutputDuration:videoResult.duration, falSeedanceResult: videoResult.falSeedanceResult,
             referenceImages:referenceImages||placeholder.referenceImages,
             referenceVideos,
             referenceAudios,
@@ -1099,13 +1116,14 @@ const AuthorizedWorkspace: React.FC<{
           // Now persist the durable URL to the DB.
           await updateVideoStatus(videoId, 'completed', {
             url: finalUrl,
-            metadata: { generationTime, generationStartedAt: genStart, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, storagePath: savedResult.storagePath },
+            metadata: { generationTime, generationStartedAt: genStart, generationCompletedAt, generationCost: finalCost, providerExpandedPrompt, videoOutputDuration:videoResult.duration, falSeedanceResult: savedResult.falSeedanceResult, storagePath: savedResult.storagePath },
           });
 
           setGeneratedMedia(prev => prev.map(item =>
             item.id === videoId ? {
               ...item,
               url: finalUrl,
+              falSeedanceResult: savedResult.falSeedanceResult,
               thumbnailUrl: savedResult.thumbnailUrl || item.thumbnailUrl,
               storagePath: savedResult.storagePath,
               thumbnailPath: savedResult.thumbnailPath,
@@ -1172,16 +1190,6 @@ const AuthorizedWorkspace: React.FC<{
       return;
     }
 
-    // OpenAI generation has its own server key; Gemini is only required for its text tools.
-
-    try {
-      validateImageGenerationReferences(config);
-    } catch (error) {
-      if (fromEditor) throw error;
-      toast.error('Generation blocked', error instanceof Error ? error.message : 'Check the attached references.');
-      return;
-    }
-
     const count = config.count;
     const batchConfig = structuredClone(config);
     const timestamp = Date.now();
@@ -1190,15 +1198,16 @@ const AuthorizedWorkspace: React.FC<{
     const placeholders = Array.from({ length: count }).map(() => ({
       id: crypto.randomUUID(),
       url: '', // Empty for loading
-      prompt: batchConfig.prompt,
+      prompt: batchConfig.prompt, imageStage: 'sending',
       originalPrompt: batchConfig.originalPrompt,
       promptPreparation: batchConfig.promptPreparation,
       youtubeSource: batchConfig.youtubeSource,
       aspectRatio: batchConfig.aspectRatio,
       resolution: batchConfig.resolution,
+      imageOperation: getImageOperation(batchConfig), seedreamOptions: batchConfig.seedreamOptions, generationProvider: batchConfig.imageProvider,
       imageModel: batchConfig.imageModel,
-      openaiImageOptions: batchConfig.imageModel === SUNBURST_MODEL ? getOpenAIImageOptions(batchConfig.openaiImageOptions) : undefined,
-      imageRequestedSize: batchConfig.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(batchConfig) : undefined,
+      openaiImageOptions: isOpenAIImageModel(batchConfig.imageModel) ? getOpenAIImageOptions(batchConfig.openaiImageOptions, batchConfig.imageModel) : undefined,
+      imageRequestedSize: isOpenAIImageModel(batchConfig.imageModel) ? getOpenAIImageSize(batchConfig) : undefined,
       imagePromptCategory: batchConfig.imagePromptCategory,
       imageEditSourceId: getGalleryEditSourceId(batchConfig.referenceImages),
       createdAt: timestamp,
@@ -1256,7 +1265,16 @@ const AuthorizedWorkspace: React.FC<{
     await finishBatch;
   };
 
-  const handleBrainstormGenerate = (request: BrainstormGenerationRequest) => {
+  const handleBrainstormGenerate = async (request: BrainstormGenerationRequest) => {
+    try {
+      const settings = resolveImageDraft(request.settings, true);
+      const imageProvider = await selectProvider(settings.imageModel);
+      await assertWorkspaceSession();
+      request = { ...request, settings: { ...settings, imageProvider } };
+    } catch (error) {
+      toast.error('Brainstorm blocked', error instanceof Error ? error.message : 'Check the image model settings.');
+      return;
+    }
     const folderId = currentFolderId;
     let settled = 0;
     const finishPreparing = () => {
@@ -1265,7 +1283,10 @@ const AuthorizedWorkspace: React.FC<{
       }
     };
     const batch = createBrainstormBatch(request, folderId, {
-      prepare: (settings, count, options) => brainstormIdeas(settings.referenceImages, request.category, settings.prompt, undefined, count, settings, options),
+      prepare: async (settings, count, options) => {
+        await assertWorkspaceSession();
+        return brainstormIdeas(settings.referenceImages, request.category, settings.prompt, undefined, count, settings, options);
+      },
       generate: runImageGeneration,
       patch: (ids, patch) => {
         const idSet = new Set(ids);
@@ -1471,10 +1492,8 @@ const AuthorizedWorkspace: React.FC<{
     let resolved = media;
     let detailReadFailed = false;
     const refsMissing = !media.referenceImages || media.referenceImages.length === 0;
-    const refsUnresolved = (media.referenceImages || []).some(ref => !ref?.data || !String(ref.data).trim());
-    const savedReferenceIds = Array.isArray(media.imageGenerationReferenceIds)
-      ? media.imageGenerationReferenceIds.filter(Boolean)
-      : [];
+    const refsUnresolved = initialDraft.referenceImages.some(ref => typeof ref.data !== 'string' || !ref.data.trim());
+    const savedReferenceIds = media.mediaType === 'video' ? media.videoReferenceImageIds : media.imageGenerationReferenceIds;
     const videoRefsMissing = media.mediaType === 'video' && (!media.referenceVideos || media.referenceVideos.length === 0);
     const audioRefsMissing = media.mediaType === 'video' && (!media.referenceAudios || media.referenceAudios.length === 0);
     const generationPromptMissing = media.mediaType !== 'video' && !media.imageGenerationPrompt?.trim();
@@ -1506,11 +1525,6 @@ const AuthorizedWorkspace: React.FC<{
       } catch (e) {
         detailReadFailed = true;
         console.warn('Recreate: failed to fetch full media row', e);
-      } finally {
-        if (recreateLoadingRef.current === loadId) {
-          recreateLoadingRef.current = null;
-          setIsRecreateLoading(false);
-        }
       }
     }
 
@@ -1523,18 +1537,27 @@ const AuthorizedWorkspace: React.FC<{
     // with missing inputs when the detail fetch failed or a stored object can
     // no longer be signed. The provider would either reject it or blend the
     // wrong identity, so make the recovery action explicit instead.
-    const resolvedImageRefs = resolved.referenceImages || [];
-    const unresolvedImageRefs = resolvedImageRefs.some(ref => !ref?.data || !String(ref.data).trim());
-
     const recreatedMode = resolved.mediaType === 'video' ? 'video' : 'image';
-    const recreatedConfig = createRecreateConfig(resolved, resolveImageModel(resolved.imageModel ?? initialDraft.imageModel));
+    let recreatedConfig = createRecreateConfig(resolved, resolveImageModel(resolved.imageModel ?? initialDraft.imageModel));
+    if (recreatedConfig.referenceImages.some(ref => (typeof ref.data !== 'string' || !ref.data.trim()) && ref.id.startsWith('saved-person:'))) {
+      recreateLoadingRef.current = loadId;
+      setIsRecreateLoading(true);
+      const restored = await restoreRecreateReferences(recreatedConfig.referenceImages, getSavedPerson);
+      if (loadId !== recreateLoadIdRef.current) return;
+      resolved = { ...resolved, referenceImages: restored };
+      recreatedConfig = createRecreateConfig(resolved, recreatedConfig.imageModel);
+    }
+    if (recreateLoadingRef.current === loadId) {
+      recreateLoadingRef.current = null;
+      setIsRecreateLoading(false);
+    }
+    const resolvedImageRefs = resolved.referenceImages || [];
     // createRecreateConfig adds an empty slot for every saved reference id the
     // detail row did not return, so a partly restored set shows up here too.
-    const missingReferenceSlots = recreatedConfig.referenceImages.some(ref => !ref?.data || !String(ref.data).trim());
+    const missingReferenceSlots = recreatedConfig.referenceImages.some(ref => typeof ref.data !== 'string' || !ref.data.trim());
     const referencesUnavailable = detailReadFailed
       || missingReferenceSlots
-      || unresolvedImageRefs
-      || ((savedReferenceIds.length > 0 || (resolved.imageGenerationReferenceIds?.length || 0) > 0 || refsUnresolved)
+      || ((savedReferenceIds?.length || refsUnresolved)
         && resolvedImageRefs.length === 0);
     setConfig(current => mergeRecreateHydration(current, initialDraft, recreatedConfig));
     if (referencesUnavailable) {
@@ -1579,6 +1602,9 @@ const AuthorizedWorkspace: React.FC<{
             imageGenerationPrompt: full.imageGenerationPrompt ?? media.imageGenerationPrompt,
             imagePromptCategory: full.imagePromptCategory ?? media.imagePromptCategory,
             originalPrompt: full.originalPrompt ?? media.originalPrompt,
+            imageOperation: full.imageOperation ?? media.imageOperation,
+            seedreamOptions: full.seedreamOptions ?? media.seedreamOptions,
+            openaiImageOptions: full.openaiImageOptions ?? media.openaiImageOptions,
             referenceImages: full.referenceImages || [],
             youtubeSource: full.youtubeSource ?? media.youtubeSource,
           };
@@ -1590,7 +1616,12 @@ const AuthorizedWorkspace: React.FC<{
       }
 
       // Generate a variation of the prompt
-      const textOptions = await resolveTextModelPreferences();
+      const imageProvider = await selectProvider(imageModel);
+      resolveImageDraft({ ...config, count: 1, imageModel, mode: 'image', prompt: resolved.prompt, aspectRatio: resolved.aspectRatio, resolution: resolved.resolution,
+        openaiImageOptions: resolved.openaiImageOptions, seedreamOptions: resolved.seedreamOptions, imageOperation: resolved.imageOperation,
+        originalPrompt: resolved.originalPrompt, referenceImages: variationReferences, imageProvider }, true);
+      await assertWorkspaceSession();
+      const textOptions = await resolveTextModelPreferences('variation');
       const variedPrompt = await generatePromptVariation(
         resolved.prompt,
         variationReferences,
@@ -1612,6 +1643,7 @@ const AuthorizedWorkspace: React.FC<{
         aspectRatio: resolved.aspectRatio,
         resolution: resolved.resolution,
         imageModel,
+        imageProvider, imageOperation: resolved.imageOperation, seedreamOptions: resolved.seedreamOptions,
         openaiImageOptions: resolved.openaiImageOptions,
         imagePromptCategory: resolved.imagePromptCategory,
         referenceImages: variationReferences,
@@ -1635,9 +1667,10 @@ const AuthorizedWorkspace: React.FC<{
         promptPreparation: variationConfig.promptPreparation,
         aspectRatio: variationConfig.aspectRatio,
         resolution: variationConfig.resolution,
+        imageOperation: getImageOperation(variationConfig), seedreamOptions: variationConfig.seedreamOptions, generationProvider: imageProvider,
         imageModel: variationConfig.imageModel,
-        openaiImageOptions: variationConfig.imageModel === SUNBURST_MODEL ? getOpenAIImageOptions(variationConfig.openaiImageOptions) : undefined,
-        imageRequestedSize: variationConfig.imageModel === SUNBURST_MODEL ? getOpenAIImageSize(variationConfig) : undefined,
+        openaiImageOptions: isOpenAIImageModel(variationConfig.imageModel) ? getOpenAIImageOptions(variationConfig.openaiImageOptions, variationConfig.imageModel) : undefined,
+        imageRequestedSize: isOpenAIImageModel(variationConfig.imageModel) ? getOpenAIImageSize(variationConfig) : undefined,
         imagePromptCategory: variationConfig.imagePromptCategory,
         createdAt: timestamp,
         referenceImages: variationConfig.referenceImages,
@@ -1651,35 +1684,13 @@ const AuthorizedWorkspace: React.FC<{
       setActiveRequests(prev => prev + 1);
 
       try {
-        const editSource = await prepareProtectedImageSource(variationConfig);
-        const generated = await generateMedia(variationConfig, progress => {
-          setGeneratedMedia(current => current.map(item => item.id === placeholder.id ? { ...item, imageProgress: progress } : item));
-        }, undefined, { id: placeholder.id, folderId: media.folderId || currentFolderId, onStage: imageStage => {
-          setGeneratedMedia(previous => previous.map(item => item.id === placeholder.id
-            ? { ...item, imageStage, imageProgress: undefined, status: imageStage === 'generating' ? 'processing' : 'pending' } : item));
-        } });
-        const newMedia = await finishProtectedImageEdit(generated, editSource);
-        newMedia.folderId = media.folderId || currentFolderId;
-        newMedia.promptPreparation = variationConfig.promptPreparation;
-
-        await assertWorkspaceSession();
-        const savedResult = newMedia.openaiStartedAt ? null : await saveImage(newMedia);
-        const remoteMedia = newMedia.openaiStartedAt ? newMedia : mergeSavedMedia(newMedia, savedResult);
-
-        setGeneratedMedia(prev => prev.map(item =>
-          item.id === placeholder.id ? remoteMedia : item
-        ));
-
+        const result = await runImageGeneration(placeholder, variationConfig, placeholder.folderId ?? null);
+        if (!result.ok) throw new Error(result.error);
         toast.dismissToast(toastId);
         toast.success('Variation Generated!', variedPrompt.length > 60 ? variedPrompt.substring(0, 60) + '...' : variedPrompt);
       } catch (error: any) {
         console.error("Variation generation failed", error);
         const { title, message } = parseErrorMessage(error);
-        // Like a batch image: keep the failed card. A server-queued job already
-        // has a saved failed row that would otherwise reappear after reload.
-        setGeneratedMedia(prev => prev.map(item => item.id === placeholder.id
-          ? { ...item, isLoading: false, url: '', status: 'failed', error: (error as any)?.message || message, imageProgress: undefined, imageStage: undefined }
-          : item));
         toast.dismissToast(toastId);
         toast.error(title, message);
       } finally {
@@ -1701,7 +1712,11 @@ const AuthorizedWorkspace: React.FC<{
         const duration = await galleryVideoDuration(media);
         let limit: number | null = null;
         flushSync(() => setConfig(prev => {
-          const MAX_VIDEOS = prev.videoModel === 'minimax-h3'
+          const MAX_VIDEOS = prev.videoModel === 'magi-2' ? getMagi2Limits(prev.magi2Mode).videos
+            : prev.videoModel === OMNI_MODEL ? prev.videoOperation === 'generate' ? OMNI_LIMITS.referenceVideos : 1
+            : prev.videoModel === 'minimax-h3' && prev.videoProvider === 'evolink' ? prev.h3MaxMode === 'reference_to_video' ? Math.max(0, Math.min(EVO_H3_CAPABILITIES.maxVideos, EVO_H3_CAPABILITIES.maxReferences - prev.referenceImages.length - (prev.referenceAudios?.length || 0))) : 0
+            : prev.videoProvider === 'fal' && isFalSeedanceModel(prev.videoModel) ? falSeedanceLimits(prev.videoModel).videos
+            : prev.videoProvider === 'openrouter' ? 0 : prev.videoModel === 'minimax-h3'
             ? prev.h3MaxMode&&prev.h3MaxMode!=='auto'?H3_MAX_CAPABILITIES[getH3MaxMode(prev)].videos.max:3
             : prev.videoModel === 'seedance-2.5'
             ? (prev.videoOperation === 'edit' || prev.videoOperation === 'extend' ? 1 : 10)
@@ -1715,7 +1730,7 @@ const AuthorizedWorkspace: React.FC<{
               {
                 id: Math.random().toString(36).substr(2, 9),
                 url: media.url,
-                mimeType: 'video/mp4',
+                mimeType: media.falSeedanceOptions?.outputFormat === 'mov' ? 'video/quicktime' : 'video/mp4',
                 duration,
                 previousPrompt: media.prompt,
               }
@@ -1878,7 +1893,6 @@ const AuthorizedWorkspace: React.FC<{
         onGenerateVariation={handleGenerateVariation}
         onEditGenerate={async editConfig => {
           if (adminGalleryUser) throw new Error('This gallery is read-only.');
-          validateImageGenerationReferences(editConfig);
           return await handleGenerate(editConfig, true) as string[];
         }}
         onCancelBrainstorm={handleCancelBrainstorm}

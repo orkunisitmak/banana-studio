@@ -38,6 +38,7 @@ test('real Controls after Re-create on a video then Image tab shows a valid Reso
   const { createRecreateConfig } = await bundle(root + '/src/lib/gallery/recreateDraft.ts');
   const out = await build({ entryPoints: ['src/components/Controls.tsx'], absWorkingDir: root, bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent', define: { 'import.meta.url': '"file:///x/"', 'import.meta.env': '{"VITE_X":""}' },
     plugins: [{ name: 'p', setup(b) {
+      b.onLoad({ filter:/ProviderRoutingSettings\.tsx$/ }, () => ({ contents: `export function useProviderWorkspace(model) { const available={fal:true,evolink:true}; const preferences={'seedance-2.5':'evolink','seedance-2.0':'evolink'}; return {settings:{preferences,loading:false},route:{available,provider:preferences[model] || 'fal'}}; }`, loader:'js' }));
       b.onLoad({ filter: /components\/Controls\.tsx$/ }, a => {
         const src = fs.readFileSync(a.path, 'utf8').replace('useState(false);\n', 'useState(false);\n');
         return { contents: src, loader: 'tsx', resolveDir: root + '/src/components' };

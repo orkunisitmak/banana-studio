@@ -1,14 +1,7 @@
 import React,{useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import '../../src/styles/index.css';
-window.__BANANA_STUDIO_CONFIG__={mode:'local',userId:'00000000-0000-0000-0000-000000000001',sessionId:'00000000-0000-0000-0000-000000000002'};
-// All application requests are synthetic. No accounts, keys or provider calls.
-window.fetch=async(input)=>{
-  const path=String(input);
-  if(path==='/api/gemini-status')return new Response(JSON.stringify({providers:{gemini:true,openai:true}}),{headers:{'Content-Type':'application/json'}});
-  if(path==='/local/query')return new Response(JSON.stringify({data:[],error:null}),{headers:{'Content-Type':'application/json'}});
-  throw new Error('The synthetic fixture blocks application network requests.');
-};
+import './offline-workspace';
 const [{Controls},{HistoryPanel},{AdminPanel}]=await Promise.all([import('../../src/components/Controls'),import('../../src/components/HistoryPanel'),import('../../src/components/AdminPanel')]);
 function Fixture(){
   const [count,setCount]=useState(0),[history,setHistory]=useState(false),[admin,setAdmin]=useState(false);

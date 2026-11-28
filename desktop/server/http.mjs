@@ -4,14 +4,16 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { LOCAL_AUTH } from './context.mjs';
 
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.avif':'image/avif','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.gif':'image/gif','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.avif':'image/avif','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4'};
+const MEDIA_CSP = "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const equal=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const json=(res,status,value)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
 const body=async(req,limit)=>{const parts=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>limit)throw new Error('LIMIT');parts.push(chunk);}return Buffer.concat(parts);};
 const serveFile=(req,res,file,media=false)=>{
   let stat;try{stat=fs.statSync(file);}catch{return json(res,404,{error:'File not found.'});}if(!stat.isFile()||fs.lstatSync(file).isSymbolicLink())return json(res,404,{error:'File not found.'});
   const extension=path.extname(file).toLowerCase();
-  const safeMedia=/^\.(png|jpe?g|webp|avif|mp4|webm|mov|mp3|wav|m4a)$/.test(extension);
+  if(media)res.setHeader('Content-Security-Policy',MEDIA_CSP);
+  const safeMedia=/^\.(png|jpe?g|gif|svg|webp|avif|mp4|webm|mov|mp3|wav|m4a)$/.test(extension);
   res.setHeader('Content-Type',media&&!safeMedia?'application/octet-stream':MIME[extension]||'application/octet-stream');
   if(media&&!safeMedia)res.setHeader('Content-Disposition','attachment');
   res.setHeader('Accept-Ranges','bytes');

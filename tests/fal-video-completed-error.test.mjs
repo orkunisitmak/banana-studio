@@ -16,6 +16,8 @@ const load = async entry => {
     entryPoints: [entry], absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
     bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) {
+      b.onResolve({ filter: /providerConfiguration\.js$/ }, () => ({ path: 'admission', namespace: 'video-provider' }));
+      b.onLoad({ filter: /.*/, namespace: 'video-provider' }, () => ({ contents: 'export const admitProvider=async()=>{throw new Error("Polling must not consult model settings")};' }));
       b.onResolve({ filter: /_lib\/(auth|providerTasks|falBillingCosts|h3Usage)\.js$/ }, args => ({ path: args.path.split('/').pop(), namespace: 'stub' }));
       b.onResolve({ filter: /(^|\/)openaiGuard\.js$/ }, () => ({ path: 'openaiGuard.js', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ contents: stubs[args.path], loader: 'js' }));

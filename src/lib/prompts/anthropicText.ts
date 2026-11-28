@@ -1,7 +1,7 @@
 // Server-safe definitions for the direct Anthropic route of Claude Opus 5.5.
 // https://platform.claude.com/docs/en/about-claude/models/overview
 export const ANTHROPIC_MODELS: Record<string, string> = {
-  'anthropic/claude-opus-5.5': 'claude-opus-5-5',
+  'claude-opus-5.5': 'claude-opus-5-5',
 };
 
 /** Anthropic reports cache reads/writes separately from uncached input.

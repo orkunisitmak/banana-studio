@@ -25,7 +25,7 @@ const textBreakdown = (row: AdminModelUsageSummary) => [
 ].filter(Boolean).join(' · ');
 
 const ModelCost = ({ row }: { row: AdminModelUsageSummary }) => <>
-  <span className="font-mono text-green-300">{money(row.total_cost)}</span>
+  <span className="font-mono text-green-300">{row.requests > 0 && row.unknown_cost_requests === row.requests ? 'Unknown' : money(row.total_cost)}</span>
   {row.unknown_cost_requests > 0 && <span className="mt-1 block text-[10px] text-amber-300">+ {row.unknown_cost_requests.toLocaleString()} unknown cost</span>}
 </>;
 
@@ -76,6 +76,7 @@ export const AdminProviderUsage = ({ usage }: { usage: ProviderUsageSummary | nu
       <div><h4 className="text-xs font-semibold text-violet-300">fal.ai{usage.fal.scope === 'workspace_endpoints' ? ' · workspace' : ''}</h4><p className="mt-0.5 break-all text-[10px] text-gray-500">{usage.fal.start ? `${usage.fal.start}${usage.fal.end ? ` — ${usage.fal.end}` : ' — present'}` : 'Provider reporting period'}</p></div>
       <span className="font-mono text-sm text-gray-200">{money(usage.fal.actualCostUsd)}</span>
     </div>
+    <p className="mt-1 text-[10px] text-gray-500">Workspace charges for app endpoints: images {money(usage.fal.imageActualCostUsd)} · video {money(usage.fal.videoActualCostUsd)} · text {money(usage.fal.textActualCostUsd)}. Text models share one fal endpoint.</p>
     {usage.fal.byEndpoint.length > 0 && <details className="mt-3 rounded-lg border border-gray-800" open>
       <summary className="cursor-pointer px-3 py-2 text-xs text-gray-300">Model / endpoint charges · {usage.fal.byEndpoint.length}</summary>
       <div className="px-3 pb-3">
@@ -105,6 +106,7 @@ export const AdminProviderUsage = ({ usage }: { usage: ProviderUsageSummary | nu
   </div>}
   {usage?.evolink && <div className="mt-4 border-t border-gray-800 pt-3 text-xs">
     <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold text-amber-300">EvoLink · account totals</h4><span className="font-mono text-gray-200">{usage.evolink.usedUsdApprox == null ? 'Unknown' : `≈ ${money(usage.evolink.usedUsdApprox)}`}</span></div>
+    <p className="mt-1 text-[10px] text-gray-500">These credits cover the entire EvoLink account, not an individual model.</p>
     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500">
       <span>{usage.evolink.usedCredits == null ? 'Used credits unavailable' : `${usage.evolink.usedCredits.toLocaleString()} used credits`}</span>
       {usage.evolink.remainingCredits != null && <span>{usage.evolink.remainingCredits.toLocaleString()} credits remaining{usage.evolink.remainingUsdApprox != null ? ` (≈ ${money(usage.evolink.remainingUsdApprox)})` : ''}</span>}

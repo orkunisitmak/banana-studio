@@ -1,6 +1,7 @@
 import React from 'react';
 import { Clock, RotateCcw, X, Image as ImageIcon, Layers, AlertCircle } from 'lucide-react';
-import { GeneratedImage } from '../types';
+import { GeneratedImage, VIDEO_MODEL_OPTIONS, getImageModelLabel } from '../types';
+import { PROVIDER_LABELS } from '../lib/providers';
 import { getImageOutputRatio, getImageResolutionLabel } from '../lib/images/openaiImage';
 
 interface HistoryPanelProps {
@@ -108,6 +109,11 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                     <span className="text-[10px] font-mono bg-gray-900 text-gray-500 px-1.5 py-0.5 rounded border border-gray-700">
                       {img.mediaType === 'video' ? img.videoAspectRatio || img.aspectRatio : getImageOutputRatio(img.imageOutputSize || img.imageRequestedSize) || img.aspectRatio}
                     </span>
+                    {(img.videoModel || img.imageModel) && <span className="text-[10px] text-gray-400">{img.mediaType === 'video'
+                      ? img.videoModel === 'seedance-2.5' && img.generationProvider === 'evolink' ? 'Seedance 2.5 Relaxed' : VIDEO_MODEL_OPTIONS.find(model => model.value === img.videoModel)?.label || img.videoModel
+                      : getImageModelLabel(img.imageModel)}</span>}
+                    {img.generationProvider && <span className="text-[10px] text-gray-400">{PROVIDER_LABELS[img.generationProvider]}</span>}
+                    {!!img.seedreamResult?.images.length && <span className="text-[10px] text-violet-300">{img.seedreamResult.images.length} {img.seedreamResult.layers ? 'layers' : 'images'}</span>}
                     {img.referenceImages && img.referenceImages.length > 0 && (
                        <span className="text-[10px] font-mono bg-violet-900/30 text-violet-400 px-1.5 py-0.5 rounded border border-violet-500/20 flex items-center gap-1">
                          {img.referenceImages.length > 1 ? <Layers className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}

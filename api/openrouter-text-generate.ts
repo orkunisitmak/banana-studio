@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { OPENROUTER_MODELS } from '../src/lib/providers.js';
+import { OPENROUTER_MODELS, PROVIDER_KEYS } from '../src/lib/providers.js';
+import { OPENAI_TEXT_MODEL } from '../src/lib/prompts/openaiText.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
+import { chatContent, postEvoOpus, postTextChat, routedChatError, vendorCost, HYDROGEN } from './_lib/textRouting.js';
 import { applyCors, createUserScopedClient, requireUser } from './_lib/auth.js';
-import { startOpenAIRequest } from './_lib/openaiGuard.js';
+import { startOpenAIRequest, startPaidRequest } from './_lib/openaiGuard.js';
 import { createTaskDeadline, waitForTask } from '../src/lib/shared/asyncTask.js';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost, isOpenRouterReasoningEffort, openRouterErrorMessage } from '../src/lib/prompts/openrouterText.js';
 import { buildBrainstormOutputFormat, brainstormOutputInstruction, isBrainstormCount, YOUTUBE_ANALYSIS_FORMAT, normalizeBrainstormOutput } from './_lib/textOutputFormats.js';
@@ -16,14 +19,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = createTaskDeadline(15_000);
   const user = await requireUser(req, res, auth.signal).finally(() => auth.dispose());
   if (!user) return;
-  const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) return res.status(503).json({ error: 'OPENROUTER_API_KEY sunucuda tanımlı değil. Yönetici OpenRouter anahtarını eklemeli.' });
   let body: any;
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
   const parts = body?.contents?.parts;
   const usageContext = body?.usageContext;
-  if (!['anthropic/claude-opus-5.5', 'gpt-6.1-sol', 'gemini-3.8-flash'].includes(body?.model)) return res.status(400).json({ error: 'Unsupported text model' });
+  if (![OPENROUTER_TEXT_MODEL, OPENAI_TEXT_MODEL, HYDROGEN].includes(body?.model)) return res.status(400).json({ error: 'Unsupported text model' });
   const model = body.model as string;
   const upstreamModel = OPENROUTER_MODELS[model];
   const effort = body.reasoningEffort ?? DEFAULT_OPENROUTER_REASONING;
@@ -36,18 +37,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (body.brainstormCount != null && (usageContext.action !== 'brainstorm' || !isBrainstormCount(body.brainstormCount))) return res.status(400).json({ error: 'Invalid Brainstorm idea count.' });
   if (body.outputFormat != null && (body.outputFormat !== 'youtube_analysis' || usageContext.action !== 'enhance' || body.brainstormFormat != null)) return res.status(400).json({ error: 'Invalid analysis output format.' });
   if (Buffer.byteLength(JSON.stringify(parts), 'utf8') > 4_100_000) return res.status(413).json({ error: 'Reference images are too large. Use fewer or smaller images.' });
-  const content: Record<string, unknown>[] = [];
-  for (const part of parts) {
-    if (typeof part?.text === 'string' && !part.inlineData && !part.fileData) content.push({ type: 'text', text: part.text });
-    else if (part?.text == null && !part.fileData && ['image/jpeg', 'image/png', 'image/webp'].includes(part?.inlineData?.mimeType)
-      && typeof part.inlineData.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(part.inlineData.data)) {
-      content.push({ type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } });
-    } else if (model === 'gemini-3.8-flash' && typeof part?.fileData?.fileUri === 'string'
-      && /^https:\/\/www\.youtube\.com\/watch\?v=[a-zA-Z0-9_-]{11}$/.test(part.fileData.fileUri)) {
-      content.push({ type: 'video_url', video_url: { url: part.fileData.fileUri } });
-    } else return res.status(400).json({ error: 'This model accepts text and image references. YouTube footage requires Gemini.' });
+  const content = chatContent(parts);
+  if (!content) return res.status(400).json({ error: 'This model accepts text and image references. YouTube footage requires native Gemini.' });
+  const provider = await admitProvider(req, res, model, body.provider);
+  if (!provider) return;
+  if (provider !== 'openrouter' && provider !== 'fal' && !(provider === 'evolink' && model === OPENROUTER_TEXT_MODEL)) {
+    return res.status(409).json({ error: 'This model requires a different text endpoint for the selected provider.' });
   }
-  const guard = await startOpenAIRequest(req, res, user, 'text', undefined, 'OpenRouter');
+  const key = process.env[PROVIDER_KEYS[provider]]?.trim();
+  if (!key) return res.status(503).json({ error: `Configure the ${provider} key before generating.` });
+  const guard = provider === 'openrouter' ? await startOpenAIRequest(req, res, user, 'text', undefined, 'OpenRouter') : await startPaidRequest(req, res, user, 'text', provider);
   if (!guard) return;
   const streaming = String(req.headers?.accept || req.headers?.Accept || '').includes('application/x-ndjson');
   let disconnected = false;
@@ -72,23 +71,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const analysis = body.outputFormat === 'youtube_analysis';
   const format = analysis ? YOUTUBE_ANALYSIS_FORMAT : usageContext.action === 'brainstorm' ? buildBrainstormOutputFormat(wardrobe, body.brainstormCount) : undefined;
   try {
-    const response = await waitForTask(fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST', redirect: 'error',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-OpenRouter-Title': 'Banana Studio' },
-      body: JSON.stringify({ model: upstreamModel,
-        messages: [{ role: 'system', content: analysis
-          ? 'Prepare the requested factual episode analysis using only the supplied footage or verified observations. Report unavailable footage honestly; never invent events, identities, prices, outcomes or timestamps. Return exactly the requested JSON object.'
-          : 'Complete the requested prompt-writing task using the supplied brief and references. Make reasonable creative decisions without follow-up questions. Return only the finished deliverable.' + (usageContext.action === 'brainstorm' ? brainstormOutputInstruction(wardrobe, body.brainstormCount) : '') },
-          { role: 'user', content }],
-        reasoning: { effort, exclude: true }, max_tokens: 32768, user: user.id,
-        provider: { require_parameters: true, allow_fallbacks: false, ...(model === 'gemini-3.8-flash' ? { only: ['google-ai-studio'] } : {}) },
-        ...(format ? { response_format: { type: 'json_schema', json_schema: { name: format.name, strict: format.strict, schema: format.schema } } } : {}),
-      }), signal: deadline.signal,
-    }), deadline.signal);
+    const system = analysis
+      ? 'Prepare the requested factual episode analysis using only the verified observations. Never invent events, identities, prices, outcomes or timestamps. Return exactly the requested JSON object.'
+      : 'Complete the requested prompt-writing task using the supplied brief and references. Make reasonable creative decisions without follow-up questions. Return only the finished deliverable.' + (usageContext.action === 'brainstorm' ? brainstormOutputInstruction(wardrobe, body.brainstormCount) : '');
+    const response = await waitForTask(provider === 'evolink' ? postEvoOpus(key, system, content, effort, format?.schema, deadline.signal)
+      : postTextChat(provider, key, model, { messages: [{ role: 'system', content: system }, { role: 'user', content }], effort, maxTokens: 32768,
+        responseFormat: format && { type: 'json_schema', json_schema: { name: format.name, strict: format.strict, schema: format.schema } } }, deadline.signal), deadline.signal);
     providerStatus = response.status; requestId = response.headers.get('x-request-id');
+    if (!response.ok) return fail(response.status, provider === 'openrouter' ? openRouterErrorMessage(response.status) : routedChatError(provider, response.status));
     const data = await waitForTask(response.json(), deadline.signal);
     deadline.dispose();
-    if (!response.ok) return fail(response.status, openRouterErrorMessage(response.status));
     requestId = typeof data?.id === 'string' ? data.id : requestId;
     // Account for a billed truncated/refused response before validating output.
     let usageLogged = false;
@@ -98,15 +90,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const { error } = await waitForTask(createUserScopedClient(req).from('usage_logs').insert({
         user_id: user.id, action: usageContext.action, model,
-        prompt: usageContext.prompt.slice(0, 500), image_count: 0, estimated_cost: calculateOpenRouterTextCost(data?.usage, model),
+        prompt: usageContext.prompt.slice(0, 500), image_count: 0, estimated_cost: provider === 'openrouter' ? calculateOpenRouterTextCost(data?.usage, model) : vendorCost(data?.usage),
       }).abortSignal(accounting.signal), accounting.signal);
       usageLogged = !error;
     } catch { usageLoggingPending = true; }
     finally { accounting.dispose(); }
     const choice = data?.choices?.[0];
-    if (choice?.finish_reason !== 'stop') return fail(502, 'Model yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
-    if (choice?.message?.refusal) return fail(422, 'Model bu isteği yanıtlayamadı.');
-    let text = choice?.message?.role === 'assistant' && typeof choice.message.content === 'string' ? choice.message.content : '';
+    if (provider === 'evolink' ? data?.stop_reason === 'refusal' : choice?.message?.refusal) return fail(422, 'Model bu isteği yanıtlayamadı.');
+    if (provider === 'evolink' ? data?.stop_reason !== 'end_turn' : choice?.finish_reason !== 'stop') return fail(502, 'Model yanıtı tamamlanamadı. İsteği kısaltıp yeniden dene.');
+    let text: string = provider === 'evolink'
+      ? data.role === 'assistant' && Array.isArray(data.content) ? data.content.filter((p: { type?: string; text?: unknown }) => p?.type === 'text' && typeof p.text === 'string').map((p: { text: string }) => p.text).join('\n') : ''
+      : choice?.message?.role === 'assistant' && typeof choice.message.content === 'string' ? choice.message.content : '';
     if (!text.trim()) return fail(502, 'Model boş yanıt döndürdü. Yeniden dene.');
     if (usageContext.action === 'brainstorm') {
       const normalized = normalizeBrainstormOutput(text, wardrobe, body.brainstormCount);
@@ -120,13 +114,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (typeof value?.videoAvailable !== 'boolean' || typeof value.brief !== 'string' || typeof value.premise !== 'string'
         || typeof value.limitation !== 'string' || !Array.isArray(value.evidence)) return fail(502, 'Model video analizini beklenen biçimde döndürmedi.');
     }
-    const result = { text, candidates: null, provider: 'openrouter', providerModel: upstreamModel, usageMetadata: { provider: 'openrouter', openrouterUsage: data.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
+    const result = { text, candidates: null, provider, providerModel: provider === 'evolink' ? 'claude-opus-5-5' : upstreamModel, usageMetadata: { provider, textProvider: provider, providerCost: vendorCost(data.usage), openrouterUsage: data.usage ?? null, usageLogged, usageLoggingPending }, requestId: guard.id };
     outcome = 'completed'; await guard.finish('completed', requestId, providerStatus);
     if (streaming) { send({ type: 'result', result }); return res.end(); }
     return res.status(200).json(result);
   } catch (error: any) {
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
-    return fail(timeout ? 504 : 502, timeout ? 'Model yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.' : openRouterErrorMessage());
+    return fail(timeout ? 504 : 502, timeout ? 'Model yanıt süresi aşıldı. İsteği kısaltıp yeniden dene.' : provider === 'openrouter' ? openRouterErrorMessage() : routedChatError(provider));
   } finally {
     deadline.dispose(); clearInterval(heartbeat); res.off?.('close', close);
     await guard.finish(outcome, requestId, providerStatus);

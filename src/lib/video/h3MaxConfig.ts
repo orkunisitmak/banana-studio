@@ -1,6 +1,6 @@
 import type { GenerationConfig, ReferenceImage } from '../../types.js';
 import { normalizeH3MaxPromptLanguage } from './h3MaxPromptGuide.js';
-import { buildH3MaxInput, H3_MAX_CAPABILITIES, isH3MaxModeAvailable, resolveH3MaxMode, type H3MaxOptions } from './h3Max.js';
+import { buildH3MaxInput, H3_MAX_CAPABILITIES, isH3MaxModeAvailable, resolveH3MaxMode, usesH3MaxTargetAudio, type H3MaxOptions } from './h3Max.js';
 
 export const getH3MaxMode = (config: Pick<GenerationConfig,'h3MaxMode'|'referenceImages'|'referenceVideos'|'referenceAudios'>) => resolveH3MaxMode(config.h3MaxMode,{
   images:config.referenceImages?.length||0,videos:config.referenceVideos?.length||0,audios:config.referenceAudios?.length||0,
@@ -10,8 +10,10 @@ export const getH3MaxMode = (config: Pick<GenerationConfig,'h3MaxMode'|'referenc
  * retains its precise fractional bounds for historical and external requests. */
 export const getH3MaxDraftCapabilities = (config: GenerationConfig) => {
   const mode = getH3MaxMode(config), capability = H3_MAX_CAPABILITIES[mode];
+  const targetAudio = usesH3MaxTargetAudio(mode, config.h3MaxOptions?.useTargetAudio);
   return { ...capability,
-    duration: capability.duration && (mode === 'text_to_video' || mode === 'image_to_video') && config.referenceAudios?.length
+    audios: targetAudio ? { min: 0, max: 1 } : capability.audios,
+    duration: capability.duration && targetAudio && config.referenceAudios?.length
       ? { ...capability.duration, min: 2 } : capability.duration,
     resolutions: mode === 'reference_to_video' && config.h3MaxOptions?.middleImageId
       ? capability.resolutions.filter(value => value !== '1080P') : capability.resolutions,
@@ -190,6 +192,7 @@ export const getKnownVideoDuration = (duration?:number):number|undefined => dura
 
 export const getH3MaxRequestBody = (config:GenerationConfig,media?:{images:Map<string,string>;videos:string[];audios:string[]}) => {
   const mode=getH3MaxMode(config),options=getH3MaxSubmissionOptions(config,media?.images);
+  const startFrame = options.startImageId ? config.referenceImages.find(image => image.id === options.startImageId) : undefined;
   // Validate the prompt as it is submitted: tags like @VIDEO expand into longer words.
   const prompt=H3_MAX_CAPABILITIES[mode].prompt==='unsupported'?undefined:normalizeH3MaxPromptLanguage(config.prompt,{mode,options:config.h3MaxOptions},{images:config.referenceImages,videos:config.referenceVideos||[],audios:config.referenceAudios||[]});
   return {mode,prompt,
@@ -198,6 +201,7 @@ export const getH3MaxRequestBody = (config:GenerationConfig,media?:{images:Map<s
     videoUrls:media?.videos||(config.referenceVideos||[]).map((_,index)=>`https://pending.invalid/video-${index}.mp4`),
     audioUrls:media?.audios||(config.referenceAudios||[]).map((_,index)=>`https://pending.invalid/audio-${index}.wav`),options,
     mediaMetadata:{images:getH3MaxReferenceImages(config).map(ref=>({width:ref.width,height:ref.height})),
+      ...(startFrame ? {startFrame:{width:startFrame.width,height:startFrame.height}} : {}),
       videos:(config.referenceVideos||[]).map(ref=>({duration:getKnownVideoDuration(ref.duration),width:ref.width,height:ref.height,size:ref.size})),
       audios:(config.referenceAudios||[]).map(ref=>({duration:ref.duration,size:ref.size}))},
   };

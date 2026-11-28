@@ -60,3 +60,14 @@ test('a non-Max H3 result is not measured', async () => {
   succeed({}); measured(9);
   assert.equal((await poll('minimax/h3/text-to-video')).duration, undefined);
 });
+
+test('saved H3 and Seedance tasks keep their originating provider, independent of current defaults', async () => {
+  const calls = [];
+  globalThis.fetch = async url => { calls.push(url); return new Response(JSON.stringify({status:'SUCCEEDED',output:['https://media.example.com/video.mp4'],duration:8})); };
+  await pollVideoTask('evo-r1', undefined, 'minimax-h3', 'evolink/minimax-h3-max-image-to-video', undefined, 'evolink', 'u1');
+  await pollVideoTask('omni-r1', undefined, 'gemini-omni-1.2-flash', undefined, undefined, 'fal', 'u1');
+  await pollVideoTask('bs_openrouter_seedance-2.5_r1', undefined, 'seedance-2.5');
+  assert.deepEqual(calls,['/api/evolink-status?taskId=evo-r1','/api/fal-h3-video?requestId=omni-r1&endpoint=google%2Fgemini-omni-flash','/api/seedance-video?taskId=bs_openrouter_seedance-2.5_r1']);
+  await assert.rejects(pollVideoTask('evo-r1', undefined, 'minimax-h3', undefined, undefined, 'evolink', 'other'), /original account/);
+  assert.equal(calls.length,3);
+});

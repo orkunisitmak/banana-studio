@@ -40,7 +40,7 @@ Yerel sunucu rastgele loopback portunda çalışır; tek kullanımlık bootstrap
 | `scripts/`, `tests/` | Derleme, paketleme, imza, gizlilik taraması ve testler |
 | `docs/en/`, `docs/tr/`, `docs/assets/` | İki dilde belgeler ve özgün demo çizimleri |
 
-`runwayService.ts` geçmişten kalan dosya adıdır; mevcut video bağlantıları Runway anahtarı kullanmaz, Seedance/EvoLink ve H3 Max/fal.ai kullanır. Model seçenekleri [types.ts](../../src/types.ts) içindedir; [sağlayıcı tablosunun](models.md) doğruluk kaynağı servis yönlendirmeleri ve sunucu izin listeleridir.
+`runwayService.ts` geçmişten kalan bir dosya adıdır; Runway hesabı gerekmez. [Sağlayıcı kaydı](../../src/lib/providers.ts) her modeli desteklenen sağlayıcılarla eşler. Hangi anahtar ve modların kullanılabileceğini [model rehberi](models.md) açıklar.
 
 ## Gereksinimler ve ilk kontroller
 
@@ -70,7 +70,7 @@ vercel dev
 
 Ayar çekmeden/değiştirmeden önce bağlı proje ve ortamı kontrol et. Development için üretimden ayrı bilgiler kullan. `.env.local` Git tarafından dışlanır, özel kalmalıdır. Gerçek yerel URL için Google/Supabase origin ve callback ayarlarını ekle. Bulut Queues/Cron davranışını deploy üzerinde de doğrula; yerel önizleme zamanlanmış teslimatın kanıtı değildir.
 
-`npm run dev` yalnızca Vite arayüzünü başlatır; Functions, OAuth, arka plan işleri veya depolamanın yerine geçmez. Ayarlanmamış arayüz özellikle kurulum ekranı gösterir. Sunucu anahtarlarını `VITE_*` ile veya arayüz koduna ekleyerek açma.
+Etkileşimli geliştirmede `npm run dev`, Vite ile birlikte kullanıcı arayüzünün çağırdığı API uçları için bir adaptör başlatır. Adaptör bu çalışma kopyasının sunucu ayarlarını ve web uçlarının kimlik doğrulamasını kullanır; yapılandırma yoksa kurulum ekranı görünür. Vite kuyruk işçisini veya zamanlanmış kurtarma görevini taklit etmez. Bunları ayrı bir web test kurulumunda doğrula. Sunucu anahtarlarını `VITE_*` ile veya tarayıcı paketine ekleyerek açığa çıkarma.
 
 Şema değişikliklerini kendi geçici projende Supabase migration akışıyla yap. Tarayıcı SQL Editor yoluyla kurduysan sonraki CLI push öncesinde migration geçmişini eşleştir; başlangıç SQL'ini tekrar uygulamak güncelleme değildir. [Supabase CLI belgeleri](https://supabase.com/docs/reference/cli/introduction).
 
@@ -116,6 +116,12 @@ Paket yayımlamadan önce `node scripts/audit-distribution.mjs '.build/staging/B
 Model tip/seçeneklerini, arayüz yetenek kontrolünü, servis yönlendirmesini ve sunucudaki model/alan izin listelerini birlikte güncelle. Yeni servis gerekiyorsa yerel anahtar kutusunu da ekle. Referans rollerini, normal üretim ile elle seçilen alan düzenleme ayrımını ve anahtarların yalnızca sunucuda kalmasını koru. Rastgele bir upstream URL'yi anahtar taşıyan proxy'ye dönüştürme.
 
 İki dilde rehberi ve model tablosunu güncelle. Kendi hesabında sınırlı gerçek çağrı yapmadan önce hata/tekrar deneme ve görev kaydını sentetik testlerle doğrula.
+
+## Ortak bir değişikliği aktarma
+
+Güncel herkese açık daldan başla. Özelliğin kontrollerini, doğrulamasını, gönderdiği istekleri, kayıtlı işleri ve sonuçlarını karşılaştır; adları aynı diye dosyaları topluca değiştirme. Her model seçim listesinde bir kez görünmeli. Kabul edilmiş bir işi bugünkü yönlendirme tercihine göre değil, kayıtlı sağlayıcısıyla kurtar. Yerel SQLite veritabanını ve anahtar kasalarını, yapılandırılabilir web kurulumunu, çevirileri ve desteklenen alternatif rotaları koru.
+
+Etkilenen her akış için neyin aktarıldığını, neyin zaten bulunduğunu ve neyin neden farklı kaldığını kaydet. [Yayın öncesi eşdeğerlik listesini](../RELEASING.md#shared-feature-parity-before-packaging) izle: yalnızca gözden geçirilmiş kodu, sentetik testleri ve paylaşılabilir belgeleri aktar. Kontrolleri bu depoda ayrıca çalıştır; başka bir deponun geçmişini, yapılandırmasını veya kullanıcı verilerini içe aktarma.
 
 ## Katkı ve dağıtım
 

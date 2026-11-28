@@ -3,21 +3,16 @@ import { createRoot } from 'react-dom/client';
 import type { GenerationConfig } from '../../src/types';
 import '../../src/styles/index.css';
 
-window.__BANANA_STUDIO_CONFIG__ = { mode: 'local', userId: '00000000-0000-0000-0000-000000000001', sessionId: '00000000-0000-0000-0000-000000000002' };
-window.fetch = async input => {
-  if (String(input) === '/api/gemini-status') return Response.json({ providers: { openai: true } });
-  if (String(input) === '/local/query') return Response.json({ data: [], error: null });
-  throw new Error('This synthetic fixture blocks application network requests.');
-};
+import './offline-workspace';
 const [{ Controls }, { getPromptEnhancementTarget }] = await Promise.all([
   import('../../src/components/Controls'), import('../../src/types'),
 ]);
 const videoUrl = URL.createObjectURL(new Blob([], { type: 'video/mp4' }));
 const audioUrl = URL.createObjectURL(new Blob([], { type: 'audio/wav' }));
 const initial: GenerationConfig = {
-  mode: 'video', videoModel: 'seedance-2.5', videoOperation: 'generate',
+  mode: 'video', videoModel: 'seedance-2.5', videoProvider: 'fal', videoOperation: 'generate',
   prompt: 'Enhanced cinematic shot with the source and soundtrack', originalPrompt: 'My original scene brief',
-  promptPreparation: { action: 'enhance', model: 'gpt-5.5' },
+  promptPreparation: { action: 'enhance', model: 'gpt-6.2-sol' },
   referenceImages: [],
   referenceVideos: [{ id: 'source', url: videoUrl, name: 'source.mp4', mimeType: 'video/mp4', duration: 5, width: 1280, height: 720, isContinuation: true, previousPrompt: 'The previous shot' }],
   referenceAudios: [{ id: 'soundtrack', url: audioUrl, name: 'soundtrack.wav', mimeType: 'audio/wav', duration: 5 }],

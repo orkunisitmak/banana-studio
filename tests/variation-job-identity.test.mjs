@@ -22,10 +22,13 @@ const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const start = source.indexOf('  const handleGenerateVariation = async');
 const end = source.indexOf('  // The limit is checked', start);
 const compiled = transformSync(`module.exports = env => {
+  const SEEDREAM_MODEL='seedream-5.5', isOpenAIImageModel=m=>m==='gpt-image-2.5-sunburst', ownImageJobsRef={current:new Set()},
+    selectProvider=async()=>"openai", getImageOperation=()=>"generate", resolveImageDraft=c=>c;
   const { config, currentFolderId, toast, resolveImageModel, getImageById, resolveTextModelPreferences, generatePromptVariation,
     createPromptPreparation, DEFAULT_VIDEO_MODEL, SUNBURST_MODEL, getOpenAIImageOptions, getOpenAIImageSize,
     setGeneratedMedia, setActiveRequests, prepareProtectedImageSource, generateMedia, finishProtectedImageEdit,
     assertWorkspaceSession, saveImage, mergeSavedMedia, parseErrorMessage } = env;
+  ${source.slice(source.indexOf('  const runImageGeneration ='), source.indexOf('  const handleGenerate = async'))}
   ${source.slice(start,end)}; return handleGenerateVariation;
 };`, { loader: 'ts', format: 'cjs' }).code;
 function setup(t, failPrompt) {
@@ -45,7 +48,7 @@ function setup(t, failPrompt) {
   const handler = mod.exports({ config: { imageModel: 'gpt-image-2.5-sunburst' }, currentFolderId: 'folder',
     toast: { loading: () => (calls.loading++, ++toastId), updateToast() {}, dismissToast() {}, success() {}, error: (...args) => errors.push(args) },
     resolveImageModel: value => value, getImageById: async () => assert.fail('No missing references'),
-    resolveTextModelPreferences: async () => ({ model: 'gpt-6.1-sol' }), generatePromptVariation: async prompt => (calls.prompt++, `Variation of ${prompt}`),
+    resolveTextModelPreferences: async () => ({ model: 'gpt-6.2-sol' }), generatePromptVariation: async prompt => (calls.prompt++, `Variation of ${prompt}`),
     createPromptPreparation: () => ({ kind: 'variation' }), DEFAULT_VIDEO_MODEL: 'seedance-2.5', SUNBURST_MODEL: 'gpt-image-2.5-sunburst',
     getOpenAIImageOptions: () => ({}), getOpenAIImageSize: () => '1024x1024',
     setGeneratedMedia: update => { media = update(media); }, setActiveRequests: update => { active = update(active); },

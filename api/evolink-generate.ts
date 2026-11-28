@@ -4,6 +4,11 @@ import { applyCors, requireUser } from './_lib/auth.js';
 import { startPaidRequest, type PaidRequest } from './_lib/openaiGuard.js';
 import { isGenerationId, prepareTaskRegistry, registerProviderTask, requireSavedVideo, saveGenerationTask } from './_lib/providerTasks.js';
 import { isReferenceUrl } from './_lib/providerMedia.js';
+import { admitProvider } from './_lib/providerConfiguration.js';
+import { claimVideo, rejectVideoClaim } from './_lib/videoClaim.js';
+import { buildEvoH3MaxInput, EVO_H3_MODEL } from '../src/lib/video/evoH3Max.js';
+import { buildMagi2Input, isMagi2PublicUrl, MAGI2_MODEL } from '../src/lib/video/magi2.js';
+import { seedanceDurationError, seedanceReferenceError, seedanceReferenceDurationError, isSeedanceQuality } from '../src/lib/video/seedance.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 
@@ -14,6 +19,8 @@ interface GenerateRequest {
   imageUrls?: string[];
   videoUrls?: string[];
   audioUrls?: string[];
+  videoDurations?: number[];
+  audioDurations?: number[];
   duration: number;
   quality: string;
   aspectRatio: string;
@@ -66,10 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.EVOLINK_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'EvoLink API key not configured' });
 
-  let acceptedTaskId: string | undefined;
-  let guard: PaidRequest = null;
   try {
-    let body: GenerateRequest;
+    let body: GenerateRequest | { videoModel: typeof MAGI2_MODEL | typeof EVO_H3_MODEL; generationId?: string };
     try {
       body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     } catch {
@@ -78,7 +83,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return res.status(400).json({ error: 'A video generation request is required.' });
     }
-    const { mode, prompt, imageUrls, videoUrls, audioUrls, duration, quality, aspectRatio, generateAudio } = body;
+    if (body.generationId !== undefined && !isGenerationId(body.generationId)) return res.status(400).json({ error: 'A valid generation ID is required.' });
+    if (body.videoModel === MAGI2_MODEL || body.videoModel === EVO_H3_MODEL) {
+      const model = body.videoModel;
+      let input: Record<string, unknown>;
+      try { input = model === MAGI2_MODEL ? buildMagi2Input(body) : buildEvoH3MaxInput(body); }
+      catch (err) { return res.status(400).json({ error: (err as Error).message }); }
+      const callback = model === MAGI2_MODEL && process.env.MAGI2_CALLBACK_URL;
+      if (callback) {
+        if (!isMagi2PublicUrl(callback)) return res.status(500).json({ error: 'Invalid configured MAGI-2 callback URL.' });
+        input.callback_url = callback;
+      }
+      return await submit(body.generationId, model, String(input.model), input);
+    }
+    const { mode, prompt, imageUrls, videoUrls, audioUrls, duration = mode === 'video_edit' ? -1 : 5, quality = '720p', aspectRatio = 'adaptive', generateAudio = true } = body as GenerateRequest;
     const videoModel = body.videoModel || 'seedance-2.5';
 
     if (videoModel !== 'seedance-2.0' && videoModel !== 'seedance-2.5') {
@@ -94,21 +112,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: 'Reference media must be arrays of public HTTPS URLs. Local blob/data or plain HTTP URLs cannot be used by Seedance.',
       });
     }
-    if (body.generationId !== undefined && !isGenerationId(body.generationId)) {
-      return res.status(400).json({ error: 'A valid generation ID is required.' });
-    }
-    const maxImages = mode === 'image_to_video' ? 2 : videoModel === 'seedance-2.5' ? 30 : 9;
-    const maxVideos = videoModel === 'seedance-2.5' ? 10 : 3;
-    if (mode === 'image_to_video' && ((videoUrls?.length || 0) > 0 || (audioUrls?.length || 0) > 0)) {
-      return res.status(400).json({ error: 'First / last frame generation does not accept video or audio references.' });
-    }
-    if ((imageUrls?.length || 0) > maxImages || (videoUrls?.length || 0) > maxVideos || (audioUrls?.length || 0) > maxVideos) {
-      return res.status(400).json({ error: `Too many references for this mode (maximum ${maxImages} images, ${maxVideos} videos, ${maxVideos} audio clips).` });
+    const mediaError = seedanceReferenceError(videoModel, mode, imageUrls?.length || 0, videoUrls?.length || 0, audioUrls?.length || 0);
+    if (mediaError) return res.status(400).json({ error: mediaError });
+    for (const [kind, durations, urls] of [['video', (body as GenerateRequest).videoDurations, videoUrls], ['audio', (body as GenerateRequest).audioDurations, audioUrls]] as const) {
+      if (durations === undefined) continue;
+      if (!Array.isArray(durations) || durations.length !== (urls?.length || 0)) return res.status(400).json({ error: 'Expected one duration per reference URL.' });
+      const error = seedanceReferenceDurationError(videoModel, mode, kind, durations);
+      if (error) return res.status(400).json({ error });
     }
 
     const isEdit = mode === 'video_edit';
     const isExtend = mode === 'video_extend';
-    const isReferenceEdit = body.referenceEditMode === true;
+    const isReferenceEdit = (body as GenerateRequest).referenceEditMode === true;
     if (isReferenceEdit && (videoModel !== 'seedance-2.0' || mode !== 'reference_to_video')) {
       return res.status(400).json({ error: 'Ref Edit requires Seedance 2.0 reference-to-video.' });
     }
@@ -121,41 +136,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if ((isEdit || isExtend) && (!videoUrls || videoUrls.length === 0)) {
       return res.status(400).json({ error: `Video ${isEdit ? 'Edit' : 'Extend'} requires at least one source video URL.` });
     }
-    if (isEdit && body.editSourcePreparationVersion !== 1) {
+    if (isEdit && (body as GenerateRequest).editSourcePreparationVersion !== 1) {
       return res.status(409).json({
         error: 'Refresh the app before running Video Edit. This client did not complete the required source-video compatibility check.',
       });
     }
 
-    const maximumDuration = videoModel === 'seedance-2.0' ? 15 : 30;
-    const isSupportedAutoDuration = videoModel === 'seedance-2.5' && duration === -1;
-    if (isEdit && duration !== -1) {
-      return res.status(400).json({ error: 'Seedance 2.5 Video Edit duration must be Auto (-1).' });
-    }
-    if (!Number.isInteger(duration) || (!isSupportedAutoDuration && (duration < 4 || duration > maximumDuration))) {
-      return res.status(400).json({
-        error: `${videoModel === 'seedance-2.0' ? 'Seedance 2.0' : 'Seedance 2.5'} duration must be an integer from 4 to ${maximumDuration} seconds${videoModel === 'seedance-2.5' ? ' or Auto (-1)' : ''}.`,
-      });
-    }
-
-    const allowedQualities = ['480p', '720p', '1080p'];
-    if (!allowedQualities.includes(quality)) {
-      return res.status(400).json({
-        error: `${videoModel === 'seedance-2.0' ? 'Seedance 2.0' : 'Seedance 2.5'} quality must be ${allowedQualities.join(', ')}.`,
-      });
-    }
+    const durationError = seedanceDurationError(videoModel, mode, duration);
+    if (durationError) return res.status(400).json({ error: durationError });
+    if (!isSeedanceQuality(quality) || !['adaptive','16:9','9:16','1:1','3:4','4:3','21:9'].includes(aspectRatio) || typeof generateAudio !== 'boolean') return res.status(400).json({ error: 'Unsupported Seedance resolution, aspect ratio or audio setting.' });
 
     let model: string;
     const requestBody: Record<string, unknown> = {
       duration,
-      quality: quality || '720p',
+      quality: quality.toLowerCase(),
       generate_audio: generateAudio !== false,
       // Seedance 2.5's relaxed-content channel is selected by disabling the
       // standard filter. EvoLink charges 10% more for this route, and its
       // remaining provider policies still apply (including input review).
       // Keep Seedance 2.0 on its existing standard-filter path.
       content_filter: videoModel !== 'seedance-2.5',
-      output_format: 'mp4',
+      ...(videoModel === 'seedance-2.5' ? { output_format: 'mp4' } : {}),
     };
 
     // Seedance 2.5 first-frame generation derives its ratio from that image.
@@ -195,54 +196,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     requestBody.model = model;
 
-    const registry = await prepareTaskRegistry(res);
-    if (!registry) return;
-    if (body.generationId && !await requireSavedVideo(registry, res, body.generationId, user.id)) return;
-    guard = await startPaidRequest(req, res, user, 'image', 'EvoLink');
-    if (!guard) return;
+    return await submit(body.generationId, videoModel, model, requestBody);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
 
-    const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-    await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
-
-    let data: any;
+  async function submit(generationId: string | undefined, videoModel: string, model: string, requestBody: Record<string, unknown>) {
+    let acceptedTaskId: string | undefined;
+    let guard: PaidRequest = null;
     try {
-      data = await response.json();
-    } catch {
-      return res.status(502).json({
-        error: `EvoLink ${model} returned an unreadable response (HTTP ${response.status}). No task ID was received; check provider task history before retrying.`,
+      const registry = await prepareTaskRegistry(res);
+      if (!registry) return;
+      if (generationId && !await requireSavedVideo(registry, res, generationId, user.id)) return;
+      if (!await admitProvider(req, res, videoModel, 'evolink')) return;
+      guard = await startPaidRequest(req, res, user, 'image', 'EvoLink');
+      if (!guard) return;
+  
+      if (generationId && !await claimVideo(registry, res, generationId, user.id, { generationProvider: 'evolink', videoModel, providerModel: model, falEndpoint: 'evolink/' + model })) {
+        await guard.finish('rejected');
+        return;
+      }
+      const response = await fetch(`${EVOLINK_BASE}/v1/videos/generations`, {
+        method: 'POST',
+        redirect: 'error', signal: AbortSignal.timeout(55_000),
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
       });
+      await guard.finish(response.ok ? 'completed' : 'failed', null, response.status);
+      if (!response.ok) await rejectVideoClaim(registry, generationId, user.id, response.status);
+  
+      let data: any;
+      try {
+        data = await response.json();
+      } catch {
+        return res.status(502).json({
+          error: `EvoLink ${model} returned an unreadable response (HTTP ${response.status}). No task ID was received; check provider task history before retrying.`,
+        });
+      }
+  
+      if (!response.ok) {
+        return res.status(response.status).json({ error: describeEvoLinkFailure(data, `EvoLink ${model} (HTTP ${response.status})`) });
+      }
+      if (typeof data?.id !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(data.id)) {
+        return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
+      }
+  
+      acceptedTaskId = data.id;
+      await registerProviderTask(registry, 'evolink', data.id, user.id);
+      if (generationId && !await saveGenerationTask(registry, generationId, user.id, data.id)) {
+        return res.status(503).json({ error: `Generation was submitted, but its saved video could not be updated (Task: ${data.id}). Do not submit again; check task history or contact an administrator.`, taskId: data.id, provider:'evolink', endpoint:'evolink/' + model, usage:data.usage || null });
+      }
+  
+      return res.status(200).json({
+        taskId: data.id, provider: 'evolink', endpoint: `evolink/${model}`,
+        // credits_reserved is provider-calculated for the exact route, duration,
+        // resolution, and reference inputs. Forward billing metadata so the app
+        // does not have to guess from a rate card that may change over time.
+        usage: data.usage || null,
+      });
+    } catch (error: any) {
+      await guard?.finish('failed');
+      console.error('EvoLink generate error:', error.message);
+      return res.status(500).json({ error: error.message || 'Video generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId, provider:'evolink', endpoint:'evolink/' + model } : {}) });
     }
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: describeEvoLinkFailure(data, `EvoLink ${model} (HTTP ${response.status})`) });
-    }
-    if (typeof data?.id !== 'string' || !data.id.trim()) {
-      return res.status(502).json({ error: `EvoLink ${model} did not return a task ID. Check provider task history before retrying.` });
-    }
-
-    acceptedTaskId = data.id;
-    await registerProviderTask(registry, 'evolink', data.id, user.id);
-    if (body.generationId && !await saveGenerationTask(registry, body.generationId, user.id, data.id)) {
-      return res.status(503).json({ error: `Generation was submitted, but its saved video could not be updated (Task: ${data.id}). Do not submit again; check task history or contact an administrator.`, taskId: data.id });
-    }
-
-    return res.status(200).json({
-      taskId: data.id,
-      // credits_reserved is provider-calculated for the exact route, duration,
-      // resolution, and reference inputs. Forward billing metadata so the app
-      // does not have to guess from a rate card that may change over time.
-      usage: data.usage || null,
-    });
-  } catch (error: any) {
-    await guard?.finish('failed');
-    console.error('EvoLink generate error:', error.message);
-    return res.status(500).json({ error: error.message || 'Video generation failed', ...(acceptedTaskId ? { taskId: acceptedTaskId } : {}) });
   }
 }

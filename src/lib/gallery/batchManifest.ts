@@ -71,7 +71,7 @@ export const buildBatchManifest = (
     const item = found.media;
     const entry: BatchManifestEntry = {
       id,
-      file: files.find(file => file.name.startsWith(`banana-${id}.`))?.name ?? null,
+      file: files.find(file => file.name.startsWith(`banana-${id}.`) || file.name === `banana-${id}/manifest.json`)?.name ?? null,
       source: found.source,
       mediaType: item.mediaType,
       createdAt: timestamp(item.createdAt),

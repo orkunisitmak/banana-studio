@@ -1,13 +1,17 @@
 import { DEFAULT_TEXT_MODEL, TEXT_MODEL_OPTIONS, type TextModelId } from '../../types';
 import { DEFAULT_OPENAI_REASONING, isOpenAIReasoningEffort, type OpenAIReasoningEffort } from './openaiText.js';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL } from './openrouterText.js';
+import { upgradeModelId } from '../providers.js';
 
 export { OPENAI_TEXT_MODEL, calculateOpenAITextCost } from './openaiText.js';
 export { OPENROUTER_TEXT_MODEL, calculateOpenRouterTextCost } from './openrouterText.js';
 export const GEMINI_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH'] as const;
 export type GeminiThinkingLevel = typeof GEMINI_THINKING_LEVELS[number];
 export const DEFAULT_GEMINI_THINKING: GeminiThinkingLevel = 'MEDIUM';
-export type TextModelPreferences = { model: TextModelId; thinkingLevel: GeminiThinkingLevel; reasoningEffort: OpenAIReasoningEffort };
+export const TEXT_FEATURES = ['enhance', 'video_enhance', 'brainstorm', 'variation'] as const;
+export type TextFeature = typeof TEXT_FEATURES[number];
+export type FeatureModels = Partial<Record<TextFeature, TextModelId>>;
+export type TextModelPreferences = { model: TextModelId; thinkingLevel: GeminiThinkingLevel; reasoningEffort: OpenAIReasoningEffort; featureModels?: FeatureModels };
 const defaultPreferences = (): TextModelPreferences => ({ model: DEFAULT_TEXT_MODEL, thinkingLevel: DEFAULT_GEMINI_THINKING, reasoningEffort: DEFAULT_OPENROUTER_REASONING });
 let accountPreferences: TextModelPreferences | null = null;
 let preferenceLoader: (() => Promise<TextModelPreferences>) | null = null;
@@ -18,13 +22,13 @@ export const configureTextModelPreferences = (loader: () => Promise<TextModelPre
   accountPreferences = defaultPreferences();
   return () => { if (preferenceLoader === loader) { preferenceLoader = null; accountPreferences = null; } };
 };
-export const resolveTextModelPreferences = (): TextModelPreferences | Promise<TextModelPreferences> => {
+export const resolveTextModelPreferences = (feature?: TextFeature): TextModelPreferences | Promise<TextModelPreferences> => {
   if (!preferenceLoader) return { model: getTextModel(), thinkingLevel: getGeminiThinkingLevel(), reasoningEffort: getOpenAIReasoningEffort() };
   const loader = preferenceLoader;
   return loader().then(value => {
     if (preferenceLoader !== loader) throw new Error('Session changed. Please try again.');
     accountPreferences = { ...value };
-    return { ...value };
+    return { ...value, model: (feature && value.featureModels?.[feature]) || value.model };
   });
 };
 const GEMINI_THINKING_STORAGE_KEY = 'nanogen-gemini-thinking';
@@ -41,20 +45,25 @@ export const setGeminiThinkingLevel = (value: GeminiThinkingLevel): void => {
   try { localStorage.setItem(GEMINI_THINKING_STORAGE_KEY, value); } catch { /* Best effort. */ }
 };
 const TEXT_MODEL_STORAGE_KEY = 'nanogen-text-model';
-const isTextModel = (model: unknown): model is TextModelId => TEXT_MODEL_OPTIONS.some(option => option.value === model);
+export const resolveTextModelId = (stored: unknown): TextModelId | undefined => {
+  if (typeof stored !== 'string') return undefined;
+  const id = upgradeModelId(stored);
+  return TEXT_MODEL_OPTIONS.find(option => option.value === id)?.value;
+};
 
 export const getTextModel = (): TextModelId => {
   if (accountPreferences) return accountPreferences.model;
   try {
     const stored = localStorage.getItem(TEXT_MODEL_STORAGE_KEY);
-    if (isTextModel(stored)) return stored;
-    if (stored) localStorage.setItem(TEXT_MODEL_STORAGE_KEY, DEFAULT_TEXT_MODEL);
+    const model = resolveTextModelId(stored) ?? DEFAULT_TEXT_MODEL;
+    if (stored && model !== stored) localStorage.setItem(TEXT_MODEL_STORAGE_KEY, model);
+    return model;
   } catch { /* Storage may be unavailable; use the default. */ }
   return DEFAULT_TEXT_MODEL;
 };
 
 export const setTextModel = (model: TextModelId): void => {
-  if (!isTextModel(model)) return;
+  if (!TEXT_MODEL_OPTIONS.some(option => option.value === model)) return;
   try { localStorage.setItem(TEXT_MODEL_STORAGE_KEY, model); } catch { /* Best effort. */ }
 };
 

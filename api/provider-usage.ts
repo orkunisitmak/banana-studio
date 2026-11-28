@@ -2,12 +2,16 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, createServiceRoleClient, requireAdmin } from './_lib/auth.js';
 import { H3_MAX_ENDPOINTS } from '../src/lib/video/h3Max.js';
 import { reconcileH3Usage } from './_lib/h3Usage.js';
+import { SEEDREAM_ENDPOINTS } from '../src/lib/images/seedream55.js';
+import { OMNI_ENDPOINTS } from '../src/lib/video/omniFlash.js';
+import { FAL_SEEDANCE_20_ENDPOINTS, FAL_SEEDANCE_ENDPOINTS } from '../src/lib/video/falSeedance25.js';
 
 const EVOLINK_BASE = 'https://api.evolink.ai';
 const FAL_PLATFORM_BASE = 'https://api.fal.ai';
 const OPENAI_BASE = 'https://api.openai.com';
 const EVOLINK_CREDITS_PER_USD = 68;
-const FAL_IMAGE_ENDPOINTS = [
+const FAL_IMAGE_ENDPOINTS = new Set([
+  ...Object.values(SEEDREAM_ENDPOINTS),
   'fal-ai/nano-banana-pro',
   'fal-ai/nano-banana-pro/edit',
   'google/nano-banana-2.1',
@@ -17,21 +21,33 @@ const FAL_IMAGE_ENDPOINTS = [
   'fal-ai/nano-banana-2/edit',
   'openai/gpt-image-2',
   'openai/gpt-image-2/edit',
-  // Provider routing can send Sunburst to fal (api/_lib/imageProviders.ts).
+  // Include retired endpoints for historical billing as well as current routes.
   'openai/gpt-image-2.5/sunburst/text-to-image',
   'openai/gpt-image-2.5/sunburst/edit',
-];
-const FAL_VIDEO_ENDPOINTS = [
+  'openai/gpt-image-2.6/sunburst/text-to-image',
+  'openai/gpt-image-2.6/sunburst/edit',
+  'openai/gpt-image-2.6/flare/text-to-image',
+  'openai/gpt-image-2.6/flare/edit',
+]);
+const FAL_VIDEO_ENDPOINTS = new Set([
   ...Object.values(H3_MAX_ENDPOINTS),
+  ...Object.values(OMNI_ENDPOINTS),
+  ...Object.values(FAL_SEEDANCE_20_ENDPOINTS),
+  ...Object.values(FAL_SEEDANCE_ENDPOINTS),
+  'fal-ai/workflow-utilities/scale-video',
   // Historical billing reconciliation only. Active H3 submissions are
   // Max-only in fal-h3-video.ts.
   'minimax/h3/text-to-video',
   'minimax/h3/image-to-video',
   'minimax/h3/reference-to-video',
-  // Seedance routed to fal (src/lib/video/seedanceProviders.ts).
-  ...['seedance-2.0', 'seedance-2.5'].flatMap(model => ['text-to-video', 'image-to-video', 'reference-to-video'].map(mode => `bytedance/${model}/${mode}`)),
-];
-const FAL_BILLING_ENDPOINTS = [...FAL_IMAGE_ENDPOINTS, ...FAL_VIDEO_ENDPOINTS];
+  // Before Seedance 2.5 US, public fal jobs used these routes.
+  'bytedance/seedance-2.5/text-to-video',
+  'bytedance/seedance-2.5/image-to-video',
+  'bytedance/seedance-2.5/reference-to-video',
+]);
+// fal bills all routed text models through its single chat endpoint.
+const FAL_TEXT_ENDPOINT = 'openrouter/router/openai/v1/chat/completions';
+const FAL_BILLING_ENDPOINTS = new Set([...FAL_IMAGE_ENDPOINTS, ...FAL_VIDEO_ENDPOINTS, FAL_TEXT_ENDPOINT]);
 export const config = { maxDuration: 60 };
 
 const numberOrNull = (value: unknown): number | null => {
@@ -78,13 +94,12 @@ const loadEvoLinkUsage = async () => {
 };
 
 const loadFalUsage = async () => {
-  // Usage requires Admin scope, independent of a key's environment-variable
-  // name. A legacy FAL_KEY may have that scope; a 403 must explain the setup.
-  // https://fal.ai/docs/api-reference/platform-apis/authentication
+  // The BILLING preset (or the equivalent read permissions) is sufficient.
+  // An existing legacy ADMIN key also works; never retry a rejected key.
   const normalizeKey = (key?: string) => key?.trim().replace(/^Key\s+/i, '').trim() || '';
   const explicitAdminKey = normalizeKey(process.env.FAL_ADMIN_KEY);
   const adminKey = explicitAdminKey || normalizeKey(process.env.FAL_KEY);
-  if (!adminKey) throw new UsageError('needs_admin_key', 'fal.ai billing is unavailable. Add an Admin-scope key from fal.ai/dashboard/keys as the server-only FAL_ADMIN_KEY environment variable, then redeploy.');
+  if (!adminKey) throw new UsageError('needs_admin_key', 'fal.ai billing is unavailable. Add a BILLING preset key from fal.ai/dashboard/keys as the server-only FAL_ADMIN_KEY environment variable, then redeploy.');
   const { usageStart, usageEnd } = usagePeriod('fal.ai');
   const params = new URLSearchParams({
     start: usageStart,
@@ -92,11 +107,10 @@ const loadFalUsage = async () => {
     expand: 'summary',
     timeframe: 'month',
     bound_to_timeframe: 'false',
-    endpoint_id: FAL_BILLING_ENDPOINTS.join(','),
+    endpoint_id: [...FAL_BILLING_ENDPOINTS].join(','),
     limit: '100',
   });
 
-  const allowed = new Set(FAL_BILLING_ENDPOINTS);
   const rows: FalUsageRow[] = [];
   const cursors = new Set<string>();
   const deadline = Date.now() + 45_000;
@@ -111,8 +125,8 @@ const loadFalUsage = async () => {
     }).catch(() => { throw new UsageError('unavailable', 'fal.ai usage could not be loaded. Totals are unavailable; retry shortly.'); });
     if (response.status === 403) {
       throw new UsageError(explicitAdminKey ? 'forbidden' : 'needs_admin_key', explicitAdminKey
-        ? 'fal.ai denied billing access (403). Check that FAL_ADMIN_KEY has Admin scope and belongs to the intended fal workspace, then redeploy after correcting it.'
-        : 'fal.ai billing requires Admin scope (403). The current FAL_KEY cannot read usage. Add an Admin-scope key from fal.ai/dashboard/keys as the server-only FAL_ADMIN_KEY, then redeploy. Image generation uses its separate existing key.');
+        ? 'fal.ai denied billing access (403). FAL_ADMIN_KEY needs billing:usage:read, auth:keys:read and account:users:read in the intended workspace. Use the BILLING preset or these custom permissions.'
+        : 'fal.ai denied billing access (403). Retain FAL_KEY for inference and add a separate BILLING preset key as the server-only FAL_ADMIN_KEY, then redeploy.');
     }
     if (response.status === 401) throw new UsageError('invalid_key', 'fal.ai rejected the billing key (401). Check that the configured server key is valid and has not been revoked.');
     if (!response.ok) throw new UsageError('unavailable', `fal.ai usage request failed (${response.status}). Totals are unavailable; retry shortly.`);
@@ -125,7 +139,7 @@ const loadFalUsage = async () => {
     }
     for (const row of payload.summary) {
       if (!row || typeof row.endpoint_id !== 'string') throw new UsageError('unavailable', 'fal.ai returned invalid usage records. Totals are unavailable.');
-      if (!allowed.has(row.endpoint_id)) continue;
+      if (!FAL_BILLING_ENDPOINTS.has(row.endpoint_id)) continue;
       // cost_total is after discounts. `cost` is its legacy alias; never use
       // pre-discount cost_subtotal or coerce null/empty/missing costs to zero.
       const cost = numberOrNull(Object.hasOwn(row, 'cost_total') ? row.cost_total : row.cost);
@@ -151,18 +165,18 @@ const loadFalUsage = async () => {
     }
   }
   const byEndpoint = [...grouped.values()];
-  const imageEndpointSet = new Set(FAL_IMAGE_ENDPOINTS);
-  const videoEndpointSet = new Set(FAL_VIDEO_ENDPOINTS);
-  const imageRows = byEndpoint.filter(row => imageEndpointSet.has(row.endpoint));
-  const videoRows = byEndpoint.filter(row => videoEndpointSet.has(row.endpoint));
-  const sumCost = (items: FalUsageRow[]) => items.reduce((sum, row) => sum + row.costUsd, 0);
+  let imageActualCostUsd = 0, videoActualCostUsd = 0, textActualCostUsd = 0;
+  for (const row of byEndpoint) {
+    if (FAL_IMAGE_ENDPOINTS.has(row.endpoint)) imageActualCostUsd += row.costUsd;
+    else if (FAL_VIDEO_ENDPOINTS.has(row.endpoint)) videoActualCostUsd += row.costUsd;
+    else textActualCostUsd += row.costUsd;
+  }
   const units = new Set(byEndpoint.map(row => row.unit));
   const quantityUnit = units.size === 1 ? byEndpoint[0]?.unit ?? null : null;
 
   return {
-    actualCostUsd: sumCost(byEndpoint),
-    imageActualCostUsd: sumCost(imageRows),
-    videoActualCostUsd: sumCost(videoRows),
+    actualCostUsd: imageActualCostUsd + videoActualCostUsd + textActualCostUsd,
+    imageActualCostUsd, videoActualCostUsd, textActualCostUsd,
     // Seconds, images, megapixels, etc. are billing units, not request counts.
     quantity: quantityUnit && byEndpoint.every(row => row.quantity != null) ? byEndpoint.reduce((sum, row) => sum + row.quantity!, 0) : null,
     quantityUnit,

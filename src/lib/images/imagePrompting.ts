@@ -1,17 +1,23 @@
 import { buildEditableReferenceGuidance, prepareEditableImagePrompt } from '../references/dynamicReferences.js';
 import { cleanPersonName, getPersonId, getPersonGroups, getPersonDescription, normalizeReferencePrompt, buildPersonIdentityContract, buildPersonSeparationRule } from '../references/personReferences.js';
 import type { BrainstormCategory, GenerationConfig, ReferenceImage } from '../../types.js';
-import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, SUNBURST_MODEL } from './openaiImage.js';
+import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, isGptImage26Model, isOpenAIImageModel } from './openaiImage.js';
+import { getDefaultImageEditSourceIndex, resolveImageOperation } from './imageOperation.js';
+import { getSeedreamDraftError, SEEDREAM_MODEL } from './seedream55.js';
 import { COMPACT_SOURCE_BRIEF_FOOTER, COMPACT_THUMBNAIL_SOURCE_BRIEF_FOOTER, EPISODE_SOURCE_BRIEF_FOOTER, SOURCE_BRIEF_FOOTER, THUMBNAIL_SOURCE_BRIEF_HEADER, THUMBNAIL_SOURCE_BRIEF_FOOTER, getOriginalImagePrompt, flattenPreparedImageBrief } from '../prompts/promptHistory.js';
 import { getQuotedPromptPattern, getStableImageTag, mapUnquotedPrompt, resolveStableImageReferences } from '../references/referenceTokens.js';
 import { EPISODE_THUMBNAIL_GUIDANCE, hasYouTubeEpisodeContext } from '../youtube/youtubeEditorial.js';
-import { buildReferenceGenerationRule, compactReferenceRoles, IDENTITY_MEDIUM_RULE, CARTOON_3D_IDENTITY_RULE, SUNBURST_PROMPT_GUIDE } from './sunburstPromptGuide.js';
+import { buildReferenceGenerationRule, compactReferenceRoles, IDENTITY_MEDIUM_RULE, CARTOON_3D_IDENTITY_RULE, SUNBURST_PROMPT_GUIDE, SUNBURST_RENDERING_RULE } from './sunburstPromptGuide.js';
 export { buildReferenceGenerationRule } from './sunburstPromptGuide.js';
 import { EDIT_REGION_REQUIRED, isValidEditRegion } from './imageEditRegion.js';
 import { getConceptWardrobe } from '../brainstorm/brainstormWardrobe.js';
 import { hasYouTubeCameraGaze, stripYouTubeCameraGaze, YOUTUBE_CAMERA_GAZE_RULE } from '../youtube/youtubeCameraGaze.js';
 
-export type ImagePromptSettings = Pick<GenerationConfig, 'imageModel' | 'aspectRatio' | 'resolution' | 'openaiImageOptions' | 'imagePromptCategory' | 'originalPrompt'>;
+export type ImagePromptSettings = Pick<GenerationConfig, 'imageModel' | 'aspectRatio' | 'resolution' | 'openaiImageOptions' | 'imagePromptCategory' | 'originalPrompt' | 'seedreamOptions'> & Partial<Pick<GenerationConfig, 'imageOperation' | 'brainstormNoText'>>;
+type EditIntentSettings = Partial<Pick<GenerationConfig, 'originalPrompt' | 'imageOperation' | 'imageModel'>>;
+const WHOLE_IMAGE_EDIT_MODELS = 'Whole-image Edit is available with GPT Image 2.6 and Nano Banana 2.1. Draw an Edit area to edit with this model.';
+/** Whole-image edits redraw the frame, so 2.5 and Nano Banana Pro keep protected area edits only. */
+export const supportsWholeImageEdit = (model: GenerationConfig['imageModel']): boolean => model === 'gemini-nano-banana-2.1' || isGptImage26Model(model);
 
 // UI mentions and provider inputs use the same upload order.
 // Quoted copy and ordinary prose must survive without whitespace/word rewrites.
@@ -20,8 +26,18 @@ export const normalizeSunburstPrompt = (prompt: string, references: ReferenceIma
 
 /** Check the provider's reference rules before creating cards or pending jobs.
  * Discard the normalized text so the user's editable draft stays untouched. */
-export const validateImageGenerationReferences = (settings: Pick<GenerationConfig, 'prompt' | 'referenceImages' | 'imageModel' | 'originalPrompt'>): void => {
+export const validateImageGenerationReferences = (input: Pick<GenerationConfig, 'prompt' | 'referenceImages' | 'imageModel' | 'originalPrompt' | 'seedreamOptions'> & Partial<Pick<GenerationConfig, 'imageOperation'>>, awaitingBrainstormPrompt = false): void => {
+  if (input.imageModel === SEEDREAM_MODEL) {
+    const error = getSeedreamDraftError(input.seedreamOptions, input.prompt, input.referenceImages, awaitingBrainstormPrompt);
+    if (error) throw new Error(error);
+    normalizeReferencePrompt(input.prompt, input.referenceImages);
+    return;
+  }
+  // Generate ignores leftover edit selections; Edit requires a source image.
+  const settings = resolveImageOperation(input);
   const references = settings.referenceImages || [];
+  if (references.some(ref => ref.editScope === 'image') && !supportsWholeImageEdit(settings.imageModel)) throw new Error(WHOLE_IMAGE_EDIT_MODELS);
+  if (references.some(ref => ref.editScope != null && ref.editScope !== 'image')) throw new Error('Invalid image edit mode.');
   const selectedSources = references.filter(ref => ref.editRegion != null);
   if (selectedSources.length) {
     if (selectedSources.length !== 1 || !isValidEditRegion(selectedSources[0].editRegion)
@@ -30,7 +46,7 @@ export const validateImageGenerationReferences = (settings: Pick<GenerationConfi
       throw new Error('Kişi fotoğrafı veya video bağlamı yerine düzenlemek istediğin görselde Edit area seç.');
     }
   }
-  if (settings.imageModel === SUNBURST_MODEL || settings.imageModel === 'gpt-image-2-beta') {
+  if (isOpenAIImageModel(settings.imageModel) || settings.imageModel === 'gpt-image-2-beta') {
     normalizeSunburstPrompt(settings.prompt, references);
     if (settings.originalPrompt) normalizeSunburstPrompt(settings.originalPrompt, references);
   } else {
@@ -107,20 +123,37 @@ const resolveEditSource = (brief: string, inputs: ReferenceImage[], selectedSour
   return selectedSource;
 };
 
-/** Local editing is an explicit area selection, never inferred from the prompt.
- * The original brief is used only to catch a conflicting named edit destination. */
-export const getSunburstEditIntent = (prompt: string, references: ReferenceImage[], settings: Pick<ImagePromptSettings, 'originalPrompt'> = {}): { sourceIndex: number } | undefined => {
-  const inputs = getSunburstReferences(references);
-  const selected = inputs.flatMap((ref, index) => ref.editRegion != null ? [index] : []);
+/** Editing requires the explicit Edit action (or, for callers without an
+ * action, an explicit area/whole-image selection). Generate ignores leftover
+ * selections. Legacy source labels and edit verbs in the prompt never activate
+ * editing; the original brief is used only to catch a conflicting named source. */
+export const getSunburstEditIntent = (prompt: string, references: ReferenceImage[], settings: EditIntentSettings = {}): { sourceIndex: number; wholeImage?: true } | undefined => {
+  if (settings.imageOperation === 'generate' || settings.imageModel === SEEDREAM_MODEL) return undefined;
+  const inputs = [...getSunburstReferences(references)];
+  let selected = inputs.flatMap((ref, index) => ref.editRegion != null || ref.editScope === 'image' ? [index] : []);
+  if (!selected.length && settings.imageOperation === 'edit') {
+    const source = getDefaultImageEditSourceIndex(inputs);
+    if (source < 0) return undefined;
+    inputs[source] = { ...inputs[source], editScope: 'image' };
+    selected = [source];
+  }
   if (!selected.length) return undefined;
   if (selected.length > 1) throw new Error('Düzenlenecek kaynak olarak tek bir görsel seç.');
   if (selected.some(index => inputs[index].isVideoContext || getPersonId(inputs[index]) != null)) throw new Error('Düzenleme için kapak görselinde Edit area ile alan seç; People fotoğrafı veya video bağlamı kaynak olamaz.');
-  if (!isValidEditRegion(inputs[selected[0]].editRegion)) throw new Error(EDIT_REGION_REQUIRED);
+  const wholeImage = inputs[selected[0]].editScope === 'image';
+  if (wholeImage && inputs[selected[0]].editRegion != null) throw new Error('Choose Edit or Edit area for the source, not both.');
+  if (!wholeImage && !isValidEditRegion(inputs[selected[0]].editRegion)) throw new Error(EDIT_REGION_REQUIRED);
   const brief = withoutQuotedCopy(normalizeEditImageMentions(normalizeSunburstPrompt(settings.originalPrompt?.trim() || prompt, references)));
   const inferredSource = resolveEditSource(brief, inputs, selected[0]);
   if (inferredSource != null && inferredSource !== selected[0]) throw new Error('Prompttaki kaynak ile alan seçimi farklı. Düzenlenecek görseli eşleştir.');
-  return { sourceIndex: selected[0] };
+  return { sourceIndex: selected[0], ...(wholeImage ? { wholeImage: true as const } : {}) };
 };
+
+/** Whole-image editing follows source content without claiming exact pixels. */
+export const buildWholeImageEditContract = (references: ReferenceImage[], sourceIndex: number): string => `WHOLE IMAGE EDIT
+SOURCE: IMAGE ${sourceIndex + 1} is the image the user explicitly selected to edit. Keep its composition, identities and unrequested contents as the base; apply the requested changes rather than inventing a new scene. Other images are donor references only, used for their brief-assigned elements or identities.
+Preserve unrequested facial identity, expression, natural skin texture, colors and lighting. Do not add beauty retouching, sharpening or a global contrast treatment. An explicitly requested restyle, pose, expression or composition change takes priority for the affected content.
+${references.map(describeSunburstReference).join('\n')}`;
 
 const LOCAL_EDIT_PRESERVATION = 'Change only what the user requested. Do not change anything else. Keep unaffected people, clothing, objects, labels and arrows intact, with the original framing, camera angle, lighting, saturation, contrast, texture and sharpness. Match any replacement to the existing scene. Do not restyle, retouch or enhance the whole image unless explicitly requested.';
 const LOCAL_EDIT_FACE_PRESERVATION = "For every face not explicitly targeted by the user's requested edit, preserve the face already present in the SOURCE: exact facial proportions, expression, gaze, age, hair, facial hair, skin tone and skin texture, including pores, fine lines and existing imperfections. Do not beautify, smooth, denoise, sharpen, relight or reconstruct those faces. Keeping a recognizable identity is not permission to redraw a face. Existing SOURCE faces take precedence over separate People/identity photos; those photos authorize a face change only when the user explicitly requests it. An object, phone, clothing, text or background correction must not retouch a person. Explicitly requested face or expression changes apply only to the targeted person; preserve all other faces.";
@@ -143,9 +176,10 @@ const buildSunburstEditContract = (references: ReferenceImage[], intent: { sourc
 
 /** Keep the edit intent after a text model rewrites the request, including
  * Brainstorm prompts which no longer carry config.originalPrompt. */
-export const preserveSunburstEditBrief = (idea: string, brief: string, references: ReferenceImage[], settings: Pick<ImagePromptSettings, 'originalPrompt'> = {}): string => {
+export const preserveSunburstEditBrief = (idea: string, brief: string, references: ReferenceImage[], settings: EditIntentSettings = {}): string => {
   const normalizedIdea = prepareImagePromptResult(stripYouTubeCameraGaze(idea), references);
   const source = prepareImagePromptResult(stripYouTubeCameraGaze(settings.originalPrompt?.trim() || brief), references).trim();
+  if (getSunburstEditIntent(brief, references, settings)?.wholeImage) return `${normalizedIdea}\n\nRequested edit: ${source}\nDo not change anything else.`;
   return `${normalizedIdea}\n\nRequested edit: ${source}\nThe user's requested edit defines the permitted changes; prompt expansion must not add retouching.\n${LOCAL_EDIT_FACE_PRESERVATION}\nDo not change anything else.`;
 };
 
@@ -180,6 +214,7 @@ export const assembleSunburstBrainstormIdea = (idea: string, brief: string, refe
 };
 
 export const describeSunburstReference = (ref: ReferenceImage, index: number): string => {
+  if (ref.editScope === 'image') return `IMAGE ${index + 1}: explicitly selected whole-image SOURCE to edit, not a general style reference.`;
   if (ref.editRegion != null) return `IMAGE ${index + 1}: approved SOURCE image to edit; its existing faces, texture and composition are authoritative. Change only the user's requested elements.`;
   if (ref.isVideoContext) return `IMAGE ${index + 1}: original video thumbnail for VIDEO CONTEXT only; use it as episode evidence, not a style reference, layout template or image to edit. Develop a different visual hook and composition. Do not copy its people, clothing, text or graphic elements unless the brief explicitly requests them. Dedicated person photos determine the selected cast's identities. The cover alone is not evidence that an event or outcome happened in the video.`;
   const personName = cleanPersonName(ref.personName || '');
@@ -243,14 +278,14 @@ export const updateImageDraftPrompt = (config: GenerationConfig, prompt: string)
   } : {}) };
 };
 
-export const buildYouTubeEditorialRule = (prompt: string, references: ReferenceImage[], settings: Pick<ImagePromptSettings, 'originalPrompt'> = {}): string =>
+export const buildYouTubeEditorialRule = (prompt: string, references: ReferenceImage[], settings: EditIntentSettings = {}): string =>
   !isYouTubeChannelBannerPrompt(prompt) && hasYouTubeEpisodeContext(prompt, references) && !getSunburstEditIntent(prompt, references, settings)
     ? EPISODE_THUMBNAIL_GUIDANCE : '';
 
 /** Brainstorm introduces the rule; subsequent text tasks retain it only for
  * those concepts. Ordinary drafts, banners and explicit area edits keep scope. */
 export const buildYouTubeCameraGazeRule = (
-  prompt: string, references: ReferenceImage[], settings: Pick<ImagePromptSettings, 'originalPrompt'> = {},
+  prompt: string, references: ReferenceImage[], settings: EditIntentSettings = {},
   thumbnailBrainstorm = hasYouTubeCameraGaze(prompt),
 ): string => thumbnailBrainstorm && !isYouTubeChannelBannerPrompt(prompt) && !getSunburstEditIntent(prompt, references, settings)
   ? YOUTUBE_CAMERA_GAZE_RULE : '';
@@ -308,6 +343,7 @@ const composeSunburstGenerationPrompt = (prompt: string, references: ReferenceIm
     const wardrobe = thumbnail && getPersonGroups(references).length
       ? 'REQUIRED YOUTUBE PERSON WARDROBE\nApplies to depicted reference people: use specific new scene-appropriate outfits, not copied, recolored or swapped reference clothes. Preserve their likeness and explicitly requested hair or facial hair. This wardrobe rule overrides copied clothing instructions. Keep an explicitly designed new outfit and the validated CONCEPT WARDROBE unchanged; it already satisfies the replacement rule. Never collapse different concept plans into one default outfit. Repeated appearances and variations of one concept use that same concept outfit; an intentional user uniform/costume wins.' : '';
     return [
+      SUNBURST_RENDERING_RULE,
       compactReferenceRoles(references, false, identityMediumRule(prompt)),
       buildYouTubeStyleReferenceRule(prompt, references, settings, thumbnail, !!edit),
       thumbnail ? `YOUTUBE THUMBNAIL DIRECTION\nUse the requested medium and composition. For an open brief, create a readable photographic cover with a clear focal hierarchy and a short Turkish headline or no text. Respect exact copy and no-text requests.${episodeContext ? ' Advertise the whole episode promise; supporting details must not become a different headline or dominant topic.' : ''} Do not invent cast, events or claims.` : '',
@@ -318,12 +354,26 @@ const composeSunburstGenerationPrompt = (prompt: string, references: ReferenceIm
   // Intent and context were resolved before unused episode covers were removed.
   // Do not resolve originalPrompt against the now-shorter reference list again.
   return [
-    buildSunburstEditContract(references, edit, false),
+    edit.wholeImage ? buildWholeImageEditContract(references, edit.sourceIndex) : buildSunburstEditContract(references, edit, false),
     `REQUESTED EDIT\n${normalizeSunburstPrompt(stripYouTubeCameraGaze(prompt), references)}`,
     settings.originalPrompt?.trim() && settings.originalPrompt.trim() !== prompt.trim() ? `USER EDIT SCOPE\n${normalizeSunburstPrompt(stripYouTubeCameraGaze(settings.originalPrompt), references)}\nThe user's original edit request defines the permitted changes. Prompt expansion cannot authorize extra retouching or face reconstruction.` : '',
     buildPersonSeparationRule(getSunburstReferences(references)),
     `SOURCE PRESERVATION\n${LOCAL_EDIT_PRESERVATION}\n${LOCAL_EDIT_FACE_PRESERVATION}`,
   ].filter(Boolean).join('\n\n');
+};
+
+/** GPT Image 2.6 applies `markup` to the FIRST input. Move the edit source to
+ * the front and renumber "image N" labels outside quoted copy to match. */
+export const moveEditSourceFirst = <T>(prompt: string, references: T[], sourceIndex: number): { prompt: string; referenceImages: T[] } => {
+  if (sourceIndex <= 0 || sourceIndex >= references.length) return { prompt, referenceImages: references };
+  const renumber = (value: number) => value === sourceIndex + 1 ? 1 : value <= sourceIndex ? value + 1 : value;
+  return {
+    prompt: mapUnquotedPrompt(prompt, text => text.replace(/\b(image)(\s+)(\d+)\b/gi, (match, word: string, space: string, number: string) => {
+      const value = Number(number);
+      return value >= 1 && value <= references.length ? `${word}${space}${renumber(value)}` : match;
+    })),
+    referenceImages: [references[sourceIndex], ...references.slice(0, sourceIndex), ...references.slice(sourceIndex + 1)],
+  };
 };
 
 export const buildSunburstGenerationPrompt = (prompt: string, references: ReferenceImage[], settings: ImagePromptSettings): string =>
@@ -367,9 +417,26 @@ const CATEGORY_DIRECTION: Record<BrainstormCategory, string> = {
 
 const CHANNEL_BANNER_DIRECTION = 'Create channel banner concepts following the stated brief and selected canvas. An old banner used as an example supplies only the roles requested by the brief; replacing it does not require preserving its text treatment, reflections, layout or colors. Include every required experience or scene in each complete concept, rather than choosing a subset. If the same person appears in multiple adventures, keep the same identity in every appearance. Do not apply video-thumbnail duration-overlay clearance or invent a video hook or slogan.';
 
-const getImagePromptTargetName = (settings: ImagePromptSettings): string => settings.imageModel === 'gpt-image-2.5-sunburst'
+const getImagePromptTargetName = (settings: ImagePromptSettings): string => settings.imageModel === SEEDREAM_MODEL
+  ? 'Seedream 5.5' : settings.imageModel === 'gpt-image-2.6-sunburst'
+  ? 'GPT Image 2.6 Sunburst' : settings.imageModel === 'gpt-image-2.5-sunburst'
   ? 'GPT Image 2.5 Sunburst' : settings.imageModel === 'gemini-nano-banana-2.1' ? 'Nano Banana 2.1'
     : settings.imageModel === 'gemini-3.1-flash-image-preview' ? 'Nano Banana 2' : 'Nano Banana Pro';
+
+function buildSeedreamGuidance(task: 'enhance' | 'brainstorm' | 'variation', references: ReferenceImage[], settings: ImagePromptSettings, count: number, category?: BrainstormCategory): string {
+  const mode = settings.seedreamOptions?.mode || 'text-to-image';
+  const direction = mode === 'layerize'
+    ? 'Describe which existing elements of the single source image to separate into editable layers. Preserve any supplied normalized <bbox>left top right bottom</bbox> tags verbatim. Do not redesign the source, invent objects or promise a specific number of returned layers.'
+    : mode === 'edit'
+    ? 'Describe only the requested changes, which of the ordered references each change uses, and what should stay unchanged. Do not assume the first image is a protected source or promise pixel-exact edits.'
+    : 'Describe the requested new image from text alone. Specify subject, composition and medium where useful. Do not invent reference images.';
+  return `Prepare ${task === 'brainstorm' ? `${count} independently usable prompts` : 'one prompt'} for Seedream 5.5 (${mode}).
+${direction}
+${category && category !== 'simple' && category !== 'custom' ? `Intended use: ${category.replace(/_/g, ' ')}.` : ''}
+Keep the user's exact visible copy, identities and constraints. Do not include API parameters in the prompt.
+${references.length ? buildEditableReferenceGuidance(references) : ''}
+${task === 'brainstorm' ? `Return only a JSON array of exactly ${count} nonempty prompt strings.` : 'Return only the finished prompt, without commentary.'}`;
+}
 
 /** Simple is a brief-led brainstorm, including when a Nano Banana model is
  * selected. Keep one policy so the legacy narrative template cannot override
@@ -378,14 +445,16 @@ const getImagePromptTargetName = (settings: ImagePromptSettings): string => sett
 export const buildSimpleBrainstormGuidance = (
   references: ReferenceImage[], settings: ImagePromptSettings, count: number, prompt = '',
 ): string => {
+  if (settings.imageModel === SEEDREAM_MODEL) return buildSeedreamGuidance('brainstorm', references, settings, count, 'simple');
   const target = getImagePromptTargetName(settings);
   const edit = getSunburstEditIntent(prompt, references, settings);
   const thumbnail = isYouTubeThumbnailPrompt(prompt, references, { ...settings, imagePromptCategory: 'simple' });
-  const canvas = settings.imageModel === 'gpt-image-2.5-sunburst' ? getOpenAIImageSize(settings) : settings.aspectRatio;
+  const canvas = isOpenAIImageModel(settings.imageModel) ? getOpenAIImageSize(settings) : settings.aspectRatio;
   return `Prepare exactly ${count} independently usable image prompts for ${target}.
 
 SIMPLE BRAINSTORM
-${settings.imageModel === SUNBURST_MODEL ? SUNBURST_PROMPT_GUIDE : ''}
+${isOpenAIImageModel(settings.imageModel) ? SUNBURST_PROMPT_GUIDE : ''}
+${!edit && isOpenAIImageModel(settings.imageModel) ? SUNBURST_RENDERING_RULE : ''}
 ${thumbnail ? buildYouTubeEditorialRule(prompt, references, settings) : ''}
 ${buildYouTubeStyleReferenceRule(prompt, references, settings, thumbnail)}
 ${buildYouTubeCameraGazeRule(prompt, references, settings, thumbnail)}
@@ -413,7 +482,7 @@ Canvas: ${canvas || 'automatic'}. This is composition context only; size and qua
 
 FINAL CHECK
 Check every prompt against the original brief and additional direction: same subject and facts, correct people/count/identity grouping, correct input numbers, requested medium, exact text, exclusions and edit boundaries. Resolve conflicting instructions and remove near-duplicate new-scene ideas without changing locked details. Each string describes one complete output, not a contact sheet or a list of alternatives; use multiple panels only when the brief requests them. Do not mention other ideas or rely on their context.
-${settings.imageModel === SUNBURST_MODEL ? 'ASSEMBLY CONTRACT\nThe app attaches the original brief and additional direction once with priority over conflicting scene details. Return the useful scene-specific execution, including concrete medium cues, without copying full source paragraphs, reference-photo lists, identity rules, section headers or API settings. Refer to exact supplied copy as "the requested text" and describe its placement; the app preserves the wording.' : ''}
+${isOpenAIImageModel(settings.imageModel) ? 'ASSEMBLY CONTRACT\nThe app attaches the original brief and additional direction once with priority over conflicting scene details. Return the useful scene-specific execution, including concrete medium cues, without copying full source paragraphs, reference-photo lists, identity rules, section headers or API settings. Refer to exact supplied copy as "the requested text" and describe its placement; the app preserves the wording.' : ''}
 Return only a valid JSON array of exactly ${count} nonempty strings, one ready-to-use image prompt per string. No commentary or idea titles outside the array.`;
 };
 
@@ -429,6 +498,7 @@ const buildCompactSunburstBrainstormGuidance = (
   return [
     `Prepare ${count} distinct image directions for GPT Image 2.5 Sunburst.`,
     SUNBURST_PROMPT_GUIDE,
+    !edit ? SUNBURST_RENDERING_RULE : '',
     edit ? `${buildSunburstEditContract(references, edit)}\nVary only the requested local change. Keep an already precise edit concise; preserve unrequested details and finish with "Do not change anything else."`
       : `${banner ? CHANNEL_BANNER_DIRECTION : CATEGORY_DIRECTION[category]} Keep the same intended use, subject, facts, people, quantities, medium, exact copy and exclusions. Vary the visual hook, layout, framing or interaction only where the brief leaves room. Do not turn a logo, diagram or product brief into a thumbnail. Each idea is one complete output; no alternative contact sheets unless requested.`,
     !edit && thumbnail ? 'THUMBNAIL SCOPE\nAdvertise the whole video promise. Use supporting moments as evidence, not as a different headline or dominant topic. Preserve participant roles, units and uncertainty; do not invent events, outcomes or cast from a published cover. Use a clear focal hierarchy and scene-appropriate actions and expressions, with every person looking into the camera. When unspecified, choose a short Turkish headline or no text; an exact-copy or no-text request wins.' : '',
@@ -455,16 +525,23 @@ export const buildSunburstGuidance = (
   count = 5,
   prompt = '',
 ): string => {
+  if (settings.imageModel === SEEDREAM_MODEL) return buildSeedreamGuidance(task, references, settings, count, category || settings.imagePromptCategory);
   category ??= isYouTubeThumbnailPrompt(prompt, references, settings) ? 'youtube_thumbnail'
     : settings.imagePromptCategory === 'youtube_thumbnail' ? 'simple' : settings.imagePromptCategory || 'simple';
+  const explicitEdit = getSunburstEditIntent(prompt, references, settings);
+  if (explicitEdit?.wholeImage) return `Prepare ${task === 'brainstorm' ? `${count} faithful edit instructions` : 'one edit instruction'} for ${getImagePromptTargetName(settings)}.
+${buildWholeImageEditContract(references, explicitEdit.sourceIndex)}
+Clarify only the user's requested changes. Preserve unrequested source details; do not invent thumbnail concepts, new outfits or camera-facing gaze rules. Do not invent an area selection or claim pixel-exact preservation. Keep exact visible wording and @ reference bindings.
+${buildEditableReferenceGuidance(references)}
+${task === 'brainstorm' ? `Return only a JSON array of exactly ${count} nonempty image edit prompt strings.` : 'Return only the finished edit prompt, without commentary.'}`;
   // Simple has its own brief-led policy for medium, style and reference roles.
   // Selecting Sunburst must not bypass it through the generic compact template.
   if (task === 'brainstorm' && category === 'simple') return buildSimpleBrainstormGuidance(references, settings, count, prompt);
-  if (task === 'brainstorm' && settings.imageModel === SUNBURST_MODEL) return buildCompactSunburstBrainstormGuidance(references, settings, category, count, prompt);
+  if (task === 'brainstorm' && isOpenAIImageModel(settings.imageModel)) return buildCompactSunburstBrainstormGuidance(references, settings, category, count, prompt);
   const inputs = getSunburstReferences(references);
   const target = getImagePromptTargetName(settings);
   const options = getOpenAIImageOptions(settings.openaiImageOptions);
-  const size = settings.imageModel === 'gpt-image-2.5-sunburst' ? getOpenAIImageSize(settings) : settings.aspectRatio;
+  const size = isOpenAIImageModel(settings.imageModel) ? getOpenAIImageSize(settings) : settings.aspectRatio;
   const edit = getSunburstEditIntent(prompt, references, settings);
   if (edit) return `Prepare ${task === 'brainstorm' ? `${count} local-edit prompts` : 'one local-edit prompt'} for ${target}.
 
@@ -499,6 +576,7 @@ ${task === 'enhance' ? 'Do not invent mood, people, props, logos or scenery beyo
 
 PROMPT FORM
 Use plain language and scale detail to the request, with no word-count target or mandatory template. Start with the intended image and subject. Add useful framing, relative scale, gaze, pose and interaction, then the visible materials, light, color and medium needed for the result. Prefer concrete appearance over quality buzzwords. Use headings only when complexity warrants them. Camera details are optional appearance cues, not guarantees of optical simulation. Explicitly request a photograph when that is the intended medium; retain natural texture without adding heavy retouching.
+${isOpenAIImageModel(settings.imageModel) ? SUNBURST_RENDERING_RULE : ''}
 ${youtube ? `\nYOUTUBE THUMBNAILS\n${YOUTUBE_THUMBNAIL_DIRECTION}\n${episodeEditorial}\nMake each thumbnail prompt independently usable. Include the visual hook, composition, relevant identity grouping and episode facts, with text placement or the user's no-text requirement. Add lighting and color details only where they explain the intended appearance. Keep supplied facts distinguishable from invented staging without forcing a separate "Episode facts" section. A precise short request can stay short; do not expand it into a long production brief. Different concepts are separate images, not a collage of alternative thumbnails.
 ${task === 'brainstorm' ? 'Across the set, change the visual idea as well as the layout. For five or more ideas, use at least three distinct composition families, such as a dominant symbolic object, a camera-facing interaction, an asymmetrical reaction portrait, or a clean graphic comparison when the premise supports it. Avoid five versions of two faces flanking the same background lineup. Vary each person\'s action, expression, head tilt and body pose while every person keeps direct eye contact with the camera and their identity stays fixed.' : ''}
 ${inputs.some(ref => ref.isVideoContext) ? 'PUBLISHED VIDEO: The episode summary and moments supply the facts; the original cover supplies context only. Create alternative thumbnail concepts for this same episode, not cosmetic edits of the existing cover. Preserve supported participants, roles, prices, units, challenge rules and uncertainty. Separate a creative visual metaphor or staged reaction from claims about real events: do not invent an injury, winner, result, quote, scandal or event absent from the evidence. Do not mistake a price for earnings or taking part in an activity for merely observing it. Keep every selected cast identity explicitly requested by the brief, regardless of which people appeared on the old cover. Reference-photo count is not cast size; episode names must not override the selected reference faces. An evidenced comparison may repeat the SAME selected person without creating additional cast members. Use the episode language for unspecified short thumbnail copy unless the user asks otherwise. Source links, timestamps and analysis instructions are research metadata; do not copy them into returned image prompts.' : ''}

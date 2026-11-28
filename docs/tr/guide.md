@@ -6,15 +6,15 @@ Banana Studio yaratıcı bir projenin adımlarını aynı yerde toplar: referans
 
 ## Çalışma alanını seç
 
-Mac'te kişisel kullanım için [bağımsız uygulamayı indir](desktop.md). Yerel bir galeri açar, yalnızca kullanacağın servislerin anahtarlarını ister. Banana Studio hesabı açman veya veritabanı kurman gerekmez.
+Mac veya Windows'ta kişisel kullanım için [bağımsız uygulamayı indir](desktop.md). Yerel bir galeri açar, yalnızca kullanacağın servislerin anahtarlarını ister. Banana Studio hesabı açman veya veritabanı kurman gerekmez.
 
-Windows kullanıcılarının da erişeceği ortak bir alan için [web sürümünü kur](deploy.md). Alan sahibi Google girişini, erişimi ve sunucu anahtarlarını yönetir. Masaüstü ve web galerileri ayrıdır; aralarında otomatik aktarım yoktur.
+Tarayıcıdan ortak bir alan kullanmak için [web sürümünü kur](deploy.md). Alan sahibi Google girişini, erişimi ve sunucu anahtarlarını yönetir. Masaüstü ve web galerileri ayrıdır; aralarında otomatik aktarım yoktur.
 
 ## İlk görselini üret
 
-1. Mac'te **Provider keys** bölümünü aç; webde alan sahibinden servisi ayarlamasını iste.
-2. İlgili anahtarı ekle. Örneğin GPT Image 2.5, OpenAI anahtarı kullanır.
-3. Görsel üretimini ve anahtarını eklediğin modeli seç.
+1. Masaüstünde **Provider keys** bölümünü aç; webde alan sahibinden servisi ayarlamasını iste.
+2. Kullanacağın rotanın anahtarını ekle. Örneğin varsayılan görsel rotaları için fal.ai anahtarı ekle.
+3. Görsel üretimini ve modelini seç. Sunburst için doğrudan OpenAI gibi alternatif bir rota kullanacaksan **AI settings → Provider routing** içinde o sağlayıcıyı seç.
 4. İstediğini yaz: “Gün doğumunda bir dağ evinin sıcak tonlarda editoryal illüstrasyonu; sade şekiller, geniş kompozisyon.”
 5. Modelin desteklediği en-boy oranı, boyut, kalite ve görsel sayısını seç. Ücret tahmini yol gösterir; sabit fiyat değildir.
 6. **Generate image** düğmesine bas. İşi galeriden takip et; sonucu aç veya indir.
@@ -39,7 +39,7 @@ Referans eklemek **yeni görsel üretimi** başlatır. Korumalı alan düzenleme
 
 Farklı konseptlerden oluşan bir seri yerine mevcut fikrini geliştirmek istediğinde **Enhance** kullan. Seçili üretim modeline uygun talimat hazırlar; göndermeden önce metni kontrol edip düzenleyebilirsin. **Revert**, hazırlama öncesindeki taslağı geri getirir.
 
-**Enhance**, brief'i üretim talimatına dönüştürür. **Brainstorm**, farklı fikirler önerir; fikir başına birden fazla görsel üretilebilir. **AI settings** üzerinden OpenRouter bağlantılı Opus 5.5, OpenAI bağlantılı GPT-6.1 Sol veya Google bağlantılı Gemini 3.8 Flash seçebilir, düşünme seviyesini ayarlayabilirsin. Başlangıç ayarı Opus 5.5 / Medium'dur.
+**AI settings** bölümünde Claude Opus 5.5, GPT-6.2 Sol veya Gemini 4 Hydrogen seç ve düşünme seviyesini ayarla. Başlangıç ayarı Opus 5.5 / Medium'dur. Her modelin desteklediği rotalar [sağlayıcı tablosunda](models.md) yer alır.
 
 Üretim açıklamaları Türkçe yazsan da İngilizce hazırlanır. Görselde görünmesini istediğin yazılar, özel isimler ve alıntılanan diyaloglar istenen dilde korunur. Tam ifade önemliyse geliştirilmiş promptu gözden geçir.
 
@@ -87,8 +87,10 @@ Analiz, süresi bilinen, yayımlanmış ve en fazla 2,5 saatlik videoları kabul
 
 | Aile | Akış |
 | --- | --- |
-| Seedance 2.0 / 2.5 Relaxed | Metin, görsel ve referanslarla üretim; desteklenen edit/uzatma kontrolleri. Seedance 2.5 first/last frame modunda ilk ve son kare olarak işaretlenmiş **iki durağan görsel** kullanılır. |
-| MiniMax H3 Max | Text to Video Max, Image to Video Max, Reference to Video Max, Extend Video Max, Lip Sync Max ve Recast. |
+| Seedance 2.0 / 2.5 | Metin, kare ve referanslarla üret. Geçişi yönlendirmek için iki durağan görseli ilk ve son kare olarak işaretle. Seedance 2.5 Edit/Extend için fal.ai (US) veya EvoLink (Relaxed) gerekir. |
+| MiniMax H3 Max | fal.ai veya EvoLink üzerinden metin, kare ve referanslarla üret. Extend, Lip Sync ve Recast için fal.ai kullan. |
+| Gemini Omni 1.2 Flash | fal.ai üzerinden metin, kare veya referanslarla üret; kaynak videoyu düzenle, uzat veya çözünürlüğünü yükselt. |
+| MAGI-2 | EvoLink üzerinden metin, ilk/son kare veya referanslarla üret. Referans modu tek başına ses de kabul eder. |
 
 Arayüz girdileri kontrol eder, moda uygun kontrolleri gösterir. Bazı video referanslarının hazırlanması ayrıca fal.ai gerektirir. İşler sürerken masaüstü uygulamasını açık tut. Webde OpenAI görsel işleri için kalıcı kuyruk vardır; diğer servislerin kendi iş kayıtları ve takip akışları kullanılır. Zaman aşımı, ücretli isteğin hiç kabul edilmediği anlamına gelmez. Yeniden göndermeden önce işi/sonucu kontrol et.
 

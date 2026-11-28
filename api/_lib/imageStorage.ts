@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readImageDimensions } from './imageDimensions.js';
+import { isPassiveSvg } from './passiveSvg.js';
 import { signMediaUrl } from '../../src/lib/references/mediaAccess.js';
 
 type StorageError = { message?: string; status?: number | string; statusCode?: number | string };
@@ -23,6 +24,18 @@ export const canonicalMediaUrl = (value: string, projectUrl = process.env.SUPABA
   } catch { return value; }
 };
 
+/** Require the declared media type to match complete passive image bytes. */
+export function completeGeneratedImage(bytes: Buffer, format: string): boolean {
+  switch (format) {
+    case 'png': return bytes.subarray(0,8).toString('hex') === '89504e470d0a1a0a' && bytes.subarray(-12).toString('hex') === '0000000049454e44ae426082';
+    case 'jpg': case 'jpeg': return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9;
+    case 'webp': return bytes.length >= 12 && bytes.toString('ascii',0,4) === 'RIFF' && bytes.toString('ascii',8,12) === 'WEBP' && bytes.readUInt32LE(4) + 8 === bytes.length;
+    case 'gif': return bytes.length >= 13 && /^GIF8[79]a$/.test(bytes.toString('ascii',0,6)) && bytes.at(-1) === 0x3b;
+    case 'svg': return isPassiveSvg(bytes);
+    default: return false;
+  }
+}
+
 /** A failed upload response may hide a successful write. Only accept a complete image. */
 export const readStoredImage = async (storage: any, path: string, expectedHash?: string, strict = false) => {
   try {
@@ -34,11 +47,7 @@ export const readStoredImage = async (storage: any, path: string, expectedHash?:
     if (!data) return null;
     const bytes = Buffer.from(await data.arrayBuffer());
     const size = readImageDimensions(bytes);
-    const complete = bytes.length >= 24 && (
-      (bytes.subarray(0, 8).toString('hex') === '89504e470d0a1a0a' && bytes.subarray(-12).toString('hex') === '0000000049454e44ae426082')
-      || (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9)
-      || (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' && bytes.readUInt32LE(4) + 8 === bytes.length)
-    );
+    const complete = completeGeneratedImage(bytes,path.slice(path.lastIndexOf('.') + 1));
     if (!size || !complete || (expectedHash && imageSha256(bytes) !== expectedHash)) return null;
     return { size, bytes: bytes.length };
   } catch (error) {

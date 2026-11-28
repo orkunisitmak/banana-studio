@@ -1,14 +1,31 @@
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
 import React, { useEffect, useState } from 'react';
 import { Cpu, Loader2 } from 'lucide-react';
-import { TEXT_MODEL_OPTIONS } from '../types';
-import { OPENAI_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThinkingLevel, GEMINI_THINKING_LEVELS, type GeminiThinkingLevel } from '../lib/prompts/textModels';
+import { GEMINI_TEXT_MODEL, TEXT_MODEL_OPTIONS } from '../types';
+import { OPENAI_TEXT_MODEL, getTextModel, getOpenAIReasoningEffort, getGeminiThinkingLevel, GEMINI_THINKING_LEVELS, TEXT_FEATURES, type GeminiThinkingLevel, type FeatureModels } from '../lib/prompts/textModels';
+import { resolveProvider } from '../lib/providers';
+import { useAvailability, useProviderPreferences } from './ProviderRoutingSettings';
 import { DEFAULT_OPENAI_REASONING, OPENAI_REASONING_EFFORTS, type OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { DEFAULT_OPENROUTER_REASONING, OPENROUTER_TEXT_MODEL, OPENROUTER_REASONING_EFFORTS } from '../lib/prompts/openrouterText';
 import { loadTextPreferences, saveTextPreferences, type SavedTextPreferences, type TextPreferenceScope } from '../services/textPreferencesService';
 
+const FEATURE_LABELS = { enhance: 'Enhance image prompt', video_enhance: 'Enhance video prompt', brainstorm: 'Brainstorm', variation: 'Prompt variations' };
+
 export const TextModelSettings: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState(getTextModel);
+  const [featureModels, setFeatureModels] = useState<FeatureModels>({});
+  const settings = useProviderPreferences();
+  const availability = useAvailability();
+  const modelOptions = TEXT_MODEL_OPTIONS.filter(option => settings.preferences[option.value] !== 'off').map(option => {
+    try {
+      resolveProvider(option.value, settings.preferences[option.value], availability.available);
+      return { ...option, ready: true };
+    } catch { return { ...option, ready: false }; }
+  });
+  const usedModels = new Set([selectedModel, ...Object.values(featureModels)]);
+  const usesOpus = usedModels.has(OPENROUTER_TEXT_MODEL), usesGPT = usedModels.has(OPENAI_TEXT_MODEL);
+  const reasoningLabel = usesGPT && usesOpus ? 'GPT and Opus reasoning' : usesOpus ? 'Opus 5.5 thinking' : 'GPT-6.2 Sol reasoning';
+  const canSave = !settings.loading && !settings.error && !availability.error && Array.from(usedModels).every(model => modelOptions.some(option => option.value === model && option.ready));
   const [reasoningEffort, setReasoningEffort] = useState(getOpenAIReasoningEffort);
   const [thinkingLevel, setThinkingLevel] = useState(getGeminiThinkingLevel);
   const [saved, setSaved] = useState<SavedTextPreferences | null>(null);
@@ -17,7 +34,8 @@ export const TextModelSettings: React.FC = () => {
   const [message, setMessage] = useState('');
   const [reload, setReload] = useState(0);
   const apply = (value: SavedTextPreferences) => {
-    setSaved(value); setSelectedModel(value.preferredModel || value.model); setThinkingLevel(value.thinkingLevel); setReasoningEffort(value.reasoningEffort);
+    setSaved(value); setSelectedModel(value.model); setThinkingLevel(value.thinkingLevel); setReasoningEffort(value.reasoningEffort);
+    setFeatureModels(value.featureModels ?? {});
   };
   useEffect(() => {
     let active = true;
@@ -28,9 +46,10 @@ export const TextModelSettings: React.FC = () => {
     return () => { active = false; };
   }, [reload]);
   const save = async (scope: TextPreferenceScope) => {
+    if (!canSave) return;
     setBusy(scope); setError(''); setMessage('');
     try {
-      apply(await saveTextPreferences(scope, { model: selectedModel, thinkingLevel, reasoningEffort }));
+      apply(await saveTextPreferences(scope, { model: selectedModel, thinkingLevel, reasoningEffort, featureModels }));
       setMessage(isLocalWorkspace() ? 'Saved on this computer. New requests will use these settings.' : scope === 'all' ? 'Saved for all users. New requests will use these settings.' : 'Saved for your account on all devices.');
     } catch (error) { setError(error instanceof Error ? error.message : 'Unable to save settings.'); }
     finally { setBusy(null); }
@@ -44,29 +63,48 @@ export const TextModelSettings: React.FC = () => {
         AI Text Model
       </legend>
       <p className="text-xs text-gray-500 mb-4">
-        Used for Enhance, Brainstorm, variations and the final YouTube video brief. Gemini reads the footage first. Changes apply after saving; running requests keep their settings.
+        Choose the default creative model or override it for individual tasks. YouTube footage analysis always uses native Gemini Hydrogen.
       </p>
       <div className="space-y-2">
-        {TEXT_MODEL_OPTIONS.map(option => (
+        {modelOptions.map(option => (
           <label key={option.value} className={`flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors focus-within:ring-2 focus-within:ring-violet-400 ${
             selectedModel === option.value
               ? 'bg-violet-600/10 border-violet-500/50 text-white'
               : 'bg-gray-900/50 border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-200'
           }`}>
             <input
-              type="radio" name="text-model" value={option.value}
+              type="radio" name="text-model" value={option.value} disabled={!option.ready}
               checked={selectedModel === option.value}
               onChange={() => { setSelectedModel(option.value); changed(); }}
               className="mt-1 h-3.5 w-3.5 shrink-0 accent-violet-500"
             />
             <span className="min-w-0">
               <span className="block text-sm font-medium">{option.label}</span>
-              <span className="mt-1 block text-xs leading-relaxed text-gray-400">{option.description}</span>
+              <span className="mt-1 block text-xs leading-relaxed text-gray-400">{option.description}{!option.ready && ' · Provider unavailable'}</span>
             </span>
           </label>
         ))}
       </div>
-      {selectedModel !== OPENAI_TEXT_MODEL && selectedModel !== OPENROUTER_TEXT_MODEL && (
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {TEXT_FEATURES.map(feature => (
+          <label key={feature} className="block text-sm text-gray-300">{FEATURE_LABELS[feature]}
+            <select value={featureModels[feature] ?? ''} className="mt-2 block w-full rounded-xl border border-gray-700 bg-gray-900 p-3 text-base text-white sm:text-sm"
+              onChange={event => {
+                const next = { ...featureModels };
+                const option = modelOptions.find(option => option.value === event.target.value && option.ready);
+                if (option) next[feature] = option.value; else delete next[feature];
+                setFeatureModels(next); changed();
+              }}>
+              <option value="">Use default text model</option>
+              {featureModels[feature] && !modelOptions.some(option => option.value === featureModels[feature]) &&
+                <option value={featureModels[feature]} disabled>Model turned off</option>}
+              {modelOptions.map(option => <option key={option.value} value={option.value} disabled={!option.ready}>{option.label}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
+      {saved && !canSave && !settings.loading && <p role="status" className="mt-3 text-sm text-amber-300">{settings.error || availability.error || 'Choose enabled models with configured providers before saving.'}</p>}
+      {usedModels.has(GEMINI_TEXT_MODEL) && (
         <label className="mt-4 block text-sm text-gray-300">
           Gemini thinking
           <select aria-label="Gemini thinking" value={thinkingLevel}
@@ -77,24 +115,24 @@ export const TextModelSettings: React.FC = () => {
           <span className="mt-2 block text-xs leading-relaxed text-gray-500">Higher thinking gives complex briefs more reasoning time.</span>
         </label>
       )}
-      {(selectedModel === OPENAI_TEXT_MODEL || selectedModel === OPENROUTER_TEXT_MODEL) && (
+      {(usesGPT || usesOpus) && (
         <label className="mt-4 block text-sm text-gray-300">
-          {selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'}
-          <select aria-label={selectedModel === OPENROUTER_TEXT_MODEL ? 'Opus 5.5 thinking' : 'GPT-6.1 Sol reasoning'} value={reasoningEffort}
+          {reasoningLabel}
+          <select aria-label={reasoningLabel} value={reasoningEffort}
             onChange={event => { setReasoningEffort(event.target.value as OpenAIReasoningEffort); changed(); }}
             className="mt-2 block w-full rounded-xl border border-gray-700 bg-gray-900 p-3 text-base sm:text-sm text-white outline-none focus:border-violet-400">
-            {(selectedModel === OPENROUTER_TEXT_MODEL ? OPENROUTER_REASONING_EFFORTS : OPENAI_REASONING_EFFORTS).map(value => <option key={value} value={value}>{({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' })[value]}{value === (selectedModel === OPENROUTER_TEXT_MODEL ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING) ? ' · Default' : ''}</option>)}
+            {(usesOpus ? OPENROUTER_REASONING_EFFORTS : OPENAI_REASONING_EFFORTS).map(value => <option key={value} value={value}>{({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' })[value]}{!(usesOpus && usesGPT) && value === (usesOpus ? DEFAULT_OPENROUTER_REASONING : DEFAULT_OPENAI_REASONING) ? ' · Default' : ''}</option>)}
           </select>
           <span className="mt-2 block text-xs leading-relaxed text-gray-500">High gives briefs more reasoning time. Lower levels respond faster; higher levels may take longer. Applies to new requests.</span>
         </label>
       )}
       {saved && <p className="mt-4 text-xs text-gray-400">{isLocalWorkspace() ? 'Settings are saved on this computer.' : `Currently using ${saved.source === 'personal' ? 'your personal settings' : 'settings saved for all users'}.`}</p>}
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" disabled={!saved || !!busy} onClick={() => void save('me')}
+        <button type="button" disabled={!saved || !!busy || !canSave} onClick={() => void save('me')}
           className="flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50">
           {busy === 'me' && <Loader2 className="h-4 w-4 animate-spin" />}{isLocalWorkspace() ? 'Save on this computer' : 'Save for me'}
         </button>
-        {!isLocalWorkspace() && saved?.canSaveAll && <button type="button" disabled={!!busy} onClick={() => void save('all')}
+        {!isLocalWorkspace() && saved?.canSaveAll && <button type="button" disabled={!!busy || !canSave} onClick={() => void save('all')}
           className="flex items-center justify-center gap-2 rounded-xl border border-violet-400/40 px-4 py-2.5 text-sm font-semibold text-violet-200 hover:bg-violet-500/10 disabled:opacity-50">
           {busy === 'all' && <Loader2 className="h-4 w-4 animate-spin" />}Save for all
         </button>}

@@ -5,6 +5,11 @@ import { refreshImageJobReferences } from './imageJobPayload.js';
 import { readStoredImage } from './imageStorage.js';
 import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
 import type { ImageJobMessage } from './imageJobQueue.js';
+import { buildSeedreamRequest, isSeedreamEndpoint, SEEDREAM_MODEL } from '../../src/lib/images/seedream55.js';
+import { normalizeReferencePrompt } from '../../src/lib/references/personReferences.js';
+import { registerProviderTask, saveGenerationTask } from './providerTasks.js';
+import { providerImageUrl } from './providerMedia.js';
+import { readFalImageStatus } from './falImageStatus.js';
 
 export class ImageJobWait extends Error {
   constructor(readonly afterSeconds:number) { super('Image job is waiting for capacity'); }
@@ -24,23 +29,40 @@ const finishAudit = (db:any,id:string) => {
   } };
 };
 
-/** Storage/database reconciliation only. Never call the provider after the
- * durable dispatch marker, even if a worker died before returning its result. */
+/** After dispatch, only query existing task state or inspect storage. Never send another generation request. */
 const observeDispatchedJob = async (db:any,job:ImageJobMessage,claim:any) => {
-  const {data:row,error} = await db.from('generations').select('status,metadata,storage_path').eq('id',job.id).eq('user_id',job.userId).maybeSingle();
+  const {data:row,error} = await db.from('generations').select('status,metadata,storage_path,image_model,task_id').eq('id',job.id).eq('user_id',job.userId).maybeSingle();
   if (error) throw new Error('Saved image state is unavailable.');
   const finish = (success:boolean,metadata?:any,path?:string,error?:string) => rpc(db,'finish_image_job',{
     p_id:job.id,p_claim:claim.claim,p_success:success,p_metadata:metadata||null,p_storage_path:path||null,p_error:error||null,
   });
   if (row?.status==='completed') {
+    if (claim.audit) await finishAudit(db,claim.audit).finish('completed',row.task_id || row.metadata?.openaiRequestId,200);
     await finish(true,row.metadata,row.storage_path);
-    if (claim.audit) await finishAudit(db,claim.audit).finish('completed',row.metadata?.openaiRequestId,200);
+    return;
+  }
+  if (row?.image_model === SEEDREAM_MODEL && row.task_id && isSeedreamEndpoint(row.metadata?.falEndpoint)) {
+    // A gallery row is editable. Never use the service key to read a task
+    // merely because a client copied its ID into that row.
+    const {data:registered,error:lookup} = await db.from('provider_tasks').select('user_id').eq('provider','fal').eq('task_id',row.task_id).maybeSingle();
+    if (lookup) throw new ImageJobWait(10);
+    if (!registered || registered.user_id !== job.userId) {
+      await finish(false,undefined,undefined,'The saved Seedream task could not be authorized. No new request was sent.');
+      if (claim.audit) await finishAudit(db,claim.audit).finish('failed');
+      return;
+    }
+    const {http,body} = await readFalImageStatus(row.metadata.falEndpoint,row.task_id,process.env.FAL_KEY,job.userId,db);
+    if (http !== 200 || body.status === 'RUNNING') throw new ImageJobWait(http !== 200 ? 30 : 5);
+    const success = body.status === 'SUCCEEDED';
+    if (claim.audit) await finishAudit(db,claim.audit).finish(success ? 'completed' : 'failed',row.task_id,http);
+    // The completed manifest, including storage_path, is already in the row.
+    await finish(success,undefined,undefined,body.error);
     return;
   }
   const elapsed=Date.now()-new Date(claim.dispatchedAt).getTime();
   if (elapsed<330_000) throw new ImageJobWait(Math.max(1,Math.ceil((330_000-elapsed)/1000)));
   const storage=db.storage.from('media');
-  for (const extension of ['png','jpg','webp']) {
+  for (const extension of ['png','jpg','webp','svg','gif']) {
     const path=`openai/${job.userId}/${job.id}.${extension}`;
     const file=await readStoredImage(storage,path,row?.metadata?.imageOutputSha256,true);
     if (file) {
@@ -79,6 +101,44 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
       await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_metadata:null,p_storage_path:null,
         p_error:'A reference is unavailable or was removed. Attach that image again. No generation was submitted.'});
       return;
+    }
+    if (claim.payload.model === SEEDREAM_MODEL) {
+      if (claim.payload.provider !== 'fal' || !process.env.FAL_KEY?.trim() || process.env.FAL_ENABLED === 'false') {
+        await guard.finish('rejected');
+        await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_storage_path:null,p_metadata:null,p_error:'The saved Seedream provider is unavailable. No generation was submitted.'});
+        return;
+      }
+      const {error:tracking} = await db.from('provider_tasks').select('task_id').limit(0);
+      if (tracking) throw new Error('Private task tracking is unavailable.');
+      const urls = await Promise.all(references.map(ref => providerImageUrl(db,ref.data)));
+      const prompt = claim.payload.seedreamOptions?.mode === 'edit' ? normalizeReferencePrompt(claim.payload.prompt,references) : claim.payload.prompt;
+      const {endpoint,input} = buildSeedreamRequest(claim.payload.seedreamOptions,prompt,urls);
+      const metadata = {generationProvider:'fal',providerModel:endpoint,falEndpoint:endpoint,seedreamOptions:claim.payload.seedreamOptions, imageOperation:claim.payload.imageOperation,imageGenerationReferenceIds:references.map(ref=>ref.id),imageGenerationPrompt:prompt,generationStartedAt:Date.now()};
+      dispatched = await rpc(db,'dispatch_image_job',{p_id:job.id,p_claim:token,p_metadata:metadata}) === true;
+      if (!dispatched) throw new ImageJobWait(5);
+      const response = await fetch('https://queue.fal.run/' + endpoint,{method:'POST',redirect:'error',headers:{Authorization:'Key ' + process.env.FAL_KEY,'Content-Type':'application/json','X-Fal-No-Retry':'1'},body:JSON.stringify(input),signal:AbortSignal.timeout(45_000)});
+      const accepted = await response.json().catch(()=>null);
+      if (!response.ok || typeof accepted?.request_id !== 'string' || !accepted.request_id || accepted.request_id.length > 200) {
+        await guard.finish('failed',null,response.status);
+        await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_metadata:null,p_storage_path:null,p_error:'Could not confirm the Seedream submission. Check provider usage before generating again.'});
+        return;
+      }
+      const task = accepted.request_id;
+      try { await registerProviderTask(db,'fal',task,job.userId); }
+      catch (error) {
+        // Keep the handle for support, but do not poll an unregistered task.
+        await guard.finish('failed',task,response.status);
+        await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_storage_path:null,p_metadata:{falRequestId:task},p_error:'The accepted Seedream task could not be registered (' + task + '). No new request was sent.'});
+        throw error;
+      }
+      // Repeating only the idempotent binding handles an ambiguous DB reply.
+      const bind = () => saveGenerationTask(db,job.id,job.userId,task).catch(()=>false);
+      if (!await bind() && !await bind()) {
+        await guard.finish('failed',task,response.status);
+        await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:false,p_storage_path:null,p_metadata:{falRequestId:task},p_error:'Could not save the registered Seedream task (' + task + '). Contact an administrator before retrying.'});
+        return;
+      }
+      return observeDispatchedJob(db,job,{claim:token,audit:claim.audit,dispatchedAt:Date.now()});
     }
     await executeOpenAIImage({method:'POST',headers:{},body:{...claim.payload,referenceImages:references}} as VercelRequest,response,{
       user:{id:job.userId},db,guard,

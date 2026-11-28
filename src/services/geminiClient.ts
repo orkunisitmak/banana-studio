@@ -2,6 +2,10 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import { GEMINI_TEXT_MODEL } from '../types';
+import { OPENAI_TEXT_MODEL } from '../lib/prompts/openaiText';
+import { OPENROUTER_TEXT_MODEL } from '../lib/prompts/openrouterText';
+import { hasYouTubeFootage } from '../lib/prompts/youtubeFootage';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -161,15 +165,18 @@ const generateContent = async (
  * function so the API key never reaches the browser.
  */
 const routeTextContent = async (request: GenerateContentRequest, options?: TextTaskOptions) => {
-  const provider = await selectProvider(request.model, options?.signal);
+  const footage = request.model === GEMINI_TEXT_MODEL && hasYouTubeFootage(request.contents);
+  const provider = footage ? 'gemini' : await selectProvider(request.model, options?.signal);
   const config = request.config as any;
-  const video = (request.contents as any)?.parts?.some((part: any) => part.fileData);
-  const normalized = { ...request,
+  const normalized = { ...request, provider,
     reasoningEffort: request.reasoningEffort || ({ LOW: 'low', MEDIUM: 'medium', HIGH: 'high' } as const)[config?.thinkingConfig?.thinkingLevel as 'LOW' | 'MEDIUM' | 'HIGH'],
-    usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
-    ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
+    usageContext: request.usageContext || { action: 'enhance' as const, prompt: footage ? '[youtube-video-brief]' : '[text-task]' },
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'anthropic' ? '/api/anthropic-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  const endpoint = request.model === GEMINI_TEXT_MODEL ? GEMINI_ENDPOINT
+    : provider === 'anthropic' ? '/api/anthropic-text-generate'
+    : request.model === OPENAI_TEXT_MODEL && (provider === 'openai' || provider === 'evolink') ? '/api/openai-text-generate'
+    : request.model === OPENAI_TEXT_MODEL || request.model === OPENROUTER_TEXT_MODEL ? '/api/openrouter-text-generate' : GEMINI_ENDPOINT;
+  return generateContent(normalized, endpoint, options);
 };
 export const getGeminiClient = () => ({
   models: {

@@ -106,6 +106,15 @@ test('loopback server requires native bootstrap, cookie, exact host and mutation
     const response=await fetch(base+'/local/query',{method:'POST',headers:{...headers,Origin:base,'Content-Type':'application/json'},body:JSON.stringify({table:'folders',operation:'insert',value:{id:'folder',name:'Example'}})});assert.equal(response.status,200);assert.equal((await response.json()).error,null);
     const page=await fetch(base+'/',{headers});assert.match(page.headers.get('content-security-policy'),/script-src 'self'/);assert.ok(!(await page.text()).includes(bootstrap));
     await f.store.upload('example.mp4',Buffer.from('0123456789'));const part=await fetch(f.store.mediaUrl('example.mp4'),{headers:{...headers,Range:'bytes=2-4'}});assert.equal(part.status,206);assert.equal(await part.text(),'234');
+    for (const [name, type, disposition] of [['sample.svg','image/svg+xml',null],['sample.gif','image/gif',null],['sample.html','application/octet-stream','attachment']]) {
+      await f.store.upload(name,Buffer.from('local header fixture'));
+      const media=await fetch(f.store.mediaUrl(name),{method:'HEAD',headers});
+      assert.equal(media.status,200);assert.equal(media.headers.get('content-type'),type);
+      assert.equal(media.headers.get('content-disposition'),disposition);
+      assert.equal(media.headers.get('x-content-type-options'),'nosniff');
+      assert.match(media.headers.get('content-security-policy'),/(?:^|;\s*)sandbox(?:;|$)/);
+      assert.match(media.headers.get('content-security-policy'),/(?:^|;\s*)default-src 'none'(?:;|$)/);
+    }
   }finally{if(local)await local.close();f.store.close();f.cleanup();}
 });
 test('JSON metadata compare-and-swap matches by value like PostgREST jsonb and rejects stale snapshots',async()=>{

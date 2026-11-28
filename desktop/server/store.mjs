@@ -1,4 +1,4 @@
-import { MODEL_ROUTES } from '../../src/lib/providers.ts';
+import { isProviderChoice, upgradeModelId, upgradeProviderPreferences } from '../../src/lib/providers.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -8,6 +8,8 @@ import { WorkspaceQuery } from '../shared/query.mjs';
 const TABLES = new Set(['generations','folders','templates','reference_images','saved_people','usage_logs','provider_tasks','profiles','authorized_emails']);
 const INTERNAL = new Set(['provider_tasks','profiles','authorized_emails']);
 const fail = (message, code = 'LOCAL_VALIDATION') => ({ data: null, error: { message, code } });
+const textModels = new Set(['claude-opus-5.5','gemini-4-hydrogen','gpt-6.2-sol']);
+const textFeatures = new Set(['enhance','video_enhance','variation','brainstorm']);
 const clone = value => JSON.parse(JSON.stringify(value));
 const ownField = (row, field) => {
   if (typeof field !== 'string' || !/^[a-z_][a-z0-9_]*(?:->>?[a-z0-9_]+)*$/i.test(field)) throw new Error('Invalid field.');
@@ -59,6 +61,8 @@ export class LocalWorkspace {
     this.db=new DatabaseSync(path.join(directory,'workspace.sqlite'));
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF; CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(collection,id)); CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS ledger (id TEXT PRIMARY KEY,payload TEXT NOT NULL);');
     const identity=this.setting('identity') || { userId:randomUUID(), sessionId:randomUUID() };this.setting('identity',identity);this.identity=identity;
+    const routes = this.setting('providerRoutes');
+    if (routes && Object.keys(routes).some(id => upgradeModelId(id) !== id)) this.setting('providerRoutes',upgradeProviderPreferences(routes));
     this.user={id:identity.userId,email:'local@example.invalid',email_confirmed_at:'2026-01-01T00:00:00Z'};
     this.put('profiles',this.user.id,{...this.user,display_name:'My workspace',role:'admin'});
     this.put('authorized_emails','local',{id:'local',email:this.user.email,is_active:true});
@@ -127,14 +131,30 @@ export class LocalWorkspace {
     } catch(error) { return fail(error.code==='23505'?'Row already exists.':'Local workspace operation could not be completed.',error.code||'LOCAL_VALIDATION'); }
   }
   rpc(name,args,trusted) {
-    if(name==='get_provider_preferences')return this.setting('providerRoutes')||{};
+    if(name==='get_provider_preferences'){
+      if(args.p_expected_user_id != null && args.p_expected_user_id !== this.user.id) throw new Error('Workspace changed.');
+      const preferences = this.setting('providerRoutes')||{};
+      return args.p_include_policy === true ? {preferences,personal:preferences,policy:{},canManage:false} : preferences;
+    }
     if(name==='save_provider_preference'){
-      if(!MODEL_ROUTES[args.p_model] || args.p_provider!=='auto'&&!MODEL_ROUTES[args.p_model].includes(args.p_provider))throw new Error('Unsupported provider choice.');
-      this.setting('providerRoutes',{...(this.setting('providerRoutes')||{}),[args.p_model]:args.p_provider});return true;
+      if(args.p_expected_user_id !== this.user.id || !isProviderChoice(args.p_model,args.p_provider)) throw new Error('Unsupported provider choice.');
+      const routes = this.setting('providerRoutes')||{};
+      if (!args.p_if_missing || !Object.hasOwn(routes,args.p_model)) this.setting('providerRoutes',{...routes,[args.p_model]:args.p_provider});
+      return true;
     }
     if(name==='get_text_model_preferences'||name==='save_text_model_preferences') {
-      if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
-      return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
+      const previous = this.setting('textPreferences') || {model:'claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'};
+      let prefs = {...previous,model:upgradeModelId(previous.model),featureModels:previous.featureModels || {}};
+      if(name.startsWith('save')){
+        if(args.p_expected_user_id !== this.user.id || args.p_scope !== 'me') throw new Error('Unsupported workspace scope.');
+        const featureModels = args.p_feature_models === undefined ? prefs.featureModels : args.p_feature_models;
+        if (!textModels.has(args.p_model) || !['LOW','MEDIUM','HIGH'].includes(args.p_gemini_thinking)
+          || !['low','medium','high','xhigh','max'].includes(args.p_openai_reasoning) || !featureModels || typeof featureModels !== 'object'
+          || Array.isArray(featureModels) || Object.entries(featureModels).some(([feature,id]) => !textFeatures.has(feature) || !textModels.has(id))) throw new Error('Invalid text preferences.');
+        prefs = {model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning,featureModels};
+        this.setting('textPreferences',prefs);
+      }
+      return {...prefs,source:'personal',canSaveAll:false,revision:1};
     }
     if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:searchPeople(row.reference_images)}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');

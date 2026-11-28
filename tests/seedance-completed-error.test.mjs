@@ -14,6 +14,10 @@ const compiled = await build({
   absWorkingDir: fileURLToPath(new URL('..', import.meta.url)),
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
   plugins: [{ name: 'stubs', setup(b) {
+    b.onResolve({ filter: /providerConfiguration\.js$/ }, () => ({ path: 'admission', namespace: 'video-provider' }));
+    b.onLoad({ filter: /.*/, namespace: 'video-provider' }, () => ({ contents: 'export const admitProvider=async (_req,_res,_model,provider)=>provider;export const providerKey=()=>"testing";' }));
+    b.onResolve({ filter: /seedanceUsage\.js$/ }, () => ({ path: 'billing', namespace: 'seedance-billing' }));
+    b.onLoad({ filter: /.*/, namespace: 'seedance-billing' }, () => ({ contents: 'export const recordSeedanceUsage=async()=>{};export const seedanceActualCost=async()=>0.42;' }));
     b.onResolve({ filter: /\/_lib\/(auth|providerTasks|imageStorage)\.js$/ }, args => ({
       path: args.path.includes('providerTasks') ? 'providerTasks' : args.path.includes('imageStorage') ? 'imageStorage' : 'auth',
       namespace: 'stub',
@@ -62,15 +66,16 @@ test('a fal Seedance task that completes with an error fails instead of waiting 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, 'FAILED');
   assert.match(res.body.error, /Content policy violation/);
+  assert.equal(res.body.actualCostUsd, 0.42);
   assert.equal(calls.length, 1);
 });
 
 test('a completed fal Seedance task without an error still returns its video', async () => {
   const { res, calls } = await poll({
     status: reply(200, { status: 'COMPLETED' }),
-    result: reply(200, { video: { url: 'https://v3.fal.media/files/out.mp4' } }),
+    result: reply(200, { video: { url: 'https://v3.fal.media/files/out.mp4' }, duration: 8, seed: 0, draft_id: 'draft-1', last_frame: { url: 'https://v3.fal.media/files/frame.jpg' } }),
   });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { status: 'SUCCEEDED', output: ['https://v3.fal.media/files/out.mp4'] });
+  assert.deepEqual(res.body, { status: 'SUCCEEDED', output: ['https://v3.fal.media/files/out.mp4'], actualCostUsd: 0.42, duration: 8, seed: 0, draftId: 'draft-1', lastFrameUrl: 'https://v3.fal.media/files/frame.jpg' });
   assert.equal(calls.length, 2);
 });

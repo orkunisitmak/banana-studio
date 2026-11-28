@@ -1936,7 +1936,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   ) : null;
 
   const searchDialog = isSearchOpen && <GallerySearchDialog images={images} folders={folders} ownerId={galleryOwner?.user_id} isLoading={isGalleryIndexLoading || isFoldersLoading} loadError={galleryLoadError || folderLoadError} onClose={closeSearch} onSelect={selectSearchResult} />;
-  if (isEmpty && !currentFolderId && !showFavoritesOnly) {
+  if (isEmpty && !currentFolderId && !showFavoritesOnly && mediaFilter === 'all') {
     return (
       <div
         className="relative flex-1 flex min-h-screen flex-col overflow-y-auto custom-scrollbar bg-[#0d1117] text-gray-600"
